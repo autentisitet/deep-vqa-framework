@@ -4,7 +4,7 @@ dataset_name: "t2vqa-db"
 
 model:
   name: "ResNetVQA"
-  backbone: "resnet50"        # 关键：使用 ResNet50
+  backbone: "resnet50"
   freeze_backbone: false
   pretrained: true
   num_frames: 8               # 视频帧数
@@ -13,7 +13,7 @@ model:
   input_size: 224
 
 preprocessing:
-  batch_size: 4               # 从 32 降到 2
+  batch_size: 4
   num_workers: 4
 
 train:

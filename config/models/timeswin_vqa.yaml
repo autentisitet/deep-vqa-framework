@@ -7,7 +7,7 @@ model:
   freeze_backbone: false
   pretrained: true
   backbone: "swin_t"
-  num_frames: 8  # 保留，需要在 Dataset 中读取
+  num_frames: 8
   transformer_layers: 2
   dropout: 0.3
   input_size: 224

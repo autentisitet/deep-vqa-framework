@@ -17,7 +17,7 @@ class DatasetType(Enum):
         elif ext in image_exts:
             return cls.IMAGE
         else:
-            raise ValueError(f"未知的扩展名: {ext}")
+            raise ValueError(f"Unknown file extension: {ext}")
 
     @classmethod
     def from_config(cls, config_value: str) -> 'DatasetType':
@@ -27,4 +27,4 @@ class DatasetType(Enum):
         elif config_value.lower() == "image":
             return cls.IMAGE
         else:
-            raise ValueError(f"未知的数据集类型配置: {config_value}")
+            raise ValueError(f"Unknown dataset type configuration: {config_value}")

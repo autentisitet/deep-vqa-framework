@@ -2,7 +2,7 @@
 from .metadata_loaders import Tid2013Loader, KonvidLoader, T2VqaLoader
 
 class MetadataLoaderFactory:
-    # 注册你的 Loader，新增数据集只需在这里加一行
+    # Register the Loader; to add a new dataset, simply add one line here.
     _REGISTRY = {
         "konvid-1k": KonvidLoader,
         "t2vqa-db": T2VqaLoader,
@@ -11,13 +11,13 @@ class MetadataLoaderFactory:
 
     @classmethod
     def get_loader(cls, dataset_name: str):
-        key = dataset_name.lower().strip()  # 调用方传入什么都能转成小写
+        key = dataset_name.lower().strip()  # Convert to lowercase
         loader_class = cls._REGISTRY.get(key)
         if not loader_class:
             available = list(cls._REGISTRY.keys())
-            raise ValueError(f"❌ 未注册的数据集: {dataset_name}，可用: {available}")
+            raise ValueError(f"❌ Unregistered dataset: {dataset_name}, Available: {available}")
 
         try:
             return loader_class()
         except Exception as e:
-            raise RuntimeError(f"❌ 实例化加载器失败: {dataset_name}, {e}")
+            raise RuntimeError(f"❌ Instantiation loader failed: {dataset_name}, {e}")

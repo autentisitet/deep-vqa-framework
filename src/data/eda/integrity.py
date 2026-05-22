@@ -10,24 +10,28 @@ from src.data.types import DatasetType
 # 检查file name是否和label匹配: assert set(img_names) == set(labels['image_id'])
 
 
-# 尝试导入 Decord，失败时回退到 OpenCV
+# Attempt to import Decord, fall back to OpenCV if it fails
 try:
     from decord import VideoReader, cpu
     DECORD_AVAILABLE = True
-    logger.info("✅ 使用 Decord 进行视频处理（高性能模式）")
+    logger.info("✅ Video processing using Decord (high-performance mode)")
 except ImportError:
     import cv2
     DECORD_AVAILABLE = False
-    logger.warning("⚠️ Decord 未安装，回退到 OpenCV（性能较低）")
+    logger.warning("⚠️ Decord is not installed; revert to OpenCV (lower performance).")
 
 
 def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple[bool, Optional[str], Dict]:
     """
-    使用 Decord 检查视频完整性
-    优势：
-    - 静态链接 FFmpeg，无系统依赖问题
-    - 10倍于 OpenCV 的性能
-    - 支持随机帧访问
+    Using Decord to check video integrity
+
+    Advantages:
+
+    - Static linking to FFmpeg, no system dependency issues
+
+    - 10 times faster than OpenCV
+
+    - Supports random frame access
     """
     diagnostics = {
         "frame_count": 0,
@@ -40,21 +44,21 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
     }
 
     try:
-        # Decord 打开视频
+        # Decord Open video
         vr = VideoReader(str(path), ctx=cpu(0))
 
-        # 基本信息
+        # Basic Information
         diagnostics["frame_count"] = len(vr)
         diagnostics["fps"] = vr.get_avg_fps()
         diagnostics["resolution"] = (vr[0].shape[1], vr[0].shape[0])  # width, height
         diagnostics["duration_sec"] = diagnostics["frame_count"] / diagnostics["fps"] if diagnostics["fps"] > 0 else 0
 
-        # 分辨率检查
+        # Resolution check
         w, h = diagnostics["resolution"]
         if w <= 0 or h <= 0:
             return False, "无效分辨率", diagnostics
 
-        # 采样检查帧完整性（Decord 随机访问，效率高）
+        # Sample to check frame integrity (Decord random access, high efficiency)
         total_frames = diagnostics["frame_count"]
         sample_indices = range(0, total_frames, sample_interval)
 
@@ -63,17 +67,17 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
 
         for idx in sample_indices:
             try:
-                # Decord 直接随机访问指定帧
+                # Decord directly accesses a specified frame randomly.
                 frame = vr[idx].asnumpy()
                 diagnostics["actual_frames"] += 1
                 consecutive_fail = 0
 
-                # 检查黑帧
+                # Check black frames
                 gray = np.mean(frame, axis=2) if len(frame.shape) == 3 else frame
                 if np.mean(gray) < 8.0:
                     diagnostics["black_frames"] += 1
 
-                # 检查卡帧（与前帧对比）
+                # Check frame rate (compare with previous frame)
                 if prev_frame is not None:
                     diff = np.mean(np.abs(gray - prev_frame))
                     if diff < 0.5:
@@ -84,14 +88,14 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
             except Exception as e:
                 consecutive_fail += 1
                 if consecutive_fail > 5:
-                    return False, f"在帧 {idx} 处连续读取失败", diagnostics
+                    return False, f"Continuous reads failed at frame {idx}", diagnostics
                 continue
 
-        # 检查坏帧比例
+        # Check the percentage of bad frames
         sample_count = max(1, len(sample_indices))
         bad_ratio = diagnostics["bad_frames"] / sample_count
         if bad_ratio > 0.3:
-            return False, f"坏帧比例过高: {bad_ratio:.2%}", diagnostics
+            return False, f"Too high percentage of bad frames: {bad_ratio:.2%}", diagnostics
 
         return True, None, diagnostics
 
@@ -101,13 +105,13 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
 
 def check_video_integrity_fallback(path: Path, sample_interval: int = 30) -> Tuple[bool, Optional[str], Dict]:
     """
-    回退方案：使用 OpenCV 检查视频完整性（保持原有逻辑）
+    Rollback solution: Use OpenCV to check video integrity (maintain original logic).
     """
     import cv2
 
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
-        return False, "无法打开视频", {}
+        return False, "Unable to open video", {}
 
     diagnostics = {
         "frame_count": int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
@@ -128,7 +132,7 @@ def check_video_integrity_fallback(path: Path, sample_interval: int = 30) -> Tup
     w, h = diagnostics["resolution"]
     if w <= 0 or h <= 0:
         cap.release()
-        return False, "无效分辨率", diagnostics
+        return False, "Invalid resolution", diagnostics
 
     frame_idx = 0
     prev_gray = None
@@ -163,45 +167,45 @@ def check_video_integrity_fallback(path: Path, sample_interval: int = 30) -> Tup
 
     cap.release()
 
-    # 检查帧数匹配
+    # Check frame count matching
     if abs(diagnostics["actual_frames"] - diagnostics["frame_count"]) > diagnostics["frame_count"] * 0.1:
-        return False, f"帧数不匹配", diagnostics
+        return False, f"Frame rate mismatch", diagnostics
 
     sample_count = max(1, diagnostics["frame_count"] // sample_interval)
     bad_ratio = diagnostics["bad_frames"] / sample_count
     if bad_ratio > 0.3:
-        return False, f"坏帧比例过高: {bad_ratio:.2%}", diagnostics
+        return False, f"Too high percentage of bad frames: {bad_ratio:.2%}", diagnostics
 
     return True, None, diagnostics
 
 
 def check_video_integrity(path: Path, sample_interval: int = 30) -> Tuple[bool, Optional[str], Dict]:
     """
-    统一的视频完整性检查入口
-    自动选择最优后端（Decord > OpenCV）
+    A unified entry point for video integrity checks
+    Automatically selects the optimal backend (Decord > OpenCV)
     """
     if DECORD_AVAILABLE:
         return check_video_integrity_decord(path, sample_interval)
     else:
-        logger.debug("Decord 不可用，使用 OpenCV 回退方案")
+        logger.debug("Decord is unavailable; use the OpenCV fallback solution.")
         return check_video_integrity_fallback(path, sample_interval)
 
 
 def check_image_integrity(path: Path) -> Tuple[bool, Optional[str], Dict]:
-    """检查图像完整性（保持不变）"""
+    """Check image integrity"""
     try:
         import cv2
         img = cv2.imread(str(path))
         if img is None:
-            return False, "无法解码"
+            return False, "Unable to decode"
 
         h, w = img.shape[:2]
         if h <= 0 or w <= 0:
-            return False, f"无效尺寸: {w}x{h}", {}
+            return False, f"Invalid size: {w}x{h}", {}
 
         unique_colors = len(np.unique(img))
         if unique_colors < 2:
-            return False, f"颜色过少: {unique_colors}种颜色", {}
+            return False, f"Too few colors: {unique_colors} kind of color", {}
 
         return True, None, {}
     except Exception as e:
@@ -210,15 +214,19 @@ def check_image_integrity(path: Path) -> Tuple[bool, Optional[str], Dict]:
 
 def check_media_integrity(path: Path, media_type: DatasetType, sample_interval: int = 30) -> Tuple[bool, Optional[str], Dict]:
     """
-    统一的媒体完整性检查入口
+    Unified Media Integrity Check Entry Point
 
-    Args:
-        path: 文件路径
-        media_type: 媒体类型（IMAGE 或 VIDEO）
-        sample_interval: 视频采样间隔
+    ## Args:
 
-    Returns:
-        (是否完整, 错误信息, 诊断信息)
+    - path: File path
+
+    - media_type: Media type (IMAGE or VIDEO)
+
+    - sample_interval: Video sampling interval
+
+    ## Returns:
+
+    - (Integrity status, error message, diagnostic information)
     """
     if media_type == DatasetType.VIDEO:
         is_ok, error, diagnostics = check_video_integrity(path, sample_interval)
@@ -227,4 +235,4 @@ def check_media_integrity(path: Path, media_type: DatasetType, sample_interval: 
         is_ok, error, diagnostics = check_image_integrity(path)
         return is_ok, error, diagnostics
     else:
-        return False, f"未知媒体类型: {media_type}", {}
+        return False, f"Unknown media type: {media_type}", {}

@@ -10,8 +10,7 @@ from typing import Dict, Any, Union, List, Optional
 
 class Evaluator:
     """
-    自适应评估底座：计算学术/工业核心指标。
-    完美对接顶层 main.py 的【五大子域】策略，内置 PyTorch 张量自适应脱钩剥离技术。
+    Calculate evaluation metrics such as PLCC and SROCC, and save prediction results and historical records.
     """
     _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -29,7 +28,7 @@ class Evaluator:
         self._history_path = self.logs_dir / f"{self._base_filename}_history.csv"
         self._manifest_path = self.logs_dir / f"{self._base_filename}_manifest.csv"
 
-        logger.info(f"⚙️  [Evaluator] 学术评估底座初始化完毕。基础标识流: {self._base_filename}")
+        logger.info(f"⚙️  [Evaluator] Evaluator initialization complete, identifier: {self._base_filename}")
 
     @property
     def base_filename(self) -> str:
@@ -37,13 +36,14 @@ class Evaluator:
 
     @base_filename.setter
     def base_filename(self, new_name: str):
-        """💎【精准修复 1】：当 trainer.py 动态隔离 Fold 名时，自适应同步联动重构落盘路径"""
+        """Update filenames based on fold"""
         self._base_filename = new_name
-        # 保持目录不变，仅级联刷新文件名
+
+        # Keep the directory unchanged, only cascade file name refresh
         if hasattr(self, '_history_path'):
             self._history_path = self.logs_dir / f"{new_name}_history.csv"
             self._manifest_path = self.logs_dir / f"{new_name}_manifest.csv"
-            logger.debug(f"🔄 [Evaluator] 资产寻址路由动态重定向 -> {self._history_path.name}")
+            logger.debug(f"🔄 [Evaluator] Update file path -> {self._history_path.name}")
 
     @property
     def history_path(self) -> Path:
@@ -65,16 +65,14 @@ class Evaluator:
 
     def execute(self, y_true, y_pred, epoch: int = None, train_loss: float = None, val_loss: float = None, traditional_metrics: dict = None, save_manifest: bool = False) -> dict:
         """
-        计算评估指标，追加历史记录，并动态吐出对账原材料。
+        Calculate metrics, save historical records and forecast results
         """
-        # 💎【精准修复 2】：利用超能力，将 y_true, y_pred 从可能包含的 PyTorch Tensor、List 中彻底无痕剥离脱钩
+        # Convert the input to a NumPy array
         y_true = self._to_clean_numpy(y_true).flatten()
         y_pred = self._to_clean_numpy(y_pred).flatten()
 
-        # 1. 安全计算标量指标
         metrics = self._compute_metrics(y_true, y_pred)
 
-        # 2. 揉入运行期上下文
         if epoch is not None:
             metrics['epoch'] = epoch
         if train_loss is not None:
@@ -82,7 +80,6 @@ class Evaluator:
         if val_loss is not None:
             metrics['val_loss'] = round(float(val_loss), 6)
 
-        # 3. 标准控制台高价值打印
         epoch_str = f"Epoch {epoch:03d} | " if epoch is not None else "Final Eval | "
         loss_str = f"TrainLoss: {train_loss:.4f} | ValLoss: {val_loss:.4f} | " if train_loss is not None else ""
 
@@ -94,7 +91,7 @@ class Evaluator:
 
         self._save_history(metrics)
 
-        # 只在需要时保存详细预测结果
+        # Save detailed prediction results only when needed.
         if save_manifest:
             self._save_manifest(y_true, y_pred, traditional_metrics)
 
@@ -103,9 +100,7 @@ class Evaluator:
 
 
     def evaluate(self, y_true, y_pred, epoch: int = None, train_loss: float = None, val_loss: float = None, traditional_metrics: dict = None, save_manifest: bool = False) -> dict:
-        """
-        🚀【架构无缝连接器】统一对接 TrainerEngine 默认调用
-        """
+        """Compatible with TrainerEngine API"""
         return self.execute(
             y_true=y_true,
             y_pred=y_pred,
@@ -119,13 +114,13 @@ class Evaluator:
 
 
     def _to_clean_numpy(self, data: Any) -> np.ndarray:
-        """💎【精准修复 2.2】：终极防御看门狗，强行将任意 PyTorch Tensor/GPU 资产脱钩为标准 CPU NumPy"""
+        """Convert Tensor/List to NumPy array"""
         if data is None:
             return np.array([])
         if isinstance(data, torch.Tensor):
             return data.detach().cpu().numpy()
         if isinstance(data, list):
-            # 处理 list 中包裹 Tensor 的极端情况
+            # Recursively process the Tensors in the list
             return np.array([self._to_clean_numpy(x) for x in data])
         if isinstance(data, np.ndarray):
             return data
@@ -134,7 +129,7 @@ class Evaluator:
 
 
     def _compute_metrics(self, y_true, y_pred) -> dict:
-        """计算核心质量评估指标，内置防崩溃零标准差防御"""
+        """Calculate PLCC, SROCC and other metrics, and handle boundary conditions such as all-zero input."""
         if len(y_true) == 0 or len(y_pred) == 0:
             return {'plcc': 0.0, 'srocc': 0.0, 'krocc': 0.0, 'rmse': 0.0, 'r2': 0.0, 'mae': 0.0}
 
@@ -142,7 +137,7 @@ class Evaluator:
         r2 = r2_score(y_true, y_pred) if len(y_true) > 1 else 0.0
         mae = np.mean(np.abs(y_true - y_pred))
 
-        # 动态防死锁常数防御
+        # Returns 0 directly when all zeros are input, to avoid scipy errors.
         if np.std(y_true) == 0 or np.std(y_pred) == 0:
             plcc, srocc, krocc = 0.0, 0.0, 0.0
         else:
@@ -162,7 +157,7 @@ class Evaluator:
 
 
     def _save_history(self, metrics: dict):
-        """保存演进指标到历史 CSV（安全追加与 Epoch 级别的幂等去重）"""
+        """Save the training metrics for each round, and only retain the latest record for the same epoch."""
         df_new = pd.DataFrame([metrics])
 
         front_cols = [c for c in ['epoch', 'train_loss', 'val_loss'] if c in df_new.columns]
@@ -184,22 +179,20 @@ class Evaluator:
 
 
     def _save_manifest(self, y_true, y_pred, traditional_metrics: dict = None):
-        """
-        将每一对样本的 true、pred 以及传统学术特征安全洗入 CSV 资产大表
-        """
+        """Save the predicted and actual values for subsequent analysis."""
         manifest_data = {
             'true': y_true,
             'pred': y_pred
         }
 
-        # 💎【精准修复 2.3】：自适应解耦传统特征字典树中的 PyTorch 批量堆叠张量
+        # Convert traditional metrics to NumPy
         if traditional_metrics and isinstance(traditional_metrics, dict):
             for metric_name, val_source in traditional_metrics.items():
                 clean_arr = self._to_clean_numpy(val_source).flatten()
                 if len(clean_arr) == len(y_true):
                     manifest_data[metric_name.lower()] = clean_arr
                 else:
-                    logger.debug(f"⚠️ [Evaluator] 指标 {metric_name} 长度 ({len(clean_arr)}) 与样本量 ({len(y_true)}) 不对齐，跳过对账。")
+                    logger.debug(f"⚠️ Metric {metric_name} length mismatch ({len(clean_arr)} vs {len(y_true)}), skipped.")
 
         df_manifest = pd.DataFrame(manifest_data)
         df_manifest.to_csv(self._manifest_path, index=False)

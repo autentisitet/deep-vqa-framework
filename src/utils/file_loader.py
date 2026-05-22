@@ -7,14 +7,14 @@ from src.data.types import DatasetType
 
 @dataclass
 class AssetInfo:
-    """资产信息 - 单一数据源"""
+    """File information: path, filename, extension, type (image/video)"""
     path: Path
     filename: str
     extension: str
 
     @property
     def dataset_type(self) -> DatasetType:
-        """根据扩展名返回数据集类型"""
+        """Returns the dataset type based on the file extension."""
         return DatasetType.from_extension(self.extension)
 
     @property
@@ -29,58 +29,58 @@ class AssetInfo:
 
 class CaseInsensitiveAssetResolver:
     """
-    工业级寻址网关：采用预构建哈希索引，彻底解决多进程 IO 竞争
+    File path resolver: Pre-scans directories to build an index, shared by multiple processes.
     """
     def __init__(self, target_dir: Union[str, Path], allowed_extensions: list):
         self.target_dir = Path(target_dir).resolve()
         self.allowed_exts: Set[str] = {f".{ext.lower().lstrip('.')}" for ext in allowed_extensions}
 
-        # 视频扩展名集合，用于在索引时自动判断属性
+        # A set of video file extensions used to automatically determine attributes during indexing.
         self.video_exts = {'.mp4', '.avi', '.mov', '.mkv', '.wmv'}
         self.image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}
 
-        # 【修改点】：不再使用动态查找，而是在初始化阶段一次性完成索引
-        # 这样在训练阶段，每个进程查的都是内存里的同一个表，无需再操作磁盘
+        # [Modification]: Dynamic lookup is no longer used; instead, the index is completed all at once during the initialization phase.
+        # In this way, during the training phase, each process looks up the same table in memory, eliminating the need for disk operations.
         self.full_registry: Dict[str, AssetInfo] = {}
 
-        logger.info(f"🚀 [Resolver] 正在构建全局路径索引，锚点: {self.target_dir}")
+        logger.info(f"🚀 [Resolver] Scanning directory: {self.target_dir}")
 
-        # 只扫描一次，将所有文件路径映射到内存字典中
-        # 无论嵌套多深，rglob 都能处理
+        # Scan only once, mapping all file paths into a memory dictionary.
+        # `rglob` can handle any level of nesting.
         for f in self.target_dir.rglob("*"):
             if f.is_file():
                 ext = f.suffix.lower()
                 if ext in self.allowed_exts:
-                    # 创建 AssetInfo 对象
+                    # Create an AssetInfo object
                     asset_info = AssetInfo(
                         path=f,
                         filename=f.name,
                         extension=ext
                     )
-                    # 存入完整的物理信息
+                    # Store complete physical information
                     self.full_registry[f.name.lower()] = asset_info
                 else:
-                    # 如果不需要的文件，直接跳过，什么都不做
+                    # Skip unnecessary files and do nothing.
                     continue
-        logger.info(f"✅ [Resolver] 索引构建完毕，已缓存 {len(self.full_registry)} 个资产。")
+        logger.info(f"✅ [Resolver] Scan complete, totaling {len(self.full_registry)} files.")
 
 
     def resolve(self, label_filename: str) -> Path:
         name_lower = Path(label_filename).name.lower()
 
-        # 【修改点】：直接查字典，O(1) 复杂度，无 IO 竞争
+        # [Modification]: Direct dictionary lookup, O(1) complexity, no IO contention.
         if name_lower in self.full_registry:
-            return self.full_registry[name_lower]       # 返回 (Path, is_video)
-        # 找不到时才抛异常
-        raise FileNotFoundError(f"❌ 资产 '{label_filename}' 在 {self.target_dir} 中无法找到。")
+            return self.full_registry[name_lower]       # Returns (Path, is_video)
+        # Throw an exception only when not found.
+        raise FileNotFoundError(f"❌ File does not exist: {label_filename} (Search directory: {self.target_dir})")
 
 
     def resolve_path(self, label_filename: str) -> Path:
-        """只返回路径（兼容旧代码）"""
+        """Returns only the path (compatible with legacy code)"""
         return self.resolve(label_filename).path
 
 
     def resolve_with_info(self, label_filename: str) -> Tuple[Path, bool, bool]:
-        """兼容旧接口：返回 (path, is_video, is_image)"""
+        """Compatible with legacy API: Returns (path, is_video, is_image)"""
         asset = self.resolve(label_filename)
         return asset.path, asset.is_video, asset.is_image
