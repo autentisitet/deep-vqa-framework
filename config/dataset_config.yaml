@@ -1,0 +1,123 @@
+# -------------------------------------------------------------------
+# 1. TID2013: 传统图像质量评价数据集 (IQA)
+# -------------------------------------------------------------------
+
+# spearman.exe 计算 Spearman 等级相关系数 (SROCC)
+# kendall.exe 计算 Kendall 等级相关系数 (KROCC)
+TID2013:
+  name: "TID2013"
+  url: "http://www.ponomarenko.info/tid2013/tid2013.rar"
+  data_type: "image"
+  file_extensions: ["bmp", "BMP"]
+
+  paths:
+    root: "datasets/TID2013"   # 数据集根目录路径
+    data: "distorted_images"
+    metadata: "."
+    metrics: "metrics_values"
+    reference: "reference_images"
+
+  metadata:
+    mos_file: "mos_with_names.txt"
+    format: "txt"
+    delimiter: r'\s+'
+
+  columns:
+    id_col: 1
+    mos_col: 0
+    std_col: 2
+
+  split:
+    train_ratio: 0.7
+    val_ratio: 0.15
+    test_ratio: 0.15
+
+  preprocessing:
+    resize: [224, 224]
+    normalize: true
+    augmentation: false
+
+
+
+# -------------------------------------------------------------------
+# 2. KoNViD-1k: 真实场景视频质量评价数据集 (VQA)
+# -------------------------------------------------------------------
+KoNViD-1k:
+  name: "KoNViD-1k"
+  url:
+    data: "https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_videos.zip"
+    metadata: "https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_metadata.zip"
+  data_type: "video"
+  file_extensions: ["mp4"]
+
+  paths:
+    root: "datasets/KoNViD-1k"
+    data: "KoNViD-1k_videos"
+    metadata: "KoNViD-1k_metadata"
+
+  metadata:
+    mos_file: "KoNViD_1k_mos.csv"
+    format: "csv"
+    delimiter: ","
+
+  columns:
+    id_col: "flickr_id"  # CSV 依然支持名称
+    mos_col: "mos"
+    std_col: "std"
+
+  split:
+    train_ratio: 0.8
+    val_ratio: 0.1
+    test_ratio: 0.1
+
+  preprocessing:
+    num_frames: 8           # 采样帧数
+    fragment_sampling:
+      num_fragments: 8
+      fragment_len: 4
+    frame_size: [224, 224]
+    fps: 30
+    normalize: true
+
+
+
+# -------------------------------------------------------------------
+# 3. T2VQA-DB: 文本到视频/含文本视频质量评价数据集 (VQA)
+# -------------------------------------------------------------------
+T2VQA-DB:
+  name: "T2VQA-DB"
+  url:
+    data: "https://drive.google.com/file/d/1aak5hgYsXock19d1rVufss3_X6eEA4Wx/view"
+    metadata: "https://drive.google.com/file/d/1aak5hgYsXock19d1rVufss3_X6eEA4Wx/view"
+  data_type: "video"
+  file_extensions: ["mp4"]
+  has_text: true
+
+  paths:
+    root: "datasets/T2VQA-DB"
+    data: "T2VQA-DB"
+    metadata: "."
+
+  metadata:
+    mos_file: "info.txt"
+    format: "txt"
+    delimiter: "|"
+
+  columns:
+    id_col: 0
+    mos_col: 2
+
+
+  split:
+    train_ratio: 0.8
+    val_ratio: 0.1
+    test_ratio: 0.1
+
+  preprocessing:
+    num_frames: 8
+    fragment_sampling:
+      num_fragments: 8
+      fragment_len: 4
+    frame_size: [224, 224]
+    fps: 30
+    normalize: true

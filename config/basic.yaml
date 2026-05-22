@@ -1,0 +1,58 @@
+# config/basic.yaml
+system:
+  project_name: "deep-vqa-framework"
+  env: "autodl"
+  device: "cuda"
+  amp: true
+  num_workers: 4
+  pin_memory: true
+
+
+
+preprocessing_defaults:
+    seed: 42
+    shuffle: true
+    pin_memory: true    # 锁页内存，加速 CPU 到 GPU 的数据传输
+    val_interval: 1       # 每1个epoch验证一次
+    k_fold: 5
+
+
+
+logging_defaults:
+    log_interval: 10
+    save_period: 1
+    tensorboard: true
+    log_level: "INFO"         # 监控走 6006 端口，不污染终端
+    print_frequency: 50
+    save_sample_images: false # 严禁往终端塞 base64 图片
+
+
+
+
+training_defaults:
+  optimizer: "adamw"
+  scheduler: "cosine"
+  warmup_epochs: 5
+  gradient_accumulation_steps: 4  # 添加这行，每 4 个 batch 更新一次
+
+  early_stop:
+    enabled: true
+    patience: 10
+    monitor: "val_srocc"    # 💎 修复：由 val_loss 改为 val_srocc。防止 Loss 虚假下降但指标死锁
+    mode: "max"             # 💎 修复：既然改成了监控 SROCC，模式必须从 "min" 切换为 "max"
+
+  checkpoint:
+    save_best: true
+    save_last: true
+    monitor: "val_srocc"
+    mode: "max"
+    save_top_k: 3         # 硬盘空间有限（AutoDL只有20G），只保留最好的 3 个 Checkpoint
+
+
+
+
+evaluation_defaults:
+  test_after_training: true
+  test_best_epoch: true
+  save_predictions: true
+  metrics: ["plcc", "srocc", "krocc", "rmse"]

@@ -1,0 +1,528 @@
+# deep-vqa-framework
+
+[![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
+[![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-blue)](https://github.com/autentisitet/deep-vqa-framework)
+
+**A Unified Deep Learning Framework for Image Quality Assessment (IQA) and Video Quality Assessment (VQA).**
+
+This framework provides an end-to-end solution for training, evaluating, and deploying quality assessment models. It features a unified architecture that seamlessly handles both image and video inputs, multi-dataset support, cross-validation pipelines, and production-ready inference APIs.
+
+---
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Architecture & Design Decisions](#architecture-decisions)
+- [Quick Start & Installation](#quick-start)
+- [Dataset Preparation](#dataset-preparation)
+- [Model Architecture](#model-architecture)
+- [Training Pipeline](#training-pipeline)
+- [Evaluation & Metrics](#evaluation-metrics)
+- [Project Structure](#project-structure)
+- [Configuration Guide](#configuration-guide)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
+---
+
+## Prerequisites <a id="prerequisites"></a>
+
+> [!CAUTION]
+>
+> ### GPU Requirements
+> Training video models requires significant GPU memory. Recommended specifications:
+>
+> - **Minimum**: NVIDIA GPU with 8GB VRAM (for IQA tasks)
+>
+> - **Recommended**: NVIDIA GPU with 24GB+ VRAM (for VQA tasks)
+>
+> - **Alternative**: Use CPU mode with `device: "cpu"` in config (significantly slower)
+>
+> [!WARNING]
+> ### Dataset Storage
+> The framework expects datasets in the following structure:
+>
+> ```text
+> datasets/
+> ├── TID2013/          # ~3GB (image dataset)
+> ├── KoNViD-1k/        # ~10GB (video dataset)
+> └── T2VQA-DB/         # ~50GB (video dataset)
+> ```
+
+---
+
+## Architecture & Design Decisions <a id="architecture-decisions"></a>
+
+### Unified IQA/VQA Architecture
+
+The framework implements a dimension-aware routing system that automatically switches between image (4D tensors) and video (5D tensors) processing modes.
+
+**Key Design Decisions:**
+
+| Decision | Implementation | Rationale |
+| :--- | :--- | :--- |
+| **Unified Model** | Single `IQAVQANet` handles both 4D and 5D inputs | Eliminates duplicate code, ensures consistent quality metrics |
+| **Flexible Backbones** | Swin-T / ResNet50 with automatic feature adaptation | Balances accuracy vs. memory consumption |
+| **Temporal Fusion** | Transformer encoder for video frame aggregation | Captures long-range dependencies between frames |
+| **Hybrid Loss** | MSE (70%) + Rank Loss (30%) | Optimizes both absolute prediction and relative ordering |
+| **Multi-Dataset Support** | YAML-based configuration with factory pattern | Easy addition of new datasets without code changes |
+| **Path Abstraction** | DSL-based `PathManager` with YAML routing | Eliminates hardcoded paths, supports symbolic links |
+| **Lazy Asset Resolution** | `CaseInsensitiveAssetResolver` with pre-built index | O(1) file lookup, case-insensitive matching |
+
+---
+
+## Quick Start & Installation <a id="quick-start"></a>
+
+### 1. Clone Repository
+
+```bash
+git clone https://github.com/yourname/deep-vqa-framework.git
+cd deep-vqa-framework
+```
+
+### 2. Environment Setup
+
+- **Using uv (Recommended)**
+
+```bash
+# Install uv if not already installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create virtual environment and install dependencies
+uv venv
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate   # Windows
+uv pip install -e .
+```
+
+- **Using pip**
+
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements.txt
+```
+
+### 3. Verify Installation
+
+```bash
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+```
+
+---
+
+## Dataset Preparation <a id="dataset-preparation"></a>
+
+### Automatic Download & Extraction
+
+```bash
+# Run the data management script
+bash scripts/manage_data.sh
+```
+
+This script automatically:
+
+- Searches for existing datasets in common locations
+
+- Downloads missing datasets via aria2/gdown
+
+- Extracts archives and creates symbolic links
+
+### Manual Setup
+
+**TID2013** (Image Quality Assessment)
+
+```bash
+# Download from: http://www.ponomarenko.info/tid2013/tid2013.rar
+# Extract to: datasets/TID2013/
+```
+
+**KoNViD-1k** (Video Quality Assessment)
+
+```bash
+# Videos: https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_videos.zip
+# Metadata: https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_metadata.zip
+# Extract to: datasets/KoNViD-1k/
+```
+
+**T2VQA-DB** (Text-to-Video Quality Assessment)
+
+```bash
+# Download from Google Drive (see dataset_config.yaml for URL)
+# Extract to: datasets/T2VQA-DB/
+```
+
+### Dataset Configuration
+
+Configure dataset paths and metadata in `config/dataset_config.yaml`:
+
+```yaml
+tid2013:
+  data_type: "image"
+  file_extensions: ["bmp"]
+  metadata:
+    mos_file: "mos_with_names.txt"
+  split:
+    train_ratio: 0.8
+    val_ratio: 0.1
+```
+
+---
+
+## Model Architecture <a id="model-architecture"></a>
+
+### IQAVQANet: Unified Quality Assessment Network
+
+```python
+# Architecture overview
+Input (4D: [B,3,H,W] or 5D: [B,F,3,H,W])
+    ↓
+Backbone (Swin-T / ResNet50)
+    ↓
+Spatial Pooling (AdaptiveAvgPool2d)
+    ↓
+[Temporal Fusion] ← TransformerEncoder (only for video)
+    ↓
+Quality Head (3-layer MLP + Sigmoid)
+    ↓
+Output: Quality Score (0-1 range)
+```
+
+### Supported Configurations
+
+| Backbone | Parameters | IQA | VQA | Memory (per sample) |
+| :--- | :--- | :--- | :--- | :--- |
+| **ResNet50** | 25M | ✅ | ✅ | ~2GB (8 frames) |
+| **Swin-T** | 28M | ✅ | ✅ | ~4GB (8 frames) |
+
+### Loss Function: Hybrid MSE + Rank Loss
+
+```python
+Total Loss = 0.7 × MSE + 0.3 × Rank Loss
+
+- MSE Loss: Absolute prediction accuracy
+- Rank Loss: Preserves relative ordering between samples
+```
+
+---
+
+## Training Pipeline <a id="training-pipeline"></a>
+
+### Quick Start Training
+
+#### Step 1: Create symbolic links
+
+```bash
+cd datasets
+ln -s TID2013 tid2013
+ln -s KoNViD-1k konvid-1k
+ln -s T2VQA-DB t2vqa-db
+
+ls -la
+```
+
+#### Step 2: Run training
+
+- **Image Dataset (TID2013)**
+
+```bash
+uv run python -m src.main --model resnet_iqa --dataset tid2013
+```
+
+- **Video Dataset (KoNViD-1k)**
+
+```bash
+uv run python -m src.main --model timeswin_vqa --dataset konvid-1k
+```
+
+- **Video Dataset (T2VQA-DB)**
+
+```bash
+uv run python -m src.main --model resnet_vqa --dataset t2vqa-db
+```
+
+### Configuration Parameters
+
+```yaml
+# config/models/resnet_vqa.yaml
+preprocessing:
+  batch_size: 2          # Reduce if OOM
+  num_workers: 4         # Data loading threads
+  k_fold: 5              # Cross-validation folds
+
+model:
+  backbone: "resnet50"   # or "swin_t"
+  num_frames: 8          # Video frames per sample
+  transformer_layers: 2  # Temporal fusion depth
+
+train:
+  epochs: 50
+  lr: 0.0001
+  gradient_accumulation_steps: 4  # Effective batch = batch_size × steps
+  early_stop:
+    enabled: true
+    patience: 10
+    monitor: "val_srocc"
+    mode: "max"
+```
+
+### Advanced Options
+
+- **Fast Smoke Test**
+
+```bash
+uv run python -m src.main --model resnet_iqa --dataset tid2013 --smoke_test
+```
+
+- **Debug Mode (with breakpoints)**
+
+```bash
+DEBUG=1 uv run python -m src.main --model resnet_iqa --dataset tid2013
+```
+
+Or you can:
+
+```bash
+LOG_LEVEL=DEBUG uv run python -m src.main --model resnet_iqa --dataset tid2013
+```
+
+- **Background Training**
+
+```bash
+nohup python -m src.main --model resnet_vqa --dataset t2vqa-db > train.log 2>&1 &
+tail -f train.log
+```
+
+---
+
+## Evaluation & Metrics <a id="evaluation-metrics"></a>
+
+### Core Metrics
+
+| Metric | Full Name | Interpretation |
+| :--- | :--- | :--- |
+| **PLCC** | Pearson Linear Correlation Coefficient | Linear relationship (accuracy) |
+| **SROCC** | Spearman Rank Order Correlation Coefficient | Monotonic relationship (ranking) |
+| **KROCC** | Kendall Rank Correlation Coefficient | Ordinal agreement |
+| **RMSE** | Root Mean Square Error | Prediction error magnitude |
+| **R²** | Coefficient of Determination | Variance explained |
+
+### Output Example
+
+```text
+📊 [Epoch 050 | HYPERIQANET] PLCC: 0.9696 | SROCC: 0.9689 | RMSE: 0.0442 | R²: 0.9314
+```
+
+### Visualizations
+
+The framework automatically generates:
+
+- **Training History**: Loss curves, PLCC/SROCC progression
+
+- **Residual Analysis**: Scatter plots, error distribution
+
+- **Cross-Model Comparison**: Bar charts for multiple models
+
+Output location: `results/{dataset}/plots/`
+
+---
+
+## Project Structure <a id="project-structure"></a>
+
+```text
+## Project Structure
+
+```text
+deep-vqa-framework/
+├── Algorithm-section.png          # Architecture diagram for documentation
+├── Makefile                        # Automation commands (training, clean, test)
+├── README.md                       # Project documentation (this file)
+├── pyproject.toml                  # Python project configuration (uv/pip)
+├── uv.lock                         # Lock file for dependency versions
+│
+├── config/                         # YAML configuration files
+│   ├── basic.yaml                  # Global defaults (system, training)
+│   ├── dataset_config.yaml         # Dataset-specific settings & metadata
+│   ├── paths.yaml                  # Path routing & symbolic link rules
+│   └── models/                     # Model-specific configurations
+│       ├── resnet_iqa.yaml         # ResNet50 for Image QA
+│       ├── resnet_vqa.yaml         # ResNet50 for Video QA
+│       └── timeswin_vqa.yaml       # TimeSwin transformer for Video QA
+│
+├── datasets/                       # Dataset storage (symlinks to actual data)
+│   ├── KoNViD-1k/                  # KoNViD-1k dataset (videos + metadata)
+│   │   ├── KoNViD-1k_metadata/     # MOS scores and video annotations
+│   │   └── KoNViD-1k_videos/       # Video files (directory only)
+│   ├── T2VQA-DB/                   # Text-to-Video QA dataset
+│   │   ├── T2VQA-DB/               # Video content (directory only)
+│   │   └── info.txt                # Dataset metadata
+│   ├── TID2013/                    # TID2013 image quality dataset
+│   │   ├── distorted_images/       # Distorted test images (directory only)
+│   │   ├── reference_images/       # Reference originals (directory only)
+│   │   ├── metrics_values/         # Objective metrics files
+│   │   ├── papers/                 # Dataset reference papers
+│   │   ├── mos.txt                 # Mean Opinion Scores
+│   │   ├── mos_std.txt             # MOS standard deviation
+│   │   ├── mos_with_names.txt      # MOS with image filenames
+│   │   └── readme                  # Dataset documentation
+│   ├── konvid-1k -> KoNViD-1k      # Symlink for case-insensitive access
+│   ├── t2vqa-db -> T2VQA-DB        # Symlink for case-insensitive access
+│   └── tid2013 -> TID2013          # Symlink for case-insensitive access
+│
+├── docs/                           # Documentation assets
+│   ├── Algorithm-section.mmd       # Mermaid diagram source
+│   └── Cloud_Platform_Rental_Guide.md  # Cloud setup instructions
+│
+├── quarantine/                     # Isolated directory for testing/archiving
+│
+├── results/                        # All training outputs and logs
+│   ├── scripts_logs/               # Script execution logs (directory)
+│   ├── model_outputs/              # Global model checkpoints (directory)
+│   ├── train_logs/                 # Global training history (directory)
+│   ├── plots/                      # Global visualization outputs
+│   │   └── *.png                   # Plot images (filenames only)
+│   ├── tid2013_integrity_report.txt  # Dataset validation report
+│   ├── TID2013/                    # Image dataset results (directory)
+│   ├── tid2013/                    # Symlink to TID2013 (legacy)
+│   ├── konvid-1k/                  # Video dataset results (directory)
+│   └── t2vqa-db/                   # T2VQA dataset results (directory)
+│
+├── scripts/                        # Utility shell scripts
+│   ├── archive_result.sh           # Archive old results to quarantine
+│   ├── cache_clean.sh              # Clear Python cache files
+│   ├── download_flag               # Flag file for download completion
+│   ├── manage_data.sh              # Dataset download & extraction
+│   ├── network_control.sh          # Network proxy configuration
+│   ├── plugin.sh                   # Plugin management
+│   ├── setup_env.sh                # Environment initialization
+│   └── system_check.sh             # GPU, CUDA, dependency validation
+│
+├── src/                            # Source code root
+│   ├── main.py                     # Entry point: training & evaluation
+│   ├── core/                       # Core training components
+│   │   ├── engine.py               # Training/validation loop
+│   │   ├── evaluator.py            # Metrics computation (PLCC, SROCC)
+│   │   └── trainer.py              # Cross-validation pipeline
+│   ├── data/                       # Data handling module
+│   │   ├── data_eda.py             # Exploratory data analysis
+│   │   ├── metadata_loader_factory.py  # Factory for dataset parsers
+│   │   ├── metadata_loaders.py     # Dataset-specific metadata loaders
+│   │   ├── types.py                # Type definitions (dataclasses)
+│   │   └── eda/                    # EDA submodules
+│   │       ├── integrity.py        # Dataset integrity validation
+│   │       ├── metrics_plotter.py  # Visualization generators
+│   │       ├── split.py            # Train/val/test splitting
+│   │       └── statistics.py       # Statistical analysis
+│   ├── models/                     # Model definitions
+│   │   ├── README.md               # Model architecture documentation
+│   │   └── iqavqa_net.py           # Unified IQA/VQA network
+│   ├── utils/                      # Utility functions
+│   │   ├── config_loader.py        # YAML config loading & merging
+│   │   ├── file_loader.py          # Asset resolution (case-insensitive)
+│   │   ├── logging_utils.py        # Logging configuration
+│   │   └── path_manager.py         # DSL-based path abstraction
+│   └── results/                    # Runtime-generated reports
+│       ├── *_integrity_report.txt  # Dataset validation reports
+│       └── plots/                  # EDA-generated plots (directory)
+
+```
+
+---
+
+## Configuration Guide <a id="configuration-guide"></a>
+
+### Configuration Layering
+
+1. **`basic.yaml`** - Global defaults (system, training, evaluation)
+2. **`models/{model}.yaml`** - Model-specific overrides
+3. **`dataset_config.yaml`** - Dataset-specific settings
+
+### Memory Optimization for Video Training
+
+```yaml
+# If encountering CUDA Out of Memory (OOM)
+preprocessing:
+  batch_size: 1              # Reduce batch size
+  num_workers: 0             # Disable multiprocessing
+
+model:
+  num_frames: 4              # Reduce temporal frames
+  backbone: "resnet50"       # Use smaller backbone
+  transformer_layers: 1      # Reduce transformer depth
+
+train:
+  gradient_accumulation_steps: 4  # Simulate larger batch
+  amp: true                  # Enable mixed precision
+```
+
+### Symlink Setup for Datasets
+
+```bash
+cd datasets
+ln -s TID2013 tid2013        # Case-insensitive access
+ln -s KoNViD-1k konvid-1k
+ln -s T2VQA-DB t2vqa-db
+```
+
+---
+
+## Troubleshooting <a id="troubleshooting"></a>
+
+### CUDA Out of Memory
+
+| Symptom | Solution |
+| :--- | :--- |
+| OOM at first batch | Reduce `batch_size` to 1 |
+| OOM after several epochs | Enable `gradient_checkpointing: true` |
+| OOM during validation | Reduce `num_frames` to 4 |
+
+### Dataset Not Found
+
+```bash
+# Check symlinks
+ls -la datasets/
+# Create missing symlinks
+ln -s ACTUAL_NAME symlink_name
+```
+
+### Missing Dependencies
+
+```bash
+# Decord for fast video loading
+uv pip install decord
+
+# OpenCV fallback (always available)
+uv pip install opencv-python
+```
+
+### Slow Training
+
+| Issue | Optimization |
+| :--- | :--- |
+| Data loading bottleneck | Increase `num_workers: 8` |
+| Small batch size | Use `gradient_accumulation_steps` |
+| Video decoding slow | Ensure Decord is installed |
+
+---
+
+## 📄 License <a id="license"></a>
+
+- **Framework**: MIT(LICENSE)
+- **Author**: [@autentisitet](https://github.com/autentisitet)
+- **Version**: 0.9.0
+
+---
+
+## 🙏 Acknowledgments
+
+- PyTorch team for deep learning framework
+- Decord developers for efficient video loading
+- TID2013, KoNViD-1k, T2VQA-DB dataset providers
+
+---
+
+**Built with ❤️ for the research community**

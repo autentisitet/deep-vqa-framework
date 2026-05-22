@@ -1,0 +1,28 @@
+# config/models/resnet_iqa.yaml
+task_type: "iqa" # 明确任务类型
+dataset_name: "TID2013"
+
+model:
+  name: "HyperIQANet"
+  backbone: "resnet50"
+  freeze_backbone: false
+  pretrained: true
+  dropout: 0.3
+  input_size: 224
+
+
+preprocessing:
+  batch_size: 32   # 覆盖 basic.yaml 中的值
+  num_workers: 4
+
+
+train:
+  epochs: 50
+  lr: 0.0001
+  weight_decay: 1.0e-4
+  grad_clip: 0.5
+
+
+loss:
+  mse_weight: 0.7
+  rank_weight: 0.3
