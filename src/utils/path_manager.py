@@ -6,7 +6,6 @@ from loguru import logger
 
 
 class PathManager:
-    # 永远以当前文件为基准，向上回溯三层找到项目真正的根目录
     _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
     _CONFIG_FILE = _PROJECT_ROOT / "config/paths.yaml"
 

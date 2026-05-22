@@ -83,8 +83,7 @@ from src.data.types import DatasetType
 
 class DataEDA:
     """
-    数据探索分析类 - 深度绑定 dataset_config.yaml。
-    具备全局大小写脱钩对账、分位数分层多折校验、I/O安全截断等现代框架超能力。
+    Data exploration and analysis: loading metadata, cleaning samples, statistical analysis, and dataset partitioning.
     """
     _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -106,7 +105,7 @@ class DataEDA:
             sub_path = self.dataset_config.get("paths", {}).get("data", "")
             self.data_dir = (root / sub_path).resolve()
 
-        logger.info(f"🚀 [PathFix] 数据寻址锚点已锁定: {self.data_dir}")
+        logger.info(f"🚀 [PathFix] Data directory: {self.data_dir}")
         plt.switch_backend('Agg')
 
         # 引入无视大小写资产解析网关
@@ -123,7 +122,7 @@ class DataEDA:
             config_path = PathManager.get_config_file("dataset_config.yaml")
 
         # 使用 safe_load_yaml 加载
-        full_config = safe_load_yaml(config_path, "数据集配置文件")
+        full_config = safe_load_yaml(config_path, "Dataset configuration file")
 
         # 大小写不敏感查找
         lowered_config = {k.lower(): v for k, v in full_config.items()}
@@ -241,7 +240,7 @@ class DataEDA:
 
 
     def _analyze_media_properties(self):
-        """统一分析媒体属性（根据数据集类型）"""
+        """Unified analysis of media attributes (based on dataset type)"""
         # 收集文件
         media_paths = set()
         for ext in self.file_extensions:
@@ -276,8 +275,8 @@ class DataEDA:
 
 
     def check_integrity(self, max_samples: int = None, skip_video_check: bool = False) -> Dict:
-        """物理样本资产完整性校验：采用批次防御与状态异步记录模式"""
-        logger.info("\n 🔍 [Integrity] 启动物理资产隔离与清洗流程...")
+        """Check file integrity: missing, corrupted, duplicate"""
+        logger.info("\n 🔍 [Integrity] Integrity check started...")
 
         # 如果指定了最大样本数，只检查部分
         df_to_check = self.df if max_samples is None else self.df.head(max_samples)
@@ -333,7 +332,7 @@ class DataEDA:
                     if dest.exists():
                         dest = quarantine_dir / f"{target_path.stem}_corrupted{target_path.suffix}"
                     shutil.move(str(target_path), str(dest))
-                    logger.warning(f"⚠️ 损坏文件已隔离: {target_path.name} ({error})")
+                    logger.warning(f"⚠️ Corrupted file has been quarantined: {target_path.name} ({error})")
                 continue
 
             valid_indices.append(i)
@@ -344,13 +343,13 @@ class DataEDA:
         # 4. 生成审计报告 (使用更加紧凑的格式)
         self._write_integrity_report(missing, corrupted)
 
-        logger.info(f"✅ [Integrity] 清洗完毕。保留样本: {len(self.df)} | 丢失: {len(missing)} | 损坏: {len(corrupted)}")
+        logger.info(f"✅ [Integrity] Cleaning complete. Retained samples: {len(self.df)} | Missing samples: {len(missing)} | Corrupted samples: {len(corrupted)}")
         return {'corrupted': corrupted, 'missing': missing, 'duplicates': duplicates}
 
 
 
     def _write_integrity_report(self, missing: List[str], corrupted: List[str]):
-        """辅助方法：解耦报告生成逻辑"""
+        """Generate an integrity check report"""
         report_path = (self._PROJECT_ROOT / "results") / f"{self.dataset_name}_integrity_report.txt"
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(f"--- Integrity Audit Report: {self.dataset_name} ---\n")
@@ -362,7 +361,7 @@ class DataEDA:
 
     def check_filename_label_match(self) -> bool:
         # 检查磁盘上的文件和 metadata 中的 label 是否完全匹配
-        """💎【精准修复 1】：真伪两极全部转换为小写，实现严丝合缝的大小写解耦匹配"""
+        """Compares the disk filename with the tag filename to see if they match (case-insensitive)"""
         if self.df is None: return False
 
         physical_names = set()
@@ -482,7 +481,7 @@ class DataEDA:
     # ==================== 主分析流一键呼叫 ====================
 
     def run_full_eda(self, save_dir: Optional[Path] = None, skip_integrity: bool = False) -> Dict:
-        """一键全自动化驱动核心流"""
+        """Execute the complete data exploration and analysis process"""
         if save_dir is None:
             save_dir = self._PROJECT_ROOT / "results" / "plots"
 
@@ -496,7 +495,7 @@ class DataEDA:
         #TODO:
         if skip_integrity:
             integrity_res = {'corrupted': [], 'missing': [], 'duplicates': []}
-            logger.info("⏭️ [Integrity] 跳过完整性检查")
+            logger.info("⏭️ [Integrity] Skip integrity check")
         else:
             # 只检查文件存在性，不检查视频内容（快很多）
             integrity_res = self.check_integrity(skip_video_check=True)

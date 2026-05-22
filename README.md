@@ -334,9 +334,6 @@ Output location: `results/{dataset}/plots/`
 ## Project Structure <a id="project-structure"></a>
 
 ```text
-## Project Structure
-
-```text
 deep-vqa-framework/
 ├── Algorithm-section.png           # Architecture diagram for documentation
 ├── Makefile                        # Automation commands (training, clean, test)
@@ -402,33 +399,32 @@ deep-vqa-framework/
 │   └── system_check.sh             # GPU, CUDA, dependency validation, etc
 │
 ├── src/
-│   ├── main.py                     # Entry point: training & evaluation
-│   ├── core/
-│   │   ├── engine.py               # Training/validation loop
-│   │   ├── evaluator.py            # Metrics computation (PLCC, SROCC)
-│   │   └── trainer.py              # Cross-validation pipeline
-│   ├── data/
-│   │   ├── data_eda.py             # Exploratory data analysis
-│   │   ├── metadata_loader_factory.py  # Factory for dataset parsers
-│   │   ├── metadata_loaders.py     # Dataset-specific metadata loaders
-│   │   ├── types.py                # Type definitions (dataclasses)
-│   │   └── eda/
-│   │       ├── integrity.py        # Dataset integrity validation
-│   │       ├── metrics_plotter.py  # Visualization generators
-│   │       ├── split.py            # Train/val/test splitting
-│   │       └── statistics.py       # Statistical analysis
-│   ├── models/
-│   │   ├── README.md               # Model architecture documentation
-│   │   └── iqavqa_net.py           # Unified IQA/VQA network
-│   ├── utils/
-│   │   ├── config_loader.py        # YAML config loading & merging
-│   │   ├── file_loader.py          # Asset resolution (case-insensitive)
-│   │   ├── logging_utils.py        # Logging configuration
-│   │   └── path_manager.py         # DSL-based path abstraction
-│   └── results/
-│       ├── *_integrity_report.txt  # Dataset validation reports
-│       └── plots/                  # EDA-generated plots (directory)
-
+ ├── main.py                     # Entry point: training & evaluation
+ ├── core/
+ │   ├── engine.py               # Training/validation loop
+ │   ├── evaluator.py            # Metrics computation (PLCC, SROCC)
+ │   └── trainer.py              # Cross-validation pipeline
+ ├── data/
+ │   ├── data_eda.py             # Exploratory data analysis
+ │   ├── metadata_loader_factory.py  # Factory for dataset parsers
+ │   ├── metadata_loaders.py     # Dataset-specific metadata loaders
+ │   ├── types.py                # Type definitions (dataclasses)
+ │   └── eda/
+ │       ├── integrity.py        # Dataset integrity validation
+ │       ├── metrics_plotter.py  # Visualization generators
+ │       ├── split.py            # Train/val/test splitting
+ │       └── statistics.py       # Statistical analysis
+ ├── models/
+ │   ├── README.md               # Model architecture documentation
+ │   └── iqavqa_net.py           # Unified IQA/VQA network
+ ├── utils/
+ │   ├── config_loader.py        # YAML config loading & merging
+ │   ├── file_loader.py          # Asset resolution (case-insensitive)
+ │   ├── logging_utils.py        # Logging configuration
+ │   └── path_manager.py         # DSL-based path abstraction
+ └── results/
+     ├── *_integrity_report.txt  # Dataset validation reports
+     └── plots/                  # EDA-generated plots (directory)
 ```
 
 ---

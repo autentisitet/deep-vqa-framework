@@ -17,7 +17,7 @@ try:
     DECORD_AVAILABLE = True
 except ImportError:
     DECORD_AVAILABLE = False
-    logger.warning("⚠️ Decord 未安装，视频加载将使用 OpenCV 回退")
+    logger.warning("⚠️ Decord is not installed; video loading will use OpenCV fallback.")
 
 
 from src.models.iqavqa_net import IQAVQANet, IQAVQALoss
@@ -25,15 +25,15 @@ from src.core.engine import TrainerEngine
 from src.utils.file_loader import CaseInsensitiveAssetResolver
 
 def worker_init_fn(worker_id):
-    """防止多进程导致的数据增强随机种子冲突"""
+    """In a multi-process DataLoader, set a different random seed for each worker."""
     np.random.seed(np.random.get_state()[1][0] + worker_id)
 
 
 
 class VQA_IQADataset(Dataset):
     """
-    通用自适应多模态数据加载器
-    直接消费 DataEDA 治理后的 DataFrame 资产，内置高价值物理级防御看门狗
+    A multimodal data loader that supports images and videos.
+    Reads DataFrames processed by DataEDA and decodes image or video frames as needed.
     """
     def __init__(self, df: pd.DataFrame, data_dir: Path, config: Dict = None, transform: Any = None, resolver: Any = None):
         self.df = df.reset_index(drop=True)
@@ -60,43 +60,39 @@ class VQA_IQADataset(Dataset):
         row = self.df.iloc[idx]
         sample_id = str(row['sample_id']).strip()
 
-        # 1. 物理层：获取 Path 和 属性
+        # 1. Physical layer: Get Path and properties
         try:
-            # 现在的 resolve 返回的是 (Path, is_video, is_image)
             target_path, is_video, is_image = self.resolver.resolve_with_info(sample_id)
             str_path = str(target_path.absolute())
         except Exception as e:
-            logger.error(f"❌ 寻址失败: {sample_id} | {e}")
-            # 💎 调试拦截：寻址失败直接断点，检查为何 Metadata 指向的文件找不到
+            logger.error(f"❌ Addressing failed: {sample_id} | {e}")
+            # Debugging Interception: Set a breakpoint immediately when addressing fails to check why the file pointed to by Metadata cannot be found.
             if os.environ.get('DEBUG', '0') == '1':
                 breakpoint()
             return default_payload
 
-        # 2. 执行层：根据物理属性“自动分流” (不再依赖 self.is_video)
+        # 2. Execution layer: Automatically distribute traffic based on physical attributes.
         data_tensor = None
         try:
             if is_video:
-                # 视频逻辑：调用你原本的高性能 Decord 采样
                 data_tensor = self._read_video_with_decord(str_path)
             elif is_image:
-                # 图片逻辑：调用图像处理
                 data_tensor = self._load_image_logic(str_path)
             else:
-                logger.error(f"⚠️ 未知类型资产: {str_path}")
+                logger.error(f"⚠️ Unknown file type: {str_path}")
         except Exception as e:
-            logger.error(f"🚨 数据读取链路崩溃: {str_path} | 原因: {e}")
-            # 💎 调试拦截：读取崩溃直接断点，检查是否是文件损坏或解码器不兼容
+            logger.error(f"🚨 Data read path crashed: {str_path} | Reason: {e}")
+            # Debugging Interception: Set a breakpoint to check for file corruption or decoder incompatibility.
             if os.environ.get('DEBUG', '0') == '1':
                 breakpoint()
 
-        # 3. 结果核验：这就是你要找的“隐形 None”的真相
         if data_tensor is None:
-            logger.critical(f"💀 发生静默读取失败 (返回 None)! 样本: {sample_id}")
+            logger.critical(f"💀 Silent read failed (returns None)! Sample: {sample_id}")
             if os.environ.get('DEBUG', '0') == '1':
-                breakpoint()     # 💎 这里是拦截“读取成功但没拿到数据”的最后关卡
+                breakpoint()
             return default_payload
 
-        # 3. 组装 Payload (保持不变)
+        # 3. Assemble the payload
         label = torch.tensor(row.get('normalized_score', row['mos']), dtype=torch.float32)
         payload = {'data': data_tensor, 'label': label}
 
@@ -109,37 +105,37 @@ class VQA_IQADataset(Dataset):
 
     def _read_video_with_decord(self, str_path: str) -> torch.Tensor:
         """
-        使用 decord 进行高性能视频采样
+        High-performance video sampling using decord
         """
         if DECORD_AVAILABLE:
             try:
-                # 使用 CPU 上下文，防止多进程下的 GPU 显存句柄死锁
+                # Use CPU context to prevent GPU memory handle deadlock in multi-process environments.
                 vr = VideoReader(str_path, ctx=cpu(0))
                 total_frames = len(vr)
                 max_frames = self.num_frames
 
-                # 均匀采样索引 (比 range(max_frames) 更具代表性)
+                # Uniform sampling index (more representative than range(max_frames))
                 if total_frames >= max_frames:
                     indices = np.linspace(0, total_frames - 1, max_frames, dtype=int).tolist()
                 else:
-                    # 对于超短视频，直接全部读取并填充
+                    # NOTE: For very short videos, read and populate them all directly.
                     indices = list(range(total_frames))
 
-                # 核心：一次性获取所有帧，直接返回 (16, H, W, 3) 的 ndarray
+                # NOTE: Retrieve all frames at once and directly return an ndarray of (16, H, W, 3).
                 frames = vr.get_batch(indices).asnumpy()
 
-                # 💎 规整化：直接用循环 resize 效率极低且易出错，考虑直接切片
-                # 检查 frames 是否为空
+                # Directly using a loop to resize is extremely inefficient and error-prone; consider slicing directly.
+                # Check if frames are empty.
                 if frames.size == 0:
-                    raise ValueError(f"Decord 返回了空帧序列: {str_path}")
+                    raise ValueError(f"Decord returned a sequence of empty frames: {str_path}")
 
-                # 规整化：resize 到 (224, 224)
-                # Decord 读取的已经是 RGB，无需 cv2.cvtColor
+                # Normalization: resize to (224, 224)
+                # Decord is already reading RGB, so there's no need for cv2.cvtColor.
                 resized_frames = [cv2.resize(f, (224, 224)) for f in frames]
                 video_np = np.stack(resized_frames)
                 data_tensor = torch.from_numpy(video_np).permute(0, 3, 1, 2).float() / 255.0
 
-                # 如果帧数不足，在时间轴上进行 padding (填充)
+                # If there are not enough frames, padding is applied to the timeline.
                 if data_tensor.size(0) < max_frames:
                     padding = data_tensor[-1].unsqueeze(0).repeat(max_frames - data_tensor.size(0), 1, 1, 1)
                     data_tensor = torch.cat([data_tensor, padding], dim=0)
@@ -147,14 +143,14 @@ class VQA_IQADataset(Dataset):
                 return data_tensor
 
             except Exception as e:
-                logger.error(f"🚨 [Decord] 视频解析严重故障: {str_path} | 错误: {e}")
+                logger.error(f"🚨 [Decord] Critical video parsing failure: {str_path} | Error: {e}")
 
-        # 回退到 OpenCV
+        # Fall back to OpenCV
         return self._read_video_with_opencv(str_path)
 
 
     def _read_video_with_opencv(self, str_path: str) -> torch.Tensor:
-        """OpenCV 视频读取回退方案"""
+        """OpenCV video readback fallback solution"""
         cap = cv2.VideoCapture(str_path)
         if not cap.isOpened():
             return torch.zeros((self.num_frames, 3, 224, 224), dtype=torch.float32)
@@ -186,9 +182,9 @@ class VQA_IQADataset(Dataset):
 
 
     def _load_image_logic(self, str_path: str) -> torch.Tensor:
-        """封装好的图像加载逻辑"""
+        """Encapsulated image loading logic"""
         img = cv2.imread(str_path)
-        if img is None: raise ValueError("解码失败")
+        if img is None: raise ValueError("Decoding failed")
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         if self.transform:
@@ -202,7 +198,7 @@ class VQA_IQADataset(Dataset):
 
 class TrainerExecutionPipeline:
     """
-    全自动模型训练调度管道 (Execution Pipeline) - 显存解耦完美闭环成品级
+    Managing the training process of K-fold cross-validation
     """
     def __init__(self, config: Dict[str, Any], eda_df: pd.DataFrame, data_dir: Path, resolver: Any = None):
         self.config = config
@@ -223,31 +219,31 @@ class TrainerExecutionPipeline:
     # FIXME
     def execute_cross_validation(self, evaluator: Any):
         """
-        执行标准 5 折交叉验证，内置调度器闭环、显存主动防御与 Top-K 文件隔离
+        Perform K-fold cross-validation, train independently for each fold, and support breakpoint cleanup and model selection.
         """
         n_splits = self.config.get('preprocessing', {}).get('k_fold', 5)
-        logger.info(f"🧱 [Pipeline] 启动标准 {n_splits} 折交叉验证分割器...")
+        logger.info(f"🧱 [Pipeline] Start with {n_splits} fold cross-validation...")
 
         clean_df = self.eda_df.copy()
 
-        # 离群值过滤
+        # Outlier filtering
         if 'is_outlier' in clean_df.columns:
             clean_df = clean_df[clean_df['is_outlier'] == False].reset_index(drop=True)
-            logger.info(f"🧹 [Pipeline] 已过滤离群值。剩余样本: {len(clean_df)}")
+            logger.info(f"🧹 [Pipeline] Outliers have been filtered out. Remaining samples: {len(clean_df)}")
 
-        # 测试集隔离
+        # Test set isolation
         test_df = None
         if 'split' in clean_df.columns:
             active_df = clean_df[clean_df['split'].isin(['train', 'val'])].reset_index(drop=True)
             test_df = clean_df[clean_df['split'] == 'test']
-            logger.info(f"🛡️ 测试集已隔离 (Size: {len(test_df)})")
+            logger.info(f"🛡️ The test set has been isolated: (Size: {len(test_df)})")
         else:
             active_df = clean_df
-            logger.warning("⚠️ 未检测到 'split' 列，存在数据泄露风险")
+            logger.warning("⚠️ The 'split' column was not detected, indicating a risk of data leakage.")
 
         original_base_filename = getattr(evaluator, 'base_filename', 'model')
 
-        # 保存原始配置，用于测试集评估
+        # Save the original configuration for test set evaluation.
         original_config = copy.deepcopy(self.config)
         for key in ['current_fold', 'model']:
             if key in original_config:
@@ -304,9 +300,9 @@ class TrainerExecutionPipeline:
             )
 
             engine.fit(train_loader, val_loader)
-            logger.info(f"🏁 [Fold {current_fold}] 完成")
+            logger.info(f"🏁 [Fold {current_fold}] Completed")
 
-            # 变量在函数结束时会自动被垃圾回收，不一定需要手动删除
+            # Variables are automatically garbage collected when the function ends, and do not necessarily need to be manually deleted.
             for var in ['model', 'optimizer', 'scheduler', 'criterion', 'engine']:
                 if var in locals():
                     del locals()[var]
@@ -314,22 +310,22 @@ class TrainerExecutionPipeline:
             gc.collect()
 
             if self.config.get('train', {}).get('fast_run', False):
-                logger.warning("⚡ 快跑模式，完成首折后退出")
+                logger.warning("⚡ Run mode, exit after completing the first discount.")
                 break
 
-        # 测试集评估
+        # Test set evaluation
         if test_df is not None and not test_df.empty:
-            logger.info(f"🧪 开始测试集评估...")
+            logger.info(f"🧪 Start test set evaluation...")
             self._evaluate_test_set(test_df, evaluator, original_base_filename, n_splits, original_config)
 
 
 
     def _evaluate_test_set(self, test_df: pd.DataFrame, evaluator: Any, base_filename: str, n_splits: int, original_config: Dict = None):
-        """测试集评估"""
-        # 使用原始配置（没有 current_fold 等污染）
+        """Test set evaluation"""
+        # Use the original configuration (without pollution such as current_fold).
         config_to_use = original_config if original_config else self.config
 
-        # 确保 model config 包含 num_frames
+        # Ensure that the model configuration contains `num_frames`
         model_config = config_to_use.get('model', {}).copy()
         model_config['num_frames'] = config_to_use.get('preprocessing', {}).get('num_frames', 8)
         config_to_use['model'] = model_config
@@ -342,11 +338,11 @@ class TrainerExecutionPipeline:
             best_model_path = save_dir / f"{base_filename}_fold{n_splits}_best.pt"
 
             if best_model_path.exists():
-                logger.info(f"💾 加载最佳模型: {best_model_path}")
+                logger.info(f"💾 Load the best model: {best_model_path}")
                 checkpoint = torch.load(best_model_path, map_location=self.device)
                 model.load_state_dict(checkpoint['state_dict'])
             else:
-                logger.warning(f"⚠️ 未找到最佳模型 {best_model_path}，使用随机权重")
+                logger.warning(f"⚠️ No best model path was found; random weights were used.")
 
             model.eval()
 
@@ -369,7 +365,7 @@ class TrainerExecutionPipeline:
             evaluator.evaluate(y_true, y_pred)
 
         finally:
-            # 清理模型和显存
+            # Clean up the model and video memory
             if model is not None:
                 del model
             torch.cuda.empty_cache()

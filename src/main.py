@@ -1,11 +1,11 @@
 import os
-# src/__init__.py 会在导入 src 包时执行，但 main.py 可能先执行
+# src/__init__.py will be executed when the src package is imported, but main.py may be executed first.
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 import cv2
-cv2.setNumThreads(0)  # 或 cv2.setNumThreads(1)
+cv2.setNumThreads(0)  # or `cv2.setNumThreads(1)`
 
 import argparse
 import yaml
@@ -28,7 +28,7 @@ import pdb
 
 @time_it
 def main():
-    # 1. 命令行参数解析
+    # 1. Command line argument parsing
     parser = argparse.ArgumentParser(description="Deep VQA/IQA General Data-Driven Framework")
     parser.add_argument('-c', '--config', type=str, default='basic', help="Basic config filename")
     parser.add_argument('--model', type=str, default='resnet_iqa', help="Model filename (e.g., resnet_iqa)")
@@ -42,13 +42,13 @@ def main():
     config = load_system_config(args.config, args.dataset)
     config['dataset_name'] = args.dataset
 
-    logger.debug(f"[Main] 命令行参数: config={args.config}, model={args.model}, dataset={args.dataset}, smoke_test={args.smoke_test}")
+    logger.debug(f"[Main] Command line arguments: config={args.config}, model={args.model}, dataset={args.dataset}, smoke_test={args.smoke_test}")
 
     dataset_name = config['dataset_name']
     task_type = config.get('task_type', 'vqa')
     model_name = config['model'].get('name', 'default_model')
 
-    logger.debug(f"[Main] 任务配置: dataset={dataset_name}, task_type={task_type}, model={model_name}")
+    logger.debug(f"[Main] Task Configuration: dataset={dataset_name}, task_type={task_type}, model={model_name}")
 
 
 
@@ -59,17 +59,17 @@ def main():
         # Help: 在这里输入 'p data_dir' 检查路径解析是否正确
         # Help: 如果发现路径偏移，检查 PathManager 的根目录设置
         if not data_dir.exists():
-            raise FileNotFoundError(f"数据集物理路径不存在: {data_dir}")
+            raise FileNotFoundError(f"The physical path to the dataset does not exist: {data_dir}")
         else:
-            # 检查是否因为目录嵌套导致路径配偏了
+            # Handling nested dataset directories: If there is only one subdirectory, use it directly.
             sub_dirs = [d for d in data_dir.iterdir() if d.is_dir()]
             if len(sub_dirs) == 1 and sub_dirs[0].name.lower() == dataset_name.lower():
-                logger.warning(f"⚠️ 发现目录嵌套，自动下潜: {sub_dirs[0]}")
+                logger.warning(f"Data is in subdirectories: {sub_dirs[0]}")
                 data_dir = sub_dirs[0].resolve()
-                logger.debug(f"[PathManager] 修正后路径: {data_dir}")
+                logger.debug(f"[PathManager] Actual data path: {data_dir}")
 
     except FileNotFoundError as e:
-        logger.error(f"❌ 数据集路径错误: {e}")
+        logger.error(f"❌ Dataset path error: {e}")
         # Help: 在这里输入 'p dataset_name' 查看数据集名称
         # Help: 输入 'p data_dir' 查看当前尝试的路径
         # Help: 检查 PathManager 的根目录配置是否正确
@@ -83,12 +83,11 @@ def main():
     plots_dir = PathManager.get_results_dir(dataset_name, "plots")
     model_outputs_dir = PathManager.get_results_dir(dataset_name, "model_outputs")
 
-    # 确保目录存在
     train_logs_dir.mkdir(parents=True, exist_ok=True)
     plots_dir.mkdir(parents=True, exist_ok=True)
     model_outputs_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.debug(f"[Main] 结果目录准备: train_logs={train_logs_dir}, plots={plots_dir}, outputs={model_outputs_dir}")
+    logger.debug(f"[Main] Result catalog preparation: train_logs={train_logs_dir}, plots={plots_dir}, outputs={model_outputs_dir}")
 
     config.setdefault('logging', {}).update({
         'save_dir': str(model_outputs_dir),
@@ -97,7 +96,7 @@ def main():
 
 
 
-    # 3. 冒烟测试模式设置
+    # 3. Smoke Test Mode Settings
     if args.smoke_test:
         logger.warning("[Main] Smoke test mode activated.")
         config.setdefault('train', {}).update({'epochs': 1, 'fast_run': True})
@@ -107,7 +106,7 @@ def main():
 
 
 
-    # 4. 初始化核心组件
+    # 4. Initialize core components
     base_fn = log_prepare(model_name=model_name, dataset_name=dataset_name)
     eda_engine = DataEDA(
         dataset_name=args.dataset,
@@ -132,7 +131,7 @@ def main():
 
 
     if 'split' not in eda_engine.df.columns:
-        logger.error("[Main] 严重错误: 数据EDA未正确划分 split 列，无法安全隔离测试集！")
+        logger.error("[Main] Critical error: Data EDA did not correctly split the split column, making it impossible to safely isolate the test set!")
         # Help: 查看数据框列名，输入 'p eda_engine.df.columns.tolist()'
         pdb.set_trace()
         return
@@ -156,7 +155,7 @@ def main():
         pdb.set_trace()
     # ------------------
 
-    # 5. 训练流水线
+    # 5. Training assembly line
     pipeline = TrainerExecutionPipeline(
         config=config,
         eda_df=eda_engine.df,
@@ -169,7 +168,7 @@ def main():
     try:
         pipeline.execute_cross_validation(evaluator=evaluator)  # FIXME
     except Exception as e:
-        logger.error(f"[Main] 训练执行失败: {e}")
+        logger.error(f"[Main] Training execution failed: {e}")
         # Help: 使用 'p e' 查看异常详情
         # Help: 输入 'p config.get("train", {})' 查看训练配置
         pdb.set_trace()
@@ -177,11 +176,11 @@ def main():
 
 
 
-    # 6. 可视化分析
+    # 6. Visual Analysis
     plotter = MetricsPlotter(task_type=task_type,
                              model_name=model_name,
                              plots_dir=plots_dir)
-    arena_payload = {}
+    model_metrics = {}
     n_splits = config.get('preprocessing', {}).get('k_fold', 5)
 
 
@@ -190,7 +189,7 @@ def main():
 
         if fold_csv_path.exists():
             fold_key = f"{model_name}_Fold{fold_idx}"
-            arena_payload[fold_key] = {"version": "v1",
+            model_metrics[fold_key] = {"version": "v1",
                                        "csv_path": fold_csv_path}
             if fold_idx == 1:
                 plotter.plot_training_history(csv_path=fold_csv_path,
@@ -207,9 +206,9 @@ def main():
 
 
 
-    # 7. 竞技场对比与收尾
-    if arena_payload:
-        plotter.plot_comparison(metrics_csv_dict=arena_payload, dataset_name=dataset_name)
+    # 7. Model Comparison and Conclusion
+    if model_metrics:
+        plotter.plot_comparison(metrics_csv_dict=model_metrics, dataset_name=dataset_name)
         logger.info("[Main] System lifecycle completed successfully.")
     else:
         logger.warning(f"[Main] No valid training history found in {train_logs_dir}.")

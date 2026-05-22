@@ -5,9 +5,9 @@ from loguru import logger
 from collections.abc import Mapping
 import pdb
 
-# 改为自动扫描，或者支持动态注册
+# Automatically scan config/models/*.yaml
 def discover_models(config_dir: Path) -> dict:
-    """自动发现 models 目录下的配置文件"""
+    """Automatically discover configuration files in the models directory"""
     models_dir = config_dir / "models"
     if not models_dir.exists():
         return {}
@@ -19,7 +19,7 @@ def discover_models(config_dir: Path) -> dict:
         model_map[model_name] = f"models/{yaml_file.name}"
     return model_map
 
-MODEL_MAP = None  # 延迟加载
+MODEL_MAP = None  # Lazy loading
 
 
 
@@ -27,7 +27,7 @@ def get_model_map(config_dir: Path) -> dict:
     global MODEL_MAP
     if MODEL_MAP is None:
         MODEL_MAP = discover_models(config_dir)
-        # 保留手动映射作为后备
+        # Manual mapping as backup
         MODEL_MAP.update({
             'resnet_iqa': 'models/resnet_iqa.yaml',
             'timeswin_vqa': 'models/timeswin_vqa.yaml'
@@ -37,7 +37,7 @@ def get_model_map(config_dir: Path) -> dict:
 
 
 def deep_update(source, overrides):
-    """递归深度合并字典"""
+    """Recursively merge dictionaries, including nested dictionaries."""
     for k, v in overrides.items():
         if isinstance(v, Mapping) and v:
             source[k] = deep_update(source.get(k, {}), v)
@@ -47,24 +47,24 @@ def deep_update(source, overrides):
 
 
 
-def safe_load_yaml(path: Path, description: str = "配置文件") -> dict:
-    """安全加载 YAML 文件，失败时抛出异常"""
+def safe_load_yaml(path: Path, description: str = "configuration file") -> dict:
+    """Safely load YAML files, throw an exception on failure."""
     try:
         with open(path, 'r', encoding='utf-8') as f:
             content = yaml.safe_load(f)
             if content is None:
-                raise ValueError(f"{description} 文件为空: {path}")
+                raise ValueError(f"{description} is empty: {path}")
             return content
     except FileNotFoundError as e:
-        logger.error(f"❌ {description} 不存在: {path}")
-        raise FileNotFoundError(f"{description} 不存在: {path}") from e
+        logger.error(f"❌ {description} does not exist: {path}")
+        raise FileNotFoundError(f"{description} does not exist: {path}") from e
     except yaml.YAMLError as e:
-        logger.error(f"❌ {description} YAML 格式错误: {path}")
-        logger.error(f"   错误详情: {e}")
-        # Help: 检查 YAML 语法，特别是缩进和特殊字符
-        raise RuntimeError(f"{description} YAML 格式错误: {path}") from e
+        logger.error(f"❌ YAML formatting error: {path}")
+        logger.error(f"   Error details: {e}")
+        # Help: Check YAML syntax, especially indentation and special characters.
+        raise RuntimeError(f"YAML formatting error: {path}") from e
     except Exception as e:
-        logger.error(f"❌ 读取 {description} 失败: {path}, 错误: {e}")
+        logger.error(f"❌ Failed to read {description}: {path}, Error: {e}")
         raise
 
 
@@ -73,11 +73,11 @@ def safe_load_yaml(path: Path, description: str = "配置文件") -> dict:
 def load_system_config(model_cfg_name: str, dataset_name: str) -> dict:
     config_dir = Path("config")
 
-    # 1. 加载基础配置
+    # 1. Load basic configuration
     basic_path = config_dir / "basic.yaml"
-    config = safe_load_yaml(basic_path, "基础配置文件")
+    config = safe_load_yaml(basic_path, "Basic configuration file")
 
-    # 2. 加载模型配置
+    # 2. Load model configuration
     model_key = str(model_cfg_name).strip().lower()
     model_map = get_model_map(config_dir)
     target_model_file = model_map.get(model_key, 'models/resnet_iqa.yaml')
@@ -85,15 +85,14 @@ def load_system_config(model_cfg_name: str, dataset_name: str) -> dict:
 
     if not model_path.exists():
         logger.warning(f"⚠️ Model config [{model_path}] not found. Falling back to resnet_iqa.yaml")
-        model_path = config_dir / 'models/resnet_iqa.yaml'
-        # 如果 fallback 也不存在，会在 safe_load_yaml 中报错
+        model_path = config_dir / 'models/resnet_iqa.yaml
 
-    model_config = safe_load_yaml(model_path, f"模型配置文件 [{model_key}]")
+    model_config = safe_load_yaml(model_path, f"Model configuration file [{model_key}]")
     config = deep_update(config, model_config)
 
-    # 3. 加载数据集配置
+    # 3. Load dataset configuration
     dataset_cfg_path = config_dir / "dataset_config.yaml"
-    ds_all = safe_load_yaml(dataset_cfg_path, "数据集配置文件")
+    ds_all = safe_load_yaml(dataset_cfg_path, "Dataset configuration file")
 
     ds_all_lowered = {k.lower(): v for k, v in ds_all.items()}
     target_ds_key = str(dataset_name).strip().lower()
@@ -101,20 +100,20 @@ def load_system_config(model_cfg_name: str, dataset_name: str) -> dict:
     if target_ds_key not in ds_all_lowered:
         available = list(ds_all.keys())
         logger.error(f"❌ Dataset '{dataset_name}' not found in dataset_config.yaml")
-        logger.info(f"   可用数据集: {available}")
+        logger.info(f"   Available datasets: {available}")
         debug_breakpoint()
         raise KeyError(f"Dataset settings for '{dataset_name}' missing. Available: {available}")
 
     dataset_info = ds_all_lowered[target_ds_key]
 
-    # ✅ 修复：命令行参数优先，不使用 YAML 中的 name
+    # Command-line arguments are prioritized; the name in YAML is not used.
     config['dataset_info'] = dataset_info
-    config['dataset_name'] = dataset_name.lower()  # 命令行参数转小写
+    config['dataset_name'] = dataset_name.lower()  # Command line arguments to lowercase
 
     logger.info(f"⚙️ [Config Engine] Layered configuration successfully built for "
                 f"Model [{model_key}] & Dataset [{config['dataset_name']}]")
 
-    logger.debug(f"[Config] 模型配置: {model_key}, 数据集: {config['dataset_name']}")
-    logger.debug(f"[Config] 训练配置: epochs={config.get('train', {}).get('epochs', 'N/A')}")
+    logger.debug(f"[Config] Model configuration: {model_key}, Dataset: {config['dataset_name']}")
+    logger.debug(f"[Config] Training configuration: epochs={config.get('train', {}).get('epochs', 'N/A')}")
 
     return config

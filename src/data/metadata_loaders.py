@@ -8,50 +8,54 @@ from typing import List, Optional
 
 def clean_and_split_line(line: str, possible_delimiters: List[str] = None) -> Optional[List[str]]:
     """
-    清洗行内容并智能识别分隔符
+    Cleans the line content and intelligently identifies delimiters
 
-    Args:
-        line: 原始行字符串
-        possible_delimiters: 可能的分隔符列表，默认 [',', '|', ' ', '\t']
+    ## Args:
 
-    Returns:
-        清洗后的字段列表，如果无法识别则返回 None
+    - line: The original line string
+
+    - possible_delimiters: A list of possible delimiters, defaulting to [',', '|', ' ', '\t']
+
+    ## Returns:
+
+    - A list of cleaned fields; returns None if no delimiter can be identified.
+
     """
     if not line or not line.strip():
         return None
 
-    # 1. 过滤各种引号：""、''、“”、‘’
-    quote_pattern = r'["“”\'\'‘’]'  # 匹配所有类型的引号
+    # 1. Filter various quotation marks: ""、''、“”、‘’
+    quote_pattern = r'["“”\'\'‘’]'  # Matches all types of quotes
     cleaned = re.sub(quote_pattern, '', line.strip())
 
-    # 2. 默认分隔符
+    # 2. Default delimiter
     if possible_delimiters is None:
         possible_delimiters = [',', '|', ' ', '\t']
 
-    # 3. 尝试识别分隔符
+    # 3. Attempt to identify delimiters
     delimiter = None
     for delim in possible_delimiters:
         if delim in cleaned:
-            # 避免空格误判（如果只有空格但没有其他分隔符）
+            # Avoid misinterpreting spaces (if there are only spaces but no other delimiters)
             if delim == ' ' and not any(d in cleaned for d in [',', '|', '\t']):
-                # 多个连续空格作为一个分隔符
+                # Multiple consecutive spaces are used as a separator
                 delimiter = r'\s+'
                 break
             elif delim != ' ':
                 delimiter = delim
                 break
 
-    # 4. 如果没有识别到分隔符，整行作为一个字段
+    # 4. If no delimiter is detected, treat the entire line as a single field.
     if delimiter is None:
         return [cleaned]
 
-    # 5. 按分隔符拆分
+    # 5. Split by delimiter
     if delimiter == r'\s+':
         fields = re.split(r'\s+', cleaned)
     else:
         fields = cleaned.split(delimiter)
 
-    # 6. 清理每个字段的首尾空白
+    # 6. Clean up leading and trailing whitespace in each field
     fields = [f.strip() for f in fields if f.strip()]
 
     return fields
@@ -59,14 +63,14 @@ def clean_and_split_line(line: str, possible_delimiters: List[str] = None) -> Op
 
 
 class BaseMetadataLoader(ABC):
-    """所有数据集加载器的抽象基类"""
+    """The abstract base class for all dataset loaders"""
     @abstractmethod
     def load(self, meta_file: Path) -> pd.DataFrame:
-        """必须返回标准化的 DataFrame，包含 sample_id 和 mos 列"""
+        "A standardized DataFrame must be returned, containing the sample_id and mos columns."
         pass
 
     def _ensure_extension(self, df: pd.DataFrame, ext: str) -> pd.DataFrame:
-        """确保 sample_id 有指定扩展名"""
+        """Make sure sample_id has a specified file extension."""
         df['sample_id'] = df['sample_id'].apply(
             lambda x: x if x.lower().endswith(ext) else x + ext
         )
@@ -74,8 +78,8 @@ class BaseMetadataLoader(ABC):
 
     def _parse_with_cleaner(self, meta_file: Path, delimiter_hint: List[str] = None) -> pd.DataFrame:
         """
-        使用 clean_and_split_line 逐行解析文件
-        适用于格式不标准的元数据文件
+        Use `clean_and_split_line` to parse the file line by line.
+        Suitable for metadata files with non-standard formats.
         """
         records = []
         with open(meta_file, 'r', encoding='utf-8') as f:
@@ -116,8 +120,8 @@ class Tid2013Loader(BaseMetadataLoader):
             return df[['sample_id', 'mos']]
 
         except Exception as e:
-            # 如果 pandas 读取失败，使用清洗函数兜底
-            logger.warning(f"TID2013 pandas 读取失败，尝试逐行解析: {e}")
+            # If pandas read fails, use a cleanup function as a fallback.
+            logger.warning(f"TID2013 pandas read failed, attempting to parse line by line: {e}")
             df = self._parse_with_cleaner(meta_file, delimiter_hint=[r'\s+'])
             df = self._ensure_extension(df, '.bmp')
             return df[['sample_id', 'mos']]
@@ -139,8 +143,8 @@ class KonvidLoader(BaseMetadataLoader):
             return df[['sample_id', 'mos']]
 
         except Exception as e:
-            logger.warning(f"Konvid-1k pandas 读取失败，尝试逐行解析: {e}")
-            # Konvid 通常是逗号分隔
+            logger.warning(f"Konvid-1k pandas read failed, attempting to parse line by line: {e}")
+            # Konvid is a comma separator.
             df = self._parse_with_cleaner(meta_file, delimiter_hint=[','])
             df = self._ensure_extension(df, '.mp4')
             return df[['sample_id', 'mos']]
@@ -164,8 +168,8 @@ class T2VqaLoader(BaseMetadataLoader):
             # return df[['sample_id', 'description', 'mos']]
 
         except Exception as e:
-            logger.warning(f"T2VQA pandas 读取失败，尝试逐行解析: {e}")
-            # T2VQA 通常是竖线分隔
+            logger.warning(f"T2VQA pandas read failed, attempting to parse line by line: {e}")
+            # T2VQA is a vertical line separator.
             df = self._parse_with_cleaner(meta_file, delimiter_hint=['|'])
             # 注意：使用清洗函数时没有 description 列
             df = self._ensure_extension(df, '.mp4')

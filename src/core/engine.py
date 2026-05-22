@@ -8,14 +8,31 @@ import numpy as np
 from loguru import logger
 from typing import Dict, Any, Optional
 
-# NOTE: Docker中torch依赖可能是旧版本，导致无法使用新API
+# NOTE: The torch dependency in Docker might be an older version, preventing the use of new APIs.
 # from torch.amp import autocast, GradScaler
 
 
 class TrainerEngine:
     """
-    数据驱动通用训练/验证引擎 (Data-Driven Training & Evaluation Engine) - 交差完美成品级
-    职责纯粹：不绑定任何具体数据集与网络，只负责张量流控制、反向传播与状态分发。
+    General Training/Validation Engine
+
+    ## Responsibilities:
+
+    - Training loop scheduling (forward/backward propagation, gradient update)
+
+    - Mixed Precision Training (AMP) and gradient pruning
+
+    - Validation set evaluation and metric collection
+
+    - Checkpoint saving and early stopping control
+
+    ## Not concerned with:
+
+    - Specific dataset format
+
+    - Model architecture details
+
+    - Loss function implementation
     """
 
     def __init__(
@@ -42,33 +59,33 @@ class TrainerEngine:
         train_cfg = config.get('train', {})
         self.epochs = train_cfg.get('epochs', 30)
         self.grad_clip = train_cfg.get('grad_clip', None)
-        self.gradient_accumulation_steps = train_cfg.get('gradient_accumulation_steps', 1)  # 添加这行
+        self.gradient_accumulation_steps = train_cfg.get('gradient_accumulation_steps', 1)
 
         self.use_amp = self.config.get('system', {}).get('amp', True)
         # self.scaler = GradScaler(device_type=self.device_type, enabled=self.use_amp)
         self.scaler = GradScaler() if self.use_amp else None
 
-        # Early Stopping 状态机初始化
+        # Early Stopping State Machine Initialization
         early_stop_cfg = train_cfg.get('early_stop', {})
         self.early_stop_enabled = early_stop_cfg.get('enabled', True)
         self.patience = early_stop_cfg.get('patience', 10)
-        self.early_stop_monitor = early_stop_cfg.get('monitor', 'val_loss').lower() # 💎 统一在源头小写化
+        self.early_stop_monitor = early_stop_cfg.get('monitor', 'val_loss').lower()     # Unify the lowercase at the source
         self.early_stop_mode = early_stop_cfg.get('mode', 'min')
 
         self.early_stop_counter = 0
         self.best_early_stop_score = float('inf') if self.early_stop_mode == 'min' else float('-inf')
 
-        # Checkpoint 状态机监控初始化
+        # Checkpoint State Machine Monitoring Initialization
         checkpoint_cfg = train_cfg.get('checkpoint', {})
-        self.checkpoint_monitor = checkpoint_cfg.get('monitor', 'val_srocc').lower() # 💎 统一在源头小写化
+        self.checkpoint_monitor = checkpoint_cfg.get('monitor', 'val_srocc').lower()    # Unify the lowercase at the source
         self.checkpoint_mode = checkpoint_cfg.get('mode', 'max')
         self.best_checkpoint_score = float('inf') if self.checkpoint_mode == 'min' else float('-inf')
 
-        logger.info(f"🚀 [Engine] 训练引擎初始化成功。设备: {self.device} | 监控指标: {self.checkpoint_monitor} | 自适应AMP: {self.use_amp}")
+        logger.info(f"🚀 [Engine] Training engine initialization successful. Device: {self.device} | Monitoring metrics: {self.checkpoint_monitor} | Adaptive AMP: {self.use_amp}")
 
 
     def _validate_config(self, config: Dict[str, Any]):
-        """配置强制检查器：在训练启动前阻断错误配置"""
+        """Check if the configuration file contains required fields; if any are missing, an error will be reported."""
         required_keys = {
             'train': ['epochs'],
             'logging': ['save_dir']
@@ -76,38 +93,38 @@ class TrainerEngine:
 
         for section, keys in required_keys.items():
             if section not in config:
-                raise ValueError(f"🚨 配置文件缺失一级节点: [{section}]")
+                raise ValueError(f"🚨 The configuration file is missing a first-level node: [{section}]")
 
             for key in keys:
                 if key not in config[section]:
-                    raise ValueError(f"🚨 配置文件缺失必要参数: [{section}.{key}]，请检查 YAML 文件。")
+                    raise ValueError(f"🚨 The configuration file is missing necessary parameters: [{section}.{key}], Please check the YAML file.")
 
-        logger.info("✅ [System] 配置项校验通过，一切就绪。")
+        logger.info("✅ [System] Configuration item verification passed, everything is ready.")
 
 
 
     def resume_training(self, checkpoint_path: str) -> int:
-        """⚙️ 工业级断点续传看门狗"""
+        """Resume training from the checkpoint; if it fails, start from scratch."""
         from pathlib import Path
         ckpt_file = Path(checkpoint_path)
 
         if not ckpt_file.exists():
-            logger.warning(f"⚠️ 未找到指定的断点文件: {checkpoint_path}，系统切回纯净初始化训练。")
+            logger.warning(f"⚠️ The breakpoint does not exist in {checkpoint_path}; reinitialize the training.")
             return 1
 
-        logger.info(f"🔄 [Engine] 正在深度解码断点快照资产: {ckpt_file.name} ...")
+        logger.info(f"🔄 [Engine] Loading checkpoint: {filename} ...")
         checkpoint = torch.load(ckpt_file, map_location=self.device)
 
         self.model.load_state_dict(checkpoint['state_dict'])
-        logger.info("   ├─ [Model] 神经网络张量权重加载完毕。")
+        logger.info("   ├─ [Model] The neural network tensor weights have been loaded.")
 
         if 'optimizer' in checkpoint and self.optimizer:
             self.optimizer.load_state_dict(checkpoint['optimizer'])
-            logger.info("   ├─ [Optimizer] 优化器一阶/二阶历史梯度动量接管成功。")
+            logger.info("   ├─ [Optimizer] The optimizer status (momentum, gradient squared, etc.) has been restored.")
 
         if 'scheduler' in checkpoint and self.scheduler and checkpoint['scheduler'] is not None:
             self.scheduler.load_state_dict(checkpoint['scheduler'])
-            logger.info("   ├─ [Scheduler] 学习率控制流状态机同步对齐。")
+            logger.info("   ├─ [Scheduler] The Scheduler status has been restored.")
 
         resume_epoch = checkpoint.get('epoch', 0) + 1
 
@@ -117,15 +134,16 @@ class TrainerEngine:
             if self.early_stop_enabled:
                 self.best_early_stop_score = hist_metrics.get(self.early_stop_monitor, self.best_early_stop_score)
 
-        logger.info(f"   └─ [Time] 锁定断层成功！本次训练将自适应从第 {resume_epoch} 轮无缝续传。")
+        logger.info(f"   └─ [Time] Continue training from the {resume_epoch}th round.")
         return resume_epoch
 
+
     def train_epoch(self, train_loader: DataLoader, epoch: int) -> float:
-        """运行单个 Epoch 的训练循环"""
+        """Training loop that runs a single epoch"""
         self.model.train()
         running_loss = 0.0
 
-        # 获取梯度累积步数
+        # Get gradient accumulation steps
         accum_steps = self.gradient_accumulation_steps
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{self.epochs} [Train]")
@@ -136,11 +154,11 @@ class TrainerEngine:
             else:
                 inputs, labels = batch_data[0].to(self.device), batch_data[1].to(self.device)
 
-            # 1. 前向传播
+            # 1. Forward propagation
             with autocast(enabled=self.use_amp):
                 outputs = self.model(inputs)
 
-            # 2. 损失计算
+            # 2. Loss Calculation
             with autocast(enabled=False):
                 outputs_f32 = outputs.float()
                 if outputs_f32.ndim > 1 and outputs_f32.size(-1) == 1:
@@ -149,15 +167,15 @@ class TrainerEngine:
                 loss_dict = self.criterion(outputs_f32, labels, model=self.model)
                 total_loss = loss_dict['total_loss']
 
-                # 关键：除以累积步数，使累积后的 loss 与正常 loss 量级一致
+                # NOTE: Divide by the cumulative number of steps to make the accumulated loss consistent with the normal loss magnitude.
                 total_loss = total_loss / accum_steps
 
-            # 3. 反向传播（不立即更新）
+            # 3. Backpropagation (not updated immediately)
             self.scaler.scale(total_loss).backward()
 
-            # 4. 每 accum_steps 步更新一次
+            # 4. Updated once every accum_steps
             if (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == len(train_loader):
-                # 梯度裁剪
+                # Gradient clipping
                 if self.grad_clip is not None:
                     self.scaler.unscale_(self.optimizer)
                     nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
@@ -166,9 +184,9 @@ class TrainerEngine:
                 self.scaler.update()
                 self.optimizer.zero_grad()
 
-            running_loss += total_loss.item() * accum_steps  # 恢复原始 loss
+            running_loss += total_loss.item() * accum_steps  # Recover the original loss
 
-            # 日志输出
+            # Log output
             log_interval = self.config.get('logging', {}).get('log_interval', 10)
             if batch_idx % log_interval == 0:
                 pbar.set_postfix({
@@ -182,7 +200,7 @@ class TrainerEngine:
 
     @torch.no_grad()
     def evaluate(self, val_loader: DataLoader, epoch: int) -> Dict[str, float]:
-        """运行单轮验证，并交由标准学术评估器计算全套对账指标"""
+        """Evaluate the model on the validation set and return the various metrics."""
         self.model.eval()
         running_loss = 0.0
 
@@ -229,7 +247,7 @@ class TrainerEngine:
                     break
 
         if eval_fn is None:
-            raise AttributeError("🚨 架构对账失败：你的 Evaluator 类里缺乏标准的评估函数路径！")
+            raise AttributeError("🚨 The Evaluator class lacks a standard evaluation function path!")
 
         metrics = eval_fn(
             y_true=np.array(all_trues),
@@ -243,15 +261,15 @@ class TrainerEngine:
 
 
     def fit(self, train_loader: DataLoader, val_loader: DataLoader, start_epoch: int = 1):
-        """主训练闭环控制体流"""
-        logger.info(f"⏱️  [System] 启动全面数据自适应迭代管道。起点 Epoch: {start_epoch}")
+        """Main training loop"""
+        logger.info(f"⏱️  [System] Training begins, starting epoch: {start_epoch}")
         checkpoint_cfg = self.config.get('train', {}).get('checkpoint', {})
 
         for epoch in range(start_epoch, self.epochs + 1):
             train_loss = self.train_epoch(train_loader, epoch)
             raw_metrics = self.evaluate(val_loader, epoch)
 
-            # 全生态小写洗牌对账
+            # Convert indicator names to lowercase
             metrics = {k.lower(): v for k, v in raw_metrics.items()}
 
             val_loss = raw_metrics.get('val_loss', metrics.get('val_loss', 0.0))
@@ -278,14 +296,14 @@ class TrainerEngine:
             else:
                 logger.info(f"📊 [Epoch {epoch}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}")
 
-            # Early Stopping 拦截机制
+            # Early cessation method
             if self.early_stop_enabled:
                 if self.early_stop_monitor in metrics:
                     score = metrics[self.early_stop_monitor]
                 elif self.early_stop_monitor == 'val_loss':
                     score = val_loss
                 else:
-                    logger.warning(f"监控指标 '{self.early_stop_monitor}' 不存在，使用 val_loss 替代")
+                    logger.warning(f"The monitoring metric '{self.early_stop_monitor}' does not exist; use val_loss instead.")
                     score = val_loss
 
                 if self._is_improved(score, self.best_early_stop_score, self.early_stop_mode):
@@ -295,10 +313,10 @@ class TrainerEngine:
                     self.early_stop_counter += 1
 
                 if self.early_stop_counter >= self.patience:
-                    logger.warning(f"🛑 [Early Stop] 监控指标 '{self.early_stop_monitor}' 连续 {self.early_stop_counter} 轮未见改善，触发防过拟合拦截！")
+                    logger.warning(f"🛑 The [Early Stop] monitoring metric '{self.early_stop_monitor}' has shown no improvement for several consecutive {self.early_stop_counter} rounds, triggering an overfitting prevention interception!")
                     break
 
-            # Checkpoint 模型资产落盘机制
+            # Save model checkpoints
             ckpt_score = metrics.get(self.checkpoint_monitor, 0.0)
 
             if self._is_improved(ckpt_score, self.best_checkpoint_score, self.checkpoint_mode):
@@ -309,7 +327,7 @@ class TrainerEngine:
             if checkpoint_cfg.get('save_last', True) and epoch == self.epochs:
                 self._save_checkpoint(epoch, val_loss, metrics, is_best=False)
 
-            # 清理显存碎片
+            # Clean up video memory fragmentation
             torch.cuda.empty_cache()
 
 
@@ -322,25 +340,24 @@ class TrainerEngine:
 
 
     def _save_checkpoint(self, epoch: int, val_loss: float, metrics: Dict[str, Any], is_best: bool):
-        """精准控制模型资产落地，全生态物理路径绝对寻址"""
+        """Save model checkpoints to the configured directory."""
         from pathlib import Path
         import re
         import shutil
 
-        # 💎【核心修复】：这里的 config['logging']['save_dir'] 是在 main.py 中被注入的绝对路径
         save_dir = Path(self.config.get('logging', {}).get('save_dir', './results/model_outputs'))
         save_dir.mkdir(parents=True, exist_ok=True)
 
         checkpoint_cfg = self.config.get('train', {}).get('checkpoint', {})
         top_k = checkpoint_cfg.get('save_top_k', 3)
 
-        # 💎【关键对账】：确保这里拿到的 base_filename 是已经在 main.py 里被清洗对齐过的
+        # NOTE：Make sure that the base_filename obtained here has already been aligned.
         base_name = self.evaluator.base_filename
+
 
         def extract_score(path: Path):
             import re
-            # 修复：使用 re.escape 防止特殊字符
-            # 兼容处理：正则匹配文件名中的指标数值
+            # NOTE：Use `re.escape` to prevent special characters, and use regular expressions to match index values ​​in filenames.
             match = re.search(rf"{re.escape(self.checkpoint_monitor)}(-?\d+\.\d+)", path.name.lower())
             return float(match.group(1)) if match else (-float('inf') if self.checkpoint_mode == 'max' else float('inf'))
 
@@ -355,23 +372,22 @@ class TrainerEngine:
 
         if is_best:
             current_score = metrics.get(self.checkpoint_monitor, 0.0)
-            # 💎【物理锁定】：直接拼成绝对路径
+            # NOTE：Directly construct an absolute path
             pt_name = f"{base_name}_fold{self.config.get('current_fold', '1')}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
             target_path = save_dir / pt_name
 
             torch.save(state, target_path)
-            logger.info(f"🏆 [Checkpoint] 权重已物理隔离归档 ──> {target_path.resolve()}")
+            logger.info(f"🏆 [Checkpoint] The weights have been saved to ──> {target_path.resolve()}")
 
-            # Top-K 空间清理逻辑保持不变
             all_best_pts = list(save_dir.glob(f"{base_name}_fold{self.config.get('current_fold', '1')}_best_epoch*.pt"))
             if len(all_best_pts) > top_k:
                 reverse_flag = True if self.checkpoint_mode == 'max' else False
                 all_best_pts.sort(key=extract_score, reverse=reverse_flag)
                 for low_pt in all_best_pts[top_k:]:
                     low_pt.unlink()
-                    logger.warning(f"🗑️  [Checkpoint] 空间防爆仓：移出旧资产 ──> {low_pt.name}")
+                    logger.warning(f"🗑️  [Checkpoint] Delete old model files and keep only the K most recent ones ──> {low_pt.name}")
 
-            # 刷新最佳软链接
+            # NOTE: Refresh Best Soft Links
             all_best_pts = list(save_dir.glob(f"{base_name}_fold{self.config.get('current_fold', '1')}_best_epoch*.pt"))
             if all_best_pts:
                 all_best_pts.sort(key=extract_score, reverse=(self.checkpoint_mode == 'max'))
@@ -383,4 +399,4 @@ class TrainerEngine:
             pt_name = f"{base_name}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
             target_path = save_dir / pt_name
             torch.save(state, target_path)
-            logger.info(f"💾 [Checkpoint] 定期模型快照归档 ──> {target_path.resolve()}")
+            logger.info(f"💾 [Checkpoint] The model snapshot has been saved to ──> {target_path.resolve()}")

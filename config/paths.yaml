@@ -1,0 +1,19 @@
+# config/paths.yaml
+roots:
+  datasets: "datasets"
+  results: "results"
+  config: "config"
+
+# 定义路径寻址规则
+resolvers:
+  # 利用“yaml文件 + Python 格式化逻辑”，实现一个小型 DSL
+  # 效果：这里的 {dataset} 会在代码中被替换为实际的数据集名称
+  dataset: "{datasets}/{dataset}"
+
+  train_logs:   "{results}/{dataset}/train_logs"
+  plots:        "{results}/{dataset}/plots"
+  model_outputs: "{results}/{dataset}/model_outputs"
+
+  model_config: "{config}/models/{name}.yaml"
+  basic_config: "{config}/basic.yaml"
+  dataset_config: "{config}/dataset_config.yaml"
