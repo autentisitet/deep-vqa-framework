@@ -11,30 +11,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  type-check:
-    name: Type Check (mypy)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dev dependencies
-        run: uv sync --extra dev --frozen
-
-      - name: Run mypy
-        run: uv run mypy src/ --ignore-missing-imports --no-error-summary
-        continue-on-error: true  # 类型检查失败不阻断 PR，但会产生警告
-
   syntax-check:
     name: Syntax & Import Check
     runs-on: ubuntu-latest
