@@ -23,7 +23,7 @@ This framework provides an end-to-end solution for training, evaluating, and dep
 - [Model Architecture](#model-architecture)
 - [Training Pipeline](#training-pipeline)
 - [Evaluation & Metrics](#evaluation-metrics)
-- [Project Structure](#project-structure)
+- [Project Main Structure](#project-main-structure)
 - [System Overview](#system-overview)
 - [Configuration Guide](#configuration-guide)
 - [Troubleshooting](#troubleshooting)
@@ -290,98 +290,45 @@ Output location: `results/{dataset}/plots/`
 
 ---
 
-## Project Structure <a id="project-structure"></a>
+## Project Main Structure <a id="project-main-structure"></a>
 
 ```text
 deep-vqa-framework/
-├── Makefile                        # Automation commands (training, clean, test)
-├── README.md                       # Project documentation (this file)
-├── DISCLAIMER.md                       # Legal liability, data usage, and resource risks
-├── pyproject.toml                  # Python project configuration (uv/pip)
-├── uv.lock                         # Lock file for dependency versions
+├── Makefile                # Automation & workflow commands
+├── README.md               # Project overview
+├── DISCLAIMER.md           # Legal liability & resource usage policy
+├── pyproject.toml          # Dependency & environment management (uv)
 │
-├── config/
-│   ├── basic.yaml                  # Global defaults (system, training)
-│   ├── dataset_config.yaml         # Dataset-specific settings & metadata
-│   ├── paths.yaml                  # Path routing & symbolic link rules
-│   └── models/                     # Model-specific configurations
-│       ├── resnet_iqa.yaml         # ResNet50 for Image QA
-│       ├── resnet_vqa.yaml         # ResNet50 for Video QA
-│       └── timeswin_vqa.yaml       # TimeSwin transformer for Video QA
+├── config/                 # YAML configuration modules
+│   ├── basic.yaml          # System & training global defaults
+│   ├── dataset_config.yaml # Dataset-specific metadata
+│   └── models/             # Model architecture parameters
 │
-├── datasets/
-│   ├── KoNViD-1k/                  # KoNViD-1k dataset (videos + metadata)
-│   │   ├── KoNViD-1k_metadata/     # MOS scores and video annotations
-│   │   └── KoNViD-1k_videos/       # Video files (directory only)
-│   ├── T2VQA-DB/                   # Text-to-Video QA dataset
-│   │   ├── T2VQA-DB/               # Video content (directory only)
-│   │   └── info.txt                # Dataset metadata
-│   ├── TID2013/                    # TID2013 image quality dataset
-│   │   ├── distorted_images/       # Distorted test images (directory only)
-│   │   ├── reference_images/       # Reference originals (directory only)
-│   │   ├── metrics_values/         # Objective metrics files
-│   │   ├── papers/                 # Dataset reference papers
-│   │   ├── mos.txt                 # Mean Opinion Scores
-│   │   ├── mos_std.txt             # MOS standard deviation
-│   │   ├── mos_with_names.txt      # MOS with image filenames
-│   │   └── readme                  # Dataset documentation
-│   ├── konvid-1k -> KoNViD-1k      # Symlink for case-insensitive access
-│   ├── t2vqa-db -> T2VQA-DB        # Symlink for case-insensitive access
-│   └── tid2013 -> TID2013          # Symlink for case-insensitive access
+├── datasets/               # Data storage & symlink routing
+│   ├── KoNViD-1k/          # Video quality dataset
+│   ├── T2VQA-DB/           # Text-to-Video QA dataset
+│   └── TID2013/            # Image quality dataset
 │
-├── docs/
-│   ├── pipeline.html                  # Interactive system architecture map
-│   ├── pipeline.png                   # Static architecture overview
-│   └── Cloud_Platform_Rental_Guide.md # Cloud setup instructions
+├── docs/                   # Interactive architecture & manuals
+│   ├── pipeline.html       # System execution & module flow
+│   └── Cloud_Platform_Rental_Guide.md
 │
-├── quarantine/                     # Isolated directory for testing/archiving
+├── results/                # Global outputs & logs
+│   ├── model_outputs/      # Training checkpoints
+│   ├── train_logs/         # Execution & performance history
+│   └── plots/              # Visualization (loss, residuals, etc.)
 │
-├── results/
-│   ├── scripts_logs/               # Script execution logs (directory)
-│   ├── model_outputs/              # Global model checkpoints (directory)
-│   ├── train_logs/                 # Global training history (directory)
-│   ├── plots/                      # Global visualization outputs
-│   │   └── *.png                   # Plot images (filenames only)
-│   ├── tid2013_integrity_report.txt  # Dataset validation report
-│   ├── TID2013/                    # Image dataset results (directory)
-│   ├── tid2013/                    # Symlink to TID2013 (legacy)
-│   ├── konvid-1k/                  # Video dataset results (directory)
-│   └── t2vqa-db/                   # T2VQA dataset results (directory)
+├── scripts/                # Infrastructure automation
+│   ├── manage_data.sh      # Download & data preparation
+│   ├── setup_env.sh        # Environment & system initialization
+│   └── *.sh                # Auxiliary maintenance & cleanup scripts
 │
-├── scripts/
-│   ├── archive_result.sh           # Archive old results to quarantine
-│   ├── cache_clean.sh              # Clear system cache files, etc
-│   ├── download_flag               # Flag file for download completion
-│   ├── manage_data.sh              # Dataset download & extraction
-│   ├── optimize_env.sh             # Network proxy configuration, etc
-│   ├── setup_links.sh              # Symlink creation
-│   ├── setup_env.sh                # Environment initialization
-│   └── system_check.sh             # GPU, CUDA, dependency validation, etc
-│
-├── src/
-│   ├── main.py                     # Entry point: training & evaluation
-│   ├── core/
-│   │   ├── engine.py               # Training/validation loop
-│   │   ├── evaluator.py            # Metrics computation (PLCC, SROCC)
-│   │   └── trainer.py              # Cross-validation pipeline
-│   ├── data/
-│   │   ├── data_eda.py             # Exploratory data analysis
-│   │   ├── metadata_loader_factory.py  # Factory for dataset parsers
-│   │   ├── metadata_loaders.py     # Dataset-specific metadata loaders
-│   │   ├── types.py                # Type definitions (enums, dataclasses)
-│   │   └── eda/
-│   │       ├── integrity.py        # File integrity check (missing/corrupted)
-│   │       ├── metrics_plotter.py  # Training curves, residuals, comparison
-│   │       ├── split.py            # Stratified K-Fold splitting
-│   │       └── statistics.py       # MOS distribution, resolution stats
-│   ├── models/
-│   │   ├── README.md               # Model architecture documentation
-│   │   └── iqavqa_net.py           # Unified IQA/VQA network
-│   └── utils/
-│       ├── config_loader.py        # YAML config loading & deep merging
-│       ├── file_loader.py          # Case-insensitive file path resolver
-│       ├── logging_utils.py        # Logging with CSV rotation
-│       └── path_manager.py         # Path routing with YAML templates
+└── src/                    # Core framework logic
+    ├── main.py             # Global execution entry point
+    ├── core/               # Training engine & evaluation pipeline
+    ├── data/               # Data loaders, EDA & integrity analysis
+    ├── models/             # Architecture definitions (IQAVQA-Net)
+    └── utils/              # Configuration, logging & path management
 ```
 
 ---
@@ -390,8 +337,8 @@ deep-vqa-framework/
 
 For a detailed look at the system architecture and execution flow, we provide two viewing options:
 
-[**Interactive Architecture Map**](docs/pipeline.html)
-[**Static Architecture Overview**](docs/pipeline.png)
+- [**Interactive Architecture Map**](docs/pipeline.html)
+- [**Static Architecture Overview**](docs/pipeline.png)
 
 ---
 
