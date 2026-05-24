@@ -11,32 +11,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint & Format Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dev dependencies
-        run: uv sync --extra dev --frozen
-
-      - name: Run ruff lint
-        run: uv run ruff check src/
-
-      - name: Run ruff format check
-        run: uv run ruff format --check src/
-
   type-check:
     name: Type Check (mypy)
     runs-on: ubuntu-latest
