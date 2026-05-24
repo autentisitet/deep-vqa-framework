@@ -85,7 +85,7 @@ def load_system_config(model_cfg_name: str, dataset_name: str) -> dict:
 
     if not model_path.exists():
         logger.warning(f"⚠️ Model config [{model_path}] not found. Falling back to resnet_iqa.yaml")
-        model_path = config_dir / 'models/resnet_iqa.yaml
+        model_path = config_dir / 'models/resnet_iqa.yaml'
 
     model_config = safe_load_yaml(model_path, f"Model configuration file [{model_key}]")
     config = deep_update(config, model_config)
