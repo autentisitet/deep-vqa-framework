@@ -1,7 +1,5 @@
-import os
 import yaml
 from pathlib import Path
-from typing import Optional
 from loguru import logger
 
 
@@ -78,13 +76,10 @@ class PathManager:
                 final_path.mkdir(parents=True, exist_ok=True)
             except PermissionError as e:
                 logger.error(f"❌ 权限不足，无法创建目录: {final_path}")
-                # Help: 检查目录权限
-                pdb.set_trace()
-                raise
+                raise RuntimeError(f"Insufficient permission to create directory: {final_path}") from e
             except OSError as e:
                 logger.error(f"❌ 创建目录失败: {final_path}, 错误: {e}")
-                pdb.set_trace()
-                raise
+                raise RuntimeError(f"Failed to create directory: {final_path}") from e
 
         return final_path
 

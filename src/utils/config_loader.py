@@ -3,7 +3,6 @@ import yaml
 from pathlib import Path
 from loguru import logger
 from collections.abc import Mapping
-import pdb
 
 # Automatically scan config/models/*.yaml
 def discover_models(config_dir: Path) -> dict:
@@ -101,7 +100,6 @@ def load_system_config(model_cfg_name: str, dataset_name: str) -> dict:
         available = list(ds_all.keys())
         logger.error(f"❌ Dataset '{dataset_name}' not found in dataset_config.yaml")
         logger.info(f"   Available datasets: {available}")
-        debug_breakpoint()
         raise KeyError(f"Dataset settings for '{dataset_name}' missing. Available: {available}")
 
     dataset_info = ds_all_lowered[target_ds_key]

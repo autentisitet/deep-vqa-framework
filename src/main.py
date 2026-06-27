@@ -8,11 +8,8 @@ import cv2
 cv2.setNumThreads(0)  # or `cv2.setNumThreads(1)`
 
 import argparse
-import yaml
 from pathlib import Path
 from loguru import logger
-from typing import Dict, Any, Optional
-from collections.abc import Mapping
 
 from src.utils.logging_utils import log_prepare, time_it
 from src.data.data_eda import DataEDA
@@ -24,6 +21,11 @@ from src.core.trainer import TrainerExecutionPipeline
 from src.utils.config_loader import load_system_config
 import pdb
 
+
+def _maybe_breakpoint() -> None:
+    """Only enter pdb when debugging is explicitly enabled."""
+    if os.environ.get("DEBUG", "0") == "1":
+        pdb.set_trace()
 
 
 @time_it
@@ -39,7 +41,7 @@ def main():
     args.dataset = args.dataset.lower()
     args.model = args.model.lower()
 
-    config = load_system_config(args.config, args.dataset)
+    config = load_system_config(args.model, args.dataset)
     config['dataset_name'] = args.dataset
 
     logger.debug(f"[Main] Command line arguments: config={args.config}, model={args.model}, dataset={args.dataset}, smoke_test={args.smoke_test}")
@@ -73,8 +75,11 @@ def main():
         # Help: 在这里输入 'p dataset_name' 查看数据集名称
         # Help: 输入 'p data_dir' 查看当前尝试的路径
         # Help: 检查 PathManager 的根目录配置是否正确
-        pdb.set_trace()
-        pdb.set_trace()
+        _maybe_breakpoint()
+        return
+    except Exception:
+        logger.exception("[Main] Unexpected failure while resolving dataset paths.")
+        _maybe_breakpoint()
         return
 
 
@@ -115,11 +120,16 @@ def main():
     )
 
 
-    eda_engine.run_full_eda(skip_integrity=True)
+    try:
+        eda_engine.run_full_eda(skip_integrity=True)
+    except Exception:
+        logger.exception("[Main] EDA execution crashed before training could start.")
+        _maybe_breakpoint()
+        return
     if eda_engine.df is None or 'split' not in eda_engine.df.columns:
         logger.error("[Main] EDA pipeline failure.")
         # Help: 检查EDA内部状态，输入 'p eda_engine.df' 查看数据框
-        pdb.set_trace()
+        _maybe_breakpoint()
         return
 
     if args.smoke_test and eda_engine.df is not None:
@@ -133,7 +143,7 @@ def main():
     if 'split' not in eda_engine.df.columns:
         logger.error("[Main] Critical error: Data EDA did not correctly split the split column, making it impossible to safely isolate the test set!")
         # Help: 查看数据框列名，输入 'p eda_engine.df.columns.tolist()'
-        pdb.set_trace()
+        _maybe_breakpoint()
         return
 
     resolver = CaseInsensitiveAssetResolver(
@@ -150,9 +160,9 @@ def main():
         path_test = resolver_debug.resolve(sample_test)
         logger.info(f"DEBUG: 测试解析成功! 物理路径为: {path_test}")
     except Exception as e:
-        logger.error(f"DEBUG: 测试解析失败! sample_id: {sample_test}, 错误: {e}")
+        logger.exception(f"DEBUG: 测试解析失败! sample_id: {sample_test}, 错误: {e}")
         # Help: 检查文件实际是否存在，输入 'import os; os.listdir(data_dir)[:10]'
-        pdb.set_trace()
+        _maybe_breakpoint()
     # ------------------
 
     # 5. Training assembly line
@@ -163,15 +173,15 @@ def main():
         resolver=resolver
     )
 
-    evaluator = Evaluator(task_type=task_type, model_name=model_name)
+    evaluator = Evaluator(task_type=task_type, model_name=model_name, logs_dir=train_logs_dir)
     evaluator.base_filename = base_fn
     try:
         pipeline.execute_cross_validation(evaluator=evaluator)  # FIXME
     except Exception as e:
-        logger.error(f"[Main] Training execution failed: {e}")
+        logger.exception(f"[Main] Training execution failed: {e}")
         # Help: 使用 'p e' 查看异常详情
         # Help: 输入 'p config.get("train", {})' 查看训练配置
-        pdb.set_trace()
+        _maybe_breakpoint()
         return
 
 

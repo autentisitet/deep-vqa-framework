@@ -225,6 +225,8 @@ class TrainerExecutionPipeline:
         logger.info(f"🧱 [Pipeline] Start with {n_splits} fold cross-validation...")
 
         clean_df = self.eda_df.copy()
+        if clean_df.empty:
+            raise ValueError("EDA dataframe is empty; training cannot start.")
 
         # Outlier filtering
         if 'is_outlier' in clean_df.columns:
@@ -240,6 +242,13 @@ class TrainerExecutionPipeline:
         else:
             active_df = clean_df
             logger.warning("⚠️ The 'split' column was not detected, indicating a risk of data leakage.")
+
+        if active_df.empty:
+            raise ValueError("No train/val samples available after split isolation.")
+        if len(active_df) < n_splits:
+            raise ValueError(
+                f"Insufficient samples for {n_splits}-fold cross-validation: only {len(active_df)} train/val samples available."
+            )
 
         original_base_filename = getattr(evaluator, 'base_filename', 'model')
 
@@ -299,7 +308,11 @@ class TrainerExecutionPipeline:
                 device=self.device
             )
 
-            engine.fit(train_loader, val_loader)
+            try:
+                engine.fit(train_loader, val_loader)
+            except Exception as e:
+                logger.exception(f"[Fold {current_fold}] Training failed.")
+                raise RuntimeError(f"Fold {current_fold} training failed.") from e
             logger.info(f"🏁 [Fold {current_fold}] Completed")
 
             # Variables are automatically garbage collected when the function ends, and do not necessarily need to be manually deleted.
@@ -333,7 +346,7 @@ class TrainerExecutionPipeline:
         model = None
 
         try:
-            model = IQAVQANet(config=self.config).to(self.device)
+            model = IQAVQANet(config=config_to_use).to(self.device)
             save_dir = Path(self.config.get('logging', {}).get('save_dir', './results/model_outputs'))
             best_model_path = save_dir / f"{base_filename}_fold{n_splits}_best.pt"
 
@@ -359,10 +372,16 @@ class TrainerExecutionPipeline:
                     y_true_list.append(target.cpu())
                     y_pred_list.append(output.cpu())
 
+            if not y_true_list or not y_pred_list:
+                raise RuntimeError("Test set evaluation produced no batches.")
+
             y_true = torch.cat(y_true_list).numpy()
             y_pred = torch.cat(y_pred_list).numpy()
 
             evaluator.evaluate(y_true, y_pred)
+        except Exception as e:
+            logger.exception("[Pipeline] Test set evaluation failed.")
+            raise RuntimeError("Test set evaluation failed.") from e
 
         finally:
             # Clean up the model and video memory

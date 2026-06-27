@@ -112,7 +112,7 @@ class TrainerEngine:
             logger.warning(f"⚠️ The breakpoint does not exist in {checkpoint_path}; reinitialize the training.")
             return 1
 
-        logger.info(f"🔄 [Engine] Loading checkpoint: {filename} ...")
+        logger.info(f"🔄 [Engine] Loading checkpoint: {ckpt_file} ...")
         checkpoint = torch.load(ckpt_file, map_location=self.device)
 
         self.model.load_state_dict(checkpoint['state_dict'])
@@ -146,6 +146,7 @@ class TrainerEngine:
         # Get gradient accumulation steps
         accum_steps = self.gradient_accumulation_steps
 
+        self.optimizer.zero_grad(set_to_none=True)
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{self.epochs} [Train]")
         for batch_idx, batch_data in enumerate(pbar):
             if isinstance(batch_data, dict):
@@ -171,18 +172,25 @@ class TrainerEngine:
                 total_loss = total_loss / accum_steps
 
             # 3. Backpropagation (not updated immediately)
-            self.scaler.scale(total_loss).backward()
+            if self.scaler is not None:
+                self.scaler.scale(total_loss).backward()
+            else:
+                total_loss.backward()
 
             # 4. Updated once every accum_steps
             if (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == len(train_loader):
                 # Gradient clipping
                 if self.grad_clip is not None:
-                    self.scaler.unscale_(self.optimizer)
+                    if self.scaler is not None:
+                        self.scaler.unscale_(self.optimizer)
                     nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
 
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-                self.optimizer.zero_grad()
+                if self.scaler is not None:
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    self.optimizer.step()
+                self.optimizer.zero_grad(set_to_none=True)
 
             running_loss += total_loss.item() * accum_steps  # Recover the original loss
 
@@ -373,13 +381,13 @@ class TrainerEngine:
         if is_best:
             current_score = metrics.get(self.checkpoint_monitor, 0.0)
             # NOTE：Directly construct an absolute path
-            pt_name = f"{base_name}_fold{self.config.get('current_fold', '1')}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
+            pt_name = f"{base_name}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
             target_path = save_dir / pt_name
 
             torch.save(state, target_path)
             logger.info(f"🏆 [Checkpoint] The weights have been saved to ──> {target_path.resolve()}")
 
-            all_best_pts = list(save_dir.glob(f"{base_name}_fold{self.config.get('current_fold', '1')}_best_epoch*.pt"))
+            all_best_pts = list(save_dir.glob(f"{base_name}_best_epoch*.pt"))
             if len(all_best_pts) > top_k:
                 reverse_flag = True if self.checkpoint_mode == 'max' else False
                 all_best_pts.sort(key=extract_score, reverse=reverse_flag)
@@ -388,14 +396,15 @@ class TrainerEngine:
                     logger.warning(f"🗑️  [Checkpoint] Delete old model files and keep only the K most recent ones ──> {low_pt.name}")
 
             # NOTE: Refresh Best Soft Links
-            all_best_pts = list(save_dir.glob(f"{base_name}_fold{self.config.get('current_fold', '1')}_best_epoch*.pt"))
+            all_best_pts = list(save_dir.glob(f"{base_name}_best_epoch*.pt"))
             if all_best_pts:
                 all_best_pts.sort(key=extract_score, reverse=(self.checkpoint_mode == 'max'))
                 best_of_best = all_best_pts[0]
-                standard_best_path = save_dir / f"{base_name}_fold{self.config.get('current_fold', '1')}_best.pt"
+                standard_best_path = save_dir / f"{base_name}_best.pt"
                 shutil.copy(best_of_best, standard_best_path)
 
         else:
+            current_score = metrics.get(self.checkpoint_monitor, 0.0)
             pt_name = f"{base_name}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
             target_path = save_dir / pt_name
             torch.save(state, target_path)

@@ -14,13 +14,14 @@ class Evaluator:
     """
     _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
-    def __init__(self, task_type: str = "iqa", model_name: str = "resnet50", version: str = "v1"):
+    def __init__(self, task_type: str = "iqa", model_name: str = "resnet50", version: str = "v1",
+                 logs_dir: Optional[Union[str, Path]] = None):
         self.task_type = task_type
         self.model_name = model_name
         self.version = version
         self.current_date = time.strftime("%Y%m%d")
 
-        self.logs_dir = self._PROJECT_ROOT / "results" / "train_logs"
+        self.logs_dir = Path(logs_dir) if logs_dir is not None else self._PROJECT_ROOT / "results" / "train_logs"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
         self._base_filename = f"{self.current_date}_{task_type}_{model_name}_{version}"
