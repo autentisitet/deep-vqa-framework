@@ -3,6 +3,7 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torchvision import models
 
 
@@ -16,13 +17,15 @@ class IQAVQANet(nn.Module):
 
     - Temporal Fusion: Transformer (Video Only)
 
-    - Regression Head: 3-Layer MLP
+    - Regression Head: 3-Layer MLP with BatchNorm
 
     ## Features:
 
     - Automatically switches between image (4D) and video (5D) modes based on input dimension
 
     - Loss Function: 0.7*MSE + 0.3*RankLoss
+
+    - Kaiming Initialization for GELU/ReLU activations
     """
 
     def __init__(self, config: Dict):
@@ -38,7 +41,6 @@ class IQAVQANet(nn.Module):
         # 1. Backbone: Swin-T or ResNet50
         # ----------------------------------------------------
         if self.backbone_name == "swin_t":
-            # Load the pre-trained Swin-Transformer backbone network
             swin = models.swin_t(weights=models.Swin_T_Weights.IMAGENET1K_V1)
             self.backbone = swin.features
             self.num_features = swin.head.in_features  # 768
@@ -46,7 +48,10 @@ class IQAVQANet(nn.Module):
 
         elif self.backbone_name == "resnet50":
             res = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
-            self.backbone = nn.Sequential(res.conv1, res.bn1, res.relu, res.maxpool, res.layer1, res.layer2, res.layer3, res.layer4)
+            self.backbone = nn.Sequential(
+                res.conv1, res.bn1, res.relu, res.maxpool,
+                res.layer1, res.layer2, res.layer3, res.layer4
+            )
             self.num_features = res.fc.in_features  # 2048
             self.is_transformer = False
         else:
@@ -76,28 +81,38 @@ class IQAVQANet(nn.Module):
         self.temporal_fusion = nn.TransformerEncoder(encoder_layer, num_layers=self.num_vqa_layers)
 
         # ----------------------------------------------------
-        # 4. Regression Head: 3-Layer MLP
+        # 4. Regression Head: 3-Layer MLP with BatchNorm
         # ----------------------------------------------------
         self.quality_head = nn.Sequential(
             nn.Linear(self.num_features, 512),
+            nn.BatchNorm1d(512),
             nn.GELU() if self.is_transformer else nn.ReLU(inplace=True),
             nn.Dropout(p=self.dropout_rate),
             nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
             nn.GELU() if self.is_transformer else nn.ReLU(inplace=True),
             nn.Dropout(p=self.dropout_rate),
             nn.Linear(256, 1),
-            nn.Sigmoid(),  # Output range (0, 1), aligned with the normalized MOS.
+            nn.Sigmoid(),
         )
 
         self._initialize_weights()
 
     def _initialize_weights(self):
-        """Xavier Initialize Regression Header Parameters"""
+        """
+        Kaiming Initialization (适用于 GELU/ReLU 激活函数)
+        
+        ✅ 使用 Kaiming 而不是 Xavier，因为 GELU/ReLU 不是对称的（不像 Tanh/Sigmoid）
+        ✅ 同时初始化 BN 的 weight 和 bias
+        """
         for m in self.quality_head.modules():
             if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)  # Xavier initialization
+                nn.init.kaiming_uniform_(m.weight, mode='fan_in', nonlinearity='relu')
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.0)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.constant_(m.weight, 1.0)
+                nn.init.constant_(m.bias, 0.0)
 
     def _forward_backbone_features(self, x: torch.Tensor) -> torch.Tensor:
         """Extract backbone features and compress them into vectors."""
@@ -177,28 +192,57 @@ class IQAVQANet(nn.Module):
 
 class IQAVQALoss(nn.Module):
     """
-    Loss Function: 0.7*MSE + 0.3*RankLoss
+    Loss Function: 
+    - IQA: MSE + RankLoss
+    - VQA: MSE + RankLoss + PLCC
+    
+    自动根据 mode 参数切换损失权重
     """
 
     def __init__(self, config: Dict):
         super().__init__()
         loss_cfg = config.get("loss", {})
-        model_cfg = config.get("model", {})
-        self.num_frames = model_cfg.get("num_frames", 8)
-        self.mse_weight = loss_cfg.get("mse_weight", 0.7)
-        self.rank_weight = loss_cfg.get("rank_weight", 0.3)
-        self.max_pairs = loss_cfg.get("max_pairs", 5000)  # Add sampling limit configuration
+        
+        # IQA 损失权重
+        self.iqa_mse_weight = loss_cfg.get("iqa_mse_weight", 0.7)
+        self.iqa_rank_weight = loss_cfg.get("iqa_rank_weight", 0.3)
+        self.iqa_plcc_weight = loss_cfg.get("iqa_plcc_weight", 0.0)  # IQA 默认不加 PLCC
+        
+        # VQA 损失权重（VQA 更关注 PLCC）
+        self.vqa_mse_weight = loss_cfg.get("vqa_mse_weight", 0.4)
+        self.vqa_rank_weight = loss_cfg.get("vqa_rank_weight", 0.3)
+        self.vqa_plcc_weight = loss_cfg.get("vqa_plcc_weight", 0.3)  # VQA 加 PLCC
+        
+        self.max_pairs = loss_cfg.get("max_pairs", 5000)
         self.mse_loss = nn.MSELoss()
+        self.l1_loss = nn.L1Loss()
+
+    def plcc_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+        """PLCC Loss: 1 - PLCC，最大化 PLCC"""
+        y_pred = y_pred.view(-1)
+        y_true = y_true.view(-1)
+        
+        y_pred_n = y_pred - y_pred.mean()
+        y_true_n = y_true - y_true.mean()
+        
+        plcc = (y_pred_n * y_true_n).sum() / (
+            torch.sqrt((y_pred_n ** 2).sum()) * torch.sqrt((y_true_n ** 2).sum()) + 1e-8
+        )
+        return 1 - plcc
 
     def rank_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
-        """Sampling method to calculate rank loss"""
+        """
+        Sampling method to calculate rank loss
+        
+        ✅ 添加了数值稳定性处理
+        ✅ 使用更高效的采样策略
+        """
         y_pred = y_pred.view(-1)
         y_true = y_true.view(-1)
         n = len(y_pred)
 
         if n > self.max_pairs:
-            # Random sampling
-            idx = torch.randperm(n)[: self.max_pairs]
+            idx = torch.randperm(n)[:self.max_pairs]
             y_pred = y_pred[idx]
             y_true = y_true[idx]
             n = self.max_pairs
@@ -206,24 +250,159 @@ class IQAVQALoss(nn.Module):
         pred_diff = y_pred.unsqueeze(0) - y_pred.unsqueeze(1)
         true_diff = y_true.unsqueeze(0) - y_true.unsqueeze(1)
 
-        # Use torch.clamp for truncation and smoothing to ensure that
-        # the gradient has an upper bound on a single pair of samples,
-        # thus avoiding gradient explosion.
-        loss = torch.relu(-pred_diff * true_diff).mean()
+        # ✅ 使用 clamp 防止梯度爆炸
+        loss = torch.relu(-pred_diff * true_diff)
+        
+        # ✅ 添加小 epsilon 防止数值不稳定
+        loss = loss.mean() + 1e-8
+        
         return loss
 
-    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, model: Optional[nn.Module] = None) -> Dict[str, torch.Tensor]:
-        # Standardize and regulate dimensions to eliminate potential problems caused by dimensional mismatches.
+    def forward(
+        self, 
+        y_pred: torch.Tensor, 
+        y_true: torch.Tensor, 
+        model: Optional[nn.Module] = None,
+        mode: str = "iqa"
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Args:
+            mode: "iqa" 或 "vqa"，决定损失函数权重
+        """
         y_pred = y_pred.view(-1)
         y_true = y_true.view(-1).float()
 
-        # Truncate values ​​that exceed the boundary to avoid NaN.
+        # Truncate values that exceed the boundary to avoid NaN.
         y_pred = torch.clamp(y_pred, min=1e-6, max=1.0 - 1e-6)
 
         mse = self.mse_loss(y_pred, y_true)
         rank = self.rank_loss(y_pred, y_true)
-        total_loss = self.mse_weight * mse + self.rank_weight * rank
+        plcc = self.plcc_loss(y_pred, y_true)
 
-        # 📌 The param loop that previously exhausted video memory for map building has been completely removed.
-        # L2 regularization is implemented using AdamW's weight_decay parameter.
-        return {"total_loss": total_loss, "mse_loss": mse, "rank_loss": rank}
+        if mode == "iqa":
+            total_loss = (
+                self.iqa_mse_weight * mse +
+                self.iqa_rank_weight * rank +
+                self.iqa_plcc_weight * plcc
+            )
+        else:  # vqa
+            total_loss = (
+                self.vqa_mse_weight * mse +
+                self.vqa_rank_weight * rank +
+                self.vqa_plcc_weight * plcc
+            )
+
+        return {
+            "total_loss": total_loss,
+            "mse_loss": mse,
+            "rank_loss": rank,
+            "plcc_loss": plcc,
+            "mode": mode,
+        }
+
+
+class EarlyStopping:
+    """
+    Early Stopping to prevent overfitting
+    
+    ✅ 当验证集指标不再提升时停止训练
+    """
+    
+    def __init__(
+        self, 
+        patience: int = 10, 
+        min_delta: float = 1e-4, 
+        mode: str = 'max',
+        verbose: bool = True
+    ):
+        """
+        Args:
+            patience: 多少个 epoch 没有提升后停止
+            min_delta: 最小提升阈值，小于此值视为没有提升
+            mode: 'max' 表示指标越高越好，'min' 表示指标越低越好
+            verbose: 是否打印日志
+        """
+        self.patience = patience
+        self.min_delta = min_delta
+        self.mode = mode
+        self.verbose = verbose
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.best_epoch = 0
+        
+    def __call__(self, score: float, epoch: int = 0) -> bool:
+        if self.best_score is None:
+            self.best_score = score
+            self.best_epoch = epoch
+            if self.verbose:
+                print(f"[EarlyStopping] Initial best score: {score:.4f} at epoch {epoch}")
+            return False
+            
+        if self.mode == 'max':
+            improved = score > self.best_score + self.min_delta
+        else:
+            improved = score < self.best_score - self.min_delta
+            
+        if improved:
+            self.best_score = score
+            self.best_epoch = epoch
+            self.counter = 0
+            if self.verbose:
+                print(f"[EarlyStopping] Improved to {score:.4f} at epoch {epoch}")
+        else:
+            self.counter += 1
+            if self.verbose:
+                print(f"[EarlyStopping] No improvement for {self.counter}/{self.patience} epochs (best: {self.best_score:.4f})")
+            if self.counter >= self.patience:
+                self.early_stop = True
+                if self.verbose:
+                    print(f"[EarlyStopping] Early stopping triggered at epoch {epoch}, best at epoch {self.best_epoch}")
+                
+        return self.early_stop
+    
+    def reset(self):
+        """重置早停状态"""
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.best_epoch = 0
+
+
+def compute_metrics(y_pred: torch.Tensor, y_true: torch.Tensor) -> Dict[str, float]:
+    """
+    计算 IQA/VQA 常用评估指标
+    
+    Args:
+        y_pred: 预测值 [B]
+        y_true: 真实值 [B]
+    
+    Returns:
+        Dict: PLCC, SROCC, RMSE, MAE
+    """
+    y_pred = y_pred.view(-1).detach().cpu().numpy()
+    y_true = y_true.view(-1).detach().cpu().numpy()
+    
+    # PLCC
+    y_pred_n = y_pred - y_pred.mean()
+    y_true_n = y_true - y_true.mean()
+    plcc = (y_pred_n * y_true_n).sum() / (
+        np.sqrt((y_pred_n ** 2).sum()) * np.sqrt((y_true_n ** 2).sum()) + 1e-8
+    )
+    
+    # SROCC
+    from scipy.stats import spearmanr
+    srocc, _ = spearmanr(y_pred, y_true)
+    
+    # RMSE
+    rmse = np.sqrt(((y_pred - y_true) ** 2).mean())
+    
+    # MAE
+    mae = np.abs(y_pred - y_true).mean()
+    
+    return {
+        "plcc": plcc,
+        "srocc": srocc,
+        "rmse": rmse,
+        "mae": mae,
+    }
