@@ -39,10 +39,13 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
         "frame_count": 0,
         "bad_frames": 0,
         "black_frames": 0,
+        "white_frames": 0,           # ✅ 新增：白帧计数
         "actual_frames": 0,
         "fps": 0,
         "resolution": (0, 0),
         "duration_sec": 0,
+        "frame_drops": False,        # ✅ 新增：是否有跳帧
+        "irregular_interval_ratio": 0.0,  # ✅ 新增：帧间隔异常比例
     }
 
     try:
@@ -66,6 +69,7 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
 
         prev_frame = None
         consecutive_fail = 0
+        timestamps = []              # ✅ 新增：记录时间戳用于跳帧检测
 
         for idx in sample_indices:
             try:
@@ -74,12 +78,27 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
                 diagnostics["actual_frames"] += 1
                 consecutive_fail = 0
 
-                # Check black frames
+                # ✅ 获取时间戳（毫秒）
+                try:
+                    timestamp = vr.get_frame_timestamp(idx)[0] * 1000  # 秒转毫秒
+                    timestamps.append(timestamp)
+                except:
+                    # 如果 decord 不支持 get_frame_timestamp，用帧索引估算
+                    timestamps.append(idx / diagnostics["fps"] * 1000)
+
+                # 转灰度图
                 gray = np.mean(frame, axis=2) if len(frame.shape) == 3 else frame
-                if np.mean(gray) < 8.0:
+                mean_gray = np.mean(gray)
+
+                # ✅ 检查黑帧
+                if mean_gray < 8.0:
                     diagnostics["black_frames"] += 1
 
-                # Check frame rate (compare with previous frame)
+                # ✅ 检查白帧（新增）
+                if mean_gray > 245.0:
+                    diagnostics["white_frames"] += 1
+
+                # 检查帧间差异（坏帧/卡顿检测）
                 if prev_frame is not None:
                     diff = np.mean(np.abs(gray - prev_frame))
                     if diff < 0.5:
@@ -92,6 +111,21 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
                 if consecutive_fail > 5:
                     return False, f"Continuous reads failed at frame {idx}", diagnostics
                 continue
+
+        # ✅ 跳帧检测：检查帧间隔是否均匀
+        if len(timestamps) > 2:
+            intervals = np.diff(timestamps)
+            mean_interval = np.mean(intervals)
+            std_interval = np.std(intervals)
+            
+            # 如果标准差 > 均值的 20%，说明帧间隔不均匀（可能有跳帧）
+            irregular_ratio = std_interval / (mean_interval + 1e-6)
+            diagnostics["irregular_interval_ratio"] = irregular_ratio
+            
+            # 如果有某个间隔超过平均间隔的 1.5 倍，说明可能有跳帧
+            max_interval = np.max(intervals)
+            if max_interval > mean_interval * 1.5:
+                diagnostics["frame_drops"] = True
 
         # Check the percentage of bad frames
         sample_count = max(1, len(sample_indices))
@@ -119,10 +153,13 @@ def check_video_integrity_fallback(path: Path, sample_interval: int = 30) -> Tup
         "frame_count": int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
         "bad_frames": 0,
         "black_frames": 0,
+        "white_frames": 0,           # ✅ 新增：白帧计数
         "actual_frames": 0,
         "fps": cap.get(cv2.CAP_PROP_FPS),
         "resolution": (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))),
         "duration_sec": 0,
+        "frame_drops": False,        # ✅ 新增：是否有跳帧
+        "irregular_interval_ratio": 0.0,  # ✅ 新增：帧间隔异常比例
     }
 
     if diagnostics["fps"] > 0:
@@ -136,6 +173,8 @@ def check_video_integrity_fallback(path: Path, sample_interval: int = 30) -> Tup
     frame_idx = 0
     prev_gray = None
     consecutive_fail = 0
+    timestamps = []                  # ✅ 新增：记录时间戳
+    prev_timestamp = 0
 
     while True:
         ret, frame = cap.read()
@@ -148,10 +187,22 @@ def check_video_integrity_fallback(path: Path, sample_interval: int = 30) -> Tup
         consecutive_fail = 0
         diagnostics["actual_frames"] += 1
 
+        # ✅ 获取时间戳
+        timestamp = cap.get(cv2.CAP_PROP_POS_MSEC)
+        if timestamp > 0:
+            timestamps.append(timestamp)
+
         if frame_idx % sample_interval == 0:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            if np.mean(gray) < 8.0:
+            mean_gray = np.mean(gray)
+
+            # ✅ 检查黑帧
+            if mean_gray < 8.0:
                 diagnostics["black_frames"] += 1
+
+            # ✅ 检查白帧（新增）
+            if mean_gray > 245.0:
+                diagnostics["white_frames"] += 1
 
             if prev_gray is not None:
                 diff = np.mean(cv2.absdiff(gray, prev_gray))
@@ -165,6 +216,19 @@ def check_video_integrity_fallback(path: Path, sample_interval: int = 30) -> Tup
             break
 
     cap.release()
+
+    # ✅ 跳帧检测：检查帧间隔是否均匀
+    if len(timestamps) > 2:
+        intervals = np.diff(timestamps)
+        mean_interval = np.mean(intervals)
+        std_interval = np.std(intervals)
+        
+        irregular_ratio = std_interval / (mean_interval + 1e-6)
+        diagnostics["irregular_interval_ratio"] = irregular_ratio
+        
+        max_interval = np.max(intervals)
+        if max_interval > mean_interval * 1.5:
+            diagnostics["frame_drops"] = True
 
     # Check frame count matching
     if abs(diagnostics["actual_frames"] - diagnostics["frame_count"]) > diagnostics["frame_count"] * 0.1:
@@ -202,6 +266,14 @@ def check_image_integrity(path: Path) -> Tuple[bool, Optional[str], Dict]:
         h, w = img.shape[:2]
         if h <= 0 or w <= 0:
             return False, f"Invalid size: {w}x{h}", {}
+
+        # ✅ 检查是否为全黑/全白图片
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        mean_gray = np.mean(gray)
+        if mean_gray < 8.0:
+            return False, "Image is almost entirely black", {}
+        if mean_gray > 245.0:
+            return False, "Image is almost entirely white", {}
 
         unique_colors = len(np.unique(img))
         if unique_colors < 2:
