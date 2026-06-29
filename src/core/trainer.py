@@ -329,7 +329,7 @@ class TrainerExecutionPipeline:
         model = None
 
         try:
-            model = IQAVQANet(config=self.config).to(self.device)
+            model = IQAVQANet(config=config_to_use).to(self.device)
             save_dir = Path(self.config.get("logging", {}).get("save_dir", "./results/model_outputs"))
             best_model_path = save_dir / f"{base_filename}_fold{n_splits}_best.pt"
 

@@ -69,7 +69,7 @@ class TrainerEngine:
         early_stop_cfg = train_cfg.get("early_stop", {})
         self.early_stop_enabled = early_stop_cfg.get("enabled", True)
         self.patience = early_stop_cfg.get("patience", 10)
-        self.early_stop_monitor = early_stop_cfg.get("monitor", "val_loss").lower()  # Unify the lowercase at the source
+        self.early_stop_monitor = early_stop_cfg.get("monitor", "val_srocc").lower()  # Unify the lowercase at the source
         self.early_stop_mode = early_stop_cfg.get("mode", "min")
 
         self.early_stop_counter = 0

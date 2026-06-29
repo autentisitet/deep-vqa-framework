@@ -124,7 +124,7 @@ class DataEDA:
             logger.error(f"❌ Dataset '{self.dataset_name}' not found in config")
             raise KeyError(f"Dataset '{self.dataset_name}' missing. Available: {available}")
 
-        return full_config[self.dataset_name]  # 注意：返回原始大小写的 key
+        return lowered_config[target_key] 
 
     # ==================== 一、Basic Analysis ====================
 
@@ -395,11 +395,21 @@ class DataEDA:
     # ==================== 四、质量分数预处理 ====================
 
     def normalize_scores(self) -> pd.DataFrame:
-        min_val = self.df["mos"].min()
-        max_val = self.df["mos"].max()
+        # 如果有 split 列，只用 train 集计算 min/max
+        if "split" in self.df.columns:
+            train_df = self.df[self.df["split"] == "train"]
+            min_val = train_df["mos"].min()
+            max_val = train_df["mos"].max()
+        else:
+            min_val = self.df["mos"].min()
+            max_val = self.df["mos"].max()
+            
         # 防零除防御
         denom = (max_val - min_val) if max_val != min_val else 1.0
         self.df["normalized_score"] = (self.df["mos"] - min_val) / denom
+
+        self.stats["mos_min"] = float(min_val)   # 加这两行
+        self.stats["mos_max"] = float(max_val)
         logger.info("  Score Processing -> Scale normalizes [0, 1] completed.")
         return self.df
 

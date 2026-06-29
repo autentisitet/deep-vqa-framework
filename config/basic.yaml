@@ -38,8 +38,8 @@ train:
   early_stop:
     enabled: true
     patience: 10
-    monitor: "val_srocc"    # 💎 修复：由 val_loss 改为 val_srocc。防止 Loss 虚假下降但指标死锁
-    mode: "max"             # 💎 修复：既然改成了监控 SROCC，模式必须从 "min" 切换为 "max"
+    monitor: "val_srocc"
+    mode: "max"             # 监控 SROCC，模式为 "max"
 
   checkpoint:
     save_best: true
@@ -47,7 +47,6 @@ train:
     monitor: "val_srocc"
     mode: "max"
     save_top_k: 3         # 硬盘空间有限（AutoDL只有20G），只保留最好的 3 个 Checkpoint
-
 
 
 

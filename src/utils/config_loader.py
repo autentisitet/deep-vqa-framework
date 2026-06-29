@@ -135,8 +135,12 @@ def load_system_config(model_cfg_name: str, dataset_name: str) -> dict:
         raise ValueError(f"Unknown model_key '{model_key}'. Did you mean one of {list(model_map.keys())}?")
 
 
-    target_model_file = model_map.get(model_key, "models/resnet_iqa.yaml")
+    if model_key not in model_map:
+        available = list(model_map.keys())
+        raise ValueError(f"❌ 未知模型: '{model_key}'. 可用模型: {available}")
+    target_model_file = model_map[model_key]
     model_path = config_dir / target_model_file
+
 
     if not model_path.exists():
         logger.warning(f"⚠️ Model config [{model_path}] not found. Falling back to resnet_iqa.yaml")

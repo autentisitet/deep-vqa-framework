@@ -1,31 +1,30 @@
 # config/models/timeswin_vqa.yaml
 task_type: "vqa"
-dataset_name: "KoNViD-1k"
 
 model:
-  name: "IQAVQANet"              # ← 修正：和代码一致
+  name: "IQAVQANet"
   backbone: "swin_t"
   freeze_backbone: false
   pretrained: true
-  num_frames: 8
+  num_frames: 16
   transformer_layers: 2
   dropout: 0.3
   input_size: 224
 
 preprocessing:
-  batch_size: 4                  # ← 修正：从 1 改为 4
+  batch_size: 8                  # ← 修正：从 1 改为 4
   num_workers: 4
-  k_fold: 5                      # ← 建议加上
+  k_fold: 5
 
 train:
   epochs: 30
-  lr: 0.0001
+  lr: 0.00005
   weight_decay: 0.0001
   grad_clip: 0.5
-  gradient_accumulation_steps: 2  # ← 建议加上（4 × 2 = 8）
+  gradient_accumulation_steps: 4  # ← 建议加上（4 × 2 = 8）
 
 loss:
-  vqa_mse_weight: 0.4            # ← 修正：VQA 用 vqa_* 前缀
+  vqa_mse_weight: 0.4
   vqa_rank_weight: 0.3
   vqa_plcc_weight: 0.3
   max_pairs: 5000
