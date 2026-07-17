@@ -28,6 +28,7 @@ This framework provides an end-to-end solution for training, evaluating, and dep
 - [Configuration Guide](#configuration-guide)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
+- [Contributors](#contributors)
 - [Acknowledgements](#acknowledgments)
 
 ---
@@ -432,10 +433,25 @@ If a `nohup`/background training run appears frozen with no new log lines and no
 
 ---
 
+## 👥 Contributors <a id="contributors"></a>
+
+| Name | Role | Contributions |
+| :--- | :--- | :--- |
+| **[@autentisitet](https://github.com/autentisitet)** | Project Lead / Core Developer | Framework architecture, training pipeline, inference engine, deployment API |
+| **[@yss0120](https://github.com/yss0120)** | Frontend Developer | Interactive frontend UI/UX (`index.html`), subjective blind rating system, quality passport visualization, data EDA pipeline |
+| **[@Zed-23](https://github.com/Zed-23)** | DevOps & QA Engineer | GitHub Actions CI configuration, shell script fixes, smoke testing, CUDA OOM debugging and memory optimization |
+| **[@bazhina-5566](https://github.com/bazhina-5566)** | Backend API Developer | FastAPI service (`deploy/api.py`), model checkpoint integration, inference API design |
+
+> [!NOTE]
+> We welcome contributions! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md) for guidelines.
+
+---
+
 ## 🙏 Acknowledgments <a id="acknowledgments"></a>
 
 - PyTorch team for deep learning framework
 - Decord developers for efficient video loading
+- FastAPI for the production-ready API framework
 - TID2013, KoNViD-1k, T2VQA-DB dataset providers
 
 ---
