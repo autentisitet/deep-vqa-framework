@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.9.2--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.4.3--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code style: ruff](https://img.shields.io/badge/ruff-⭐-purple)](https://github.com/astral-sh/ruff)
 
 **A Unified Deep Learning Framework for Image Quality Assessment (IQA) and Video Quality Assessment (VQA).**
@@ -18,65 +18,17 @@ This framework provides an end-to-end solution for training, evaluating, and dep
 
 ## Table of Contents
 
-- [System Requirements](#system-requirements)
 - [Architecture & Design Decisions](#architecture-decisions)
 - [Model Architecture](#model-architecture)
 - [Training Pipeline](#training-pipeline)
 - [Evaluation & Metrics](#evaluation-metrics)
+- [Deployment & Inference API](#deployment-api)
 - [Project Main Structure](#project-main-structure)
 - [System Overview](#system-overview)
 - [Configuration Guide](#configuration-guide)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 - [Acknowledgements](#acknowledgments)
-
----
-
-## System Requirements <a id="system-requirements"></a>
-
-### Hardware Requirements
-
-| Component | Minimum | Recommended |
-| ----------- | --------- | ------------- |
-| **GPU** | 8GB VRAM (IQA only) | 24GB+ VRAM (VQA training) |
-| **RAM** | 16GB | 32GB+ |
-| **Disk Space** | 50GB | 200GB+ (including datasets) |
-| **CPU** | 4 cores | 8+ cores |
-
-### Software Requirements
-
-| Component | Version | Notes |
-| ----------- | --------- | ------- |
-| **OS** | Linux (Ubuntu 20.04+) / Windows 10+ / macOS 12+ | Linux recommended for training |
-| **Python** | 3.10 - 3.12 | 3.12+ not fully tested |
-| **CUDA** | 11.8 / 12.1 | Required for GPU training |
-| **PyTorch** | 2.0+ | 2.5+ recommended for better AMP support |
-| **cuDNN** | 8.7+ | Included with PyTorch |
-
-### Storage Breakdown
-
-The framework expects datasets in the following structure:
-
-| Dataset | Size (Compressed) | Size (Extracted) |
-| --------- | ------------------- | ------------------- |
-| TID2013 | ~500MB | ~3GB |
-| KoNViD-1k | ~9GB | ~10GB |
-| T2VQA-DB | ~45GB | ~50GB+ |
-| **Total** | **~55GB** | **~63GB+** |
-
-### Additional Space
-
-| Item | Estimated Size |
-| ------ | ---------------- |
-| Python environment (uv/venv) | ~5GB |
-| Model checkpoints (5-fold) | ~10GB |
-| Training logs & plots | ~2GB |
-| **Grand Total** | **~80-100GB** |
-
-> [!NOTE]
-> - Use `uv` for faster installation and smaller dependency footprint
-> - Symbolic links (see below) do not consume additional disk space
-> - `quarantine/` directory may grow if files are isolated; run `scripts/cache_clean.sh` regularly
 
 ---
 
@@ -93,7 +45,7 @@ The framework implements a dimension-aware routing system that automatically swi
 | **Unified Model** | Single `IQAVQANet` handles both 4D and 5D inputs | Eliminates duplicate code, ensures consistent quality metrics |
 | **Flexible Backbones** | Swin-T / ResNet50 with automatic feature adaptation | Balances accuracy vs. memory consumption |
 | **Temporal Fusion** | Transformer encoder for video frame aggregation | Captures long-range dependencies between frames |
-| **Hybrid Loss** | MSE (70%) + Rank Loss (30%) | Optimizes both absolute prediction and relative ordering |
+| **Task-Aware Loss** | MSE + Rank + PLCC, reweighted per `task_type` | Optimizes absolute prediction, relative ordering, and linear MOS alignment |
 | **Multi-Dataset Support** | YAML-based configuration with factory pattern | Easy addition of new datasets without code changes |
 | **Path Abstraction** | DSL-based `PathManager` with YAML routing | Eliminates hardcoded paths, supports symbolic links |
 | **Lazy Asset Resolution** | `CaseInsensitiveAssetResolver` with pre-built index | O(1) file lookup, case-insensitive matching |
@@ -126,14 +78,25 @@ Output: Quality Score (0-1 range)
 | **ResNet50** | 25M | ✅ | ✅ | ~2GB (8 frames) |
 | **Swin-T** | 28M | ✅ | ✅ | ~4GB (8 frames) |
 
-### Loss Function: Hybrid MSE + Rank Loss
+### Loss Function: Task-Aware Hybrid Loss
+
+`IQAVQALoss` combines three components, weighted differently depending on `task_type` (`iqa` vs `vqa`):
 
 ```text
-Total Loss = 0.7 × MSE + 0.3 × Rank Loss
-
-- MSE Loss: Absolute prediction accuracy
-- Rank Loss: Preserves relative ordering between samples
+Total Loss = w_mse × MSE + w_rank × RankLoss + w_plcc × (1 − PLCC)
 ```
+
+| Task | MSE | Rank | PLCC |
+| :--- | :-- | :--- | :--- |
+| IQA (`resnet_iqa`) | 0.7 | 0.3 | 0.0 |
+| VQA (`timeswin_vqa`) | 0.4 | 0.3 | 0.3 |
+
+- **MSE Loss**: Absolute prediction accuracy
+- **Rank Loss**: Pairwise ranking consistency (sampled, capped at `max_pairs` pairs)
+- **PLCC Loss**: `1 − Pearson correlation`, weighted in for VQA to directly optimize linear alignment with human MOS
+
+> [!WARNING]
+> Known issue: `mode` isn't currently passed from the training engine into `IQAVQALoss.forward()`, so VQA runs fall back to the IQA weight set until this is wired up.
 
 ---
 
@@ -155,27 +118,30 @@ You can choose between running the direct uv command or using the make wrapper.
 | :-------- | :------ | :----------- | :------------- |
 | TID2013 | `resnet_iqa` | `uv run python -m src.main --model resnet_iqa --dataset tid2013` | `make train DATASET=tid2013 MODEL=resnet_iqa` |
 | KoNViD-1k | `timeswin_vqa` | `uv run python -m src.main --model timeswin_vqa --dataset konvid-1k` | `make train DATASET=konvid-1k MODEL=timeswin_vqa` |
-| T2VQA-DB | `resnet_vqa` | `uv run python -m src.main --model resnet_vqa --dataset t2vqa-db` | `make train DATASET=t2vqa-db MODEL=resnet_vqa` |
+| T2VQA-DB | `timeswin_vqa` | `uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db` | `make train DATASET=t2vqa-db MODEL=timeswin_vqa` |
 
 *Note: By default, DEBUG=0 is applied in make commands. You can override it by appending DEBUG=1 if needed.*
+
+> [!NOTE]
+> Only two model configs ship today: `resnet_iqa` (image/ResNet50) and `timeswin_vqa` (video/Swin-T). Model configs are auto-discovered from `config/models/*.yaml` — drop a new YAML there (e.g. `resnet_vqa.yaml`) to register another combination before referencing it in commands.
 
 ### Configuration Parameters
 
 ```yaml
-# config/models/resnet_vqa.yaml
+# config/models/timeswin_vqa.yaml
 preprocessing:
-  batch_size: 2          # Reduce if OOM
-  num_workers: 4         # Data loading threads
-  k_fold: 5              # Cross-validation folds
+  batch_size: 8            # Reduce if OOM
+  num_workers: 4           # Data loading threads
+  k_fold: 5                 # Cross-validation folds
 
 model:
-  backbone: "resnet50"   # or "swin_t"
-  num_frames: 8          # Video frames per sample
-  transformer_layers: 2  # Temporal fusion depth
+  backbone: "swin_t"        # or "resnet50"
+  num_frames: 16            # Video frames per sample
+  transformer_layers: 2     # Temporal fusion depth
 
 train:
-  epochs: 50
-  lr: 0.0001
+  epochs: 30
+  lr: 0.00005
   gradient_accumulation_steps: 4  # Effective batch = batch_size × steps
   early_stop:
     enabled: true
@@ -249,6 +215,62 @@ Output location: `results/{dataset}/plots/`
 
 ---
 
+## Deployment & Inference API <a id="deployment-api"></a>
+
+A standalone FastAPI service (`deploy/api.py`) exposes trained checkpoints for inference, decoupled from the training stack. It loads one IQA model and one VQA model at startup and serves a unified 0-5 MOS scale regardless of which model answers the request.
+
+### Directory Layout
+
+```text
+deploy/
+├── api.py               # FastAPI service (this file)
+├── infer.py              # Preprocessing + checkpoint loading + prediction helpers
+├── iqa-models/
+│   └── tid2013_best.pt   # Default IQA checkpoint (resnet_iqa, trained on TID2013)
+└── vqa-models/
+    └── konvid_best.pt    # Default VQA checkpoint (timeswin_vqa, trained on KoNViD-1k)
+```
+
+> [!WARNING]
+> Checkpoint paths are resolved relative to `api.py`'s own location (`Path(__file__).resolve().parent / "iqa-models" / ...`), so `.pt` files must sit in `deploy/iqa-models/` and `deploy/vqa-models/` — not in `results/model_outputs/`.
+
+### Starting the Service
+
+```bash
+cd deploy
+uv run python -m deploy.api
+```
+
+The service listens on `0.0.0.0:8000` and loads both checkpoints eagerly on startup; if neither model file is found, startup fails with `RuntimeError: 没有成功加载任何模型，服务启动失败`.
+
+### Endpoints
+
+| Endpoint | Method | Purpose |
+| :--- | :--- | :--- |
+| `/health` | GET | Returns loaded model IDs and inference device |
+| `/evaluate` | POST | Runs inference on an uploaded image/video and returns a unified MOS score |
+
+`/evaluate` accepts `multipart/form-data` with:
+
+| Field | Type | Notes |
+| :--- | :--- | :--- |
+| `file` | file | Image or video to score |
+| `media_type` | string | `"image"` or `"video"` |
+| `task_type` | string | Echoed back in the response, not used for routing |
+| `model` | string | `"resnet_iqa"` or `"timeswin_vqa"` — selects which cached model handles the request |
+
+Cross-media inference is supported in both directions: `resnet_iqa` averages predictions across sampled frames when given a video, and `timeswin_vqa` expands a single image into a pseudo-video (`image_to_video_tensor`) when given an image.
+
+The response includes both `mos` (unified 0–5 scale, `raw_score × 5`) and `dataset_mos` (denormalized back to the source dataset's original MOS range, for debugging).
+
+> [!NOTE]
+> MOS denormalization uses `dataset_info.mos_min`/`mos_max` from the checkpoint's saved config if present, otherwise falls back to hardcoded constants (`DATASET_MOS_PARAMS`) for TID2013/KoNViD-1k only. Given the training pipeline doesn't currently guarantee `mos_min`/`mos_max` land in `dataset_info` (see the Configuration Guide note on `dataset_info` above), the hardcoded fallback is likely what's actually used in practice — verify the printed range in the startup log (`✅ ... 模型加载完成 (... MOS 范围: X~Y)`) matches your dataset before trusting `dataset_mos` output.
+
+> [!NOTE]
+> CORS is currently wide open (`allow_origins=["*"]`) — fine for local development, but tighten this before exposing the service beyond your own machine.
+
+---
+
 ## Project Main Structure <a id="project-main-structure"></a>
 
 ```text
@@ -259,35 +281,43 @@ deep-vqa-framework/
 ├── pyproject.toml          # Dependency & environment management (uv)
 │
 ├── config/                 # YAML configuration modules
-│   ├── basic.yaml          # System & training global defaults
-│   ├── dataset_config.yaml # Dataset-specific metadata
-│   └── models/             # Model architecture parameters
+│   ├── paths.yaml            # Path resolution DSL (roots & resolvers)
+│   ├── basic.yaml            # System & training global defaults
+│   ├── dataset_config.yaml   # Dataset-specific metadata
+│   └── models/                 # Model architecture parameters
 │
-├── datasets/               # Data storage & symlink routing
-│   ├── KoNViD-1k/          # Video quality dataset
-│   ├── T2VQA-DB/           # Text-to-Video QA dataset
-│   └── TID2013/            # Image quality dataset
+├── datasets/                 # Data storage & symlink routing
+│   ├── KoNViD-1k/               # Video quality dataset
+│   ├── T2VQA-DB/                 # Text-to-Video QA dataset
+│   └── TID2013/                  # Image quality dataset
 │
-├── docs/                   # Interactive architecture & manuals
-│   ├── pipeline.html       # System execution & module flow
+├── docs/                     # Interactive architecture & manuals
+│   ├── pipeline.html            # System execution & module flow
 │   └── Cloud_Platform_Rental_Guide.md
 │
-├── results/                # Global outputs & logs
-│   ├── model_outputs/      # Training checkpoints
-│   ├── train_logs/         # Execution & performance history
-│   └── plots/              # Visualization (loss, residuals, etc.)
+├── results/                  # Global outputs & logs
+│   ├── model_outputs/           # Training checkpoints
+│   ├── train_logs/               # Execution & performance history
+│   └── plots/                     # Visualization (loss, residuals, etc.)
 │
-├── scripts/                # Infrastructure automation
-│   ├── manage_data.sh      # Download & data preparation
-│   ├── setup_env.sh        # Environment & system initialization
-│   └── *.sh                # Auxiliary maintenance & cleanup scripts
+├── scripts/                  # Infrastructure automation
+│   ├── manage_data.sh           # Download & data preparation
+│   ├── setup_env.sh              # Environment & system initialization
+│   ├── archive_results.sh         # Package results
+│   └── *.sh                        # Auxiliary maintenance & cleanup scripts
 │
-└── src/                    # Core framework logic
-    ├── main.py             # Global execution entry point
-    ├── core/               # Training engine & evaluation pipeline
-    ├── data/               # Data loaders, EDA & integrity analysis
-    ├── models/             # Architecture definitions (IQAVQA-Net)
-    └── utils/              # Configuration, logging & path management
+├── deploy/                  # Standalone inference service (decoupled from training)
+│   ├── api.py                    # FastAPI service — see note below on module naming
+│   ├── infer.py                   # Preprocessing + checkpoint loading + prediction
+│   ├── iqa-models/                # IQA .pt checkpoints served by api.py
+│   └── vqa-models/                # VQA .pt checkpoints served by api.py
+│
+└── src/                       # Core framework logic
+    ├── main.py                   # Global execution entry point
+    ├── core/                        # Training engine & evaluation pipeline
+    ├── data/                        # Data loaders, EDA & integrity analysis
+    ├── models/                      # Architecture definitions (IQAVQA-Net)
+    └── utils/                        # Configuration, logging & path management
 ```
 
 ---
@@ -305,13 +335,15 @@ For a detailed look at the system architecture and execution flow, we provide tw
 
 ### Configuration Layering
 
-Configuration files are merged in the following order (later files override earlier ones):
+Configuration is assembled by `config_loader.load_system_config()` in two distinct steps:
 
-| Layer | File | Purpose |
+| Stage | File | How it's merged |
 | ------- | ------ | --------- |
-| 1 (Base) | `basic.yaml` | Global defaults |
-| 2 (Model) | `models/{model}.yaml` | Model-specific overrides |
-| 3 (Dataset) | `dataset_config.yaml` | Dataset-specific settings |
+| 1 (Base) | `basic.yaml` | Loaded first as the starting config |
+| 2 (Model) | `models/{model}.yaml` | Deep-merged on top of stage 1 (matching keys override) |
+| 3 (Dataset) | `dataset_config.yaml` | **Not merged into top-level keys** — the matched dataset entry is attached wholesale as `config["dataset_info"]` |
+
+The merged result is validated against `config_loader.validate_config_schema()`'s required-field list before training starts. Path resolution (`config/paths.yaml`) is handled separately by `PathManager` and is not part of this merge.
 
 ### Memory Optimization for Video Training
 
@@ -340,8 +372,11 @@ train:
 | Symptom | Solution |
 | :--- | :--- |
 | OOM at first batch | Reduce `batch_size` to 1 |
-| OOM after several epochs | Enable `gradient_checkpointing: true` |
+| OOM after several epochs | Reduce `num_frames` or switch to the `resnet50` backbone |
 | OOM during validation | Reduce `num_frames` to 4 |
+
+> [!NOTE]
+> Gradient checkpointing is not currently implemented in `IQAVQANet` — don't set `gradient_checkpointing: true` in configs yet; it has no effect.
 
 ### Dataset Not Found
 
@@ -379,13 +414,21 @@ Decord is pre-configured as the default backend. If Decord is not available, the
 | Small batch size | Use `gradient_accumulation_steps` |
 | Video decoding slow | Ensure Decord is installed |
 
+### Disk Filling Up
+
+`quarantine/` (created by `DataEDA.check_integrity()` when corrupted files are moved aside) is **not** currently handled by `cache_clean.sh` — clear it manually, or add a cleanup step to the script.
+
+### Training Hangs With No Error (Background Runs)
+
+If a `nohup`/background training run appears frozen with no new log lines and no crash, check whether it's stuck at a `pdb.set_trace()` breakpoint. `PathManager.resolve(..., mkdir=True)` currently drops into `pdb` on `PermissionError`/`OSError` while creating a directory, which will silently block a non-interactive process waiting on stdin instead of raising. Kill the process and check disk permissions/space if this happens.
+
 ---
 
 ## 📄 License <a id="license"></a>
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.9.2-beta (pre-release)
+- **Version**: 0.4.3-beta (pre-release)
 
 ---
 
