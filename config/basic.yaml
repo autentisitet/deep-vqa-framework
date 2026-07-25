@@ -33,7 +33,7 @@ train:
   optimizer: "adamw"
   scheduler: "cosine"
   warmup_epochs: 5
-  gradient_accumulation_steps: 4  # 添加这行，每 4 个 batch 更新一次
+  gradient_accumulation_steps: 4  # 每 4 个 batch 更新一次
 
   early_stop:
     enabled: true
@@ -46,7 +46,7 @@ train:
     save_last: true
     monitor: "val_srocc"
     mode: "max"
-    save_top_k: 3         # 硬盘空间有限（AutoDL只有20G），只保留最好的 3 个 Checkpoint
+    save_top_k: 3
 
 
 

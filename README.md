@@ -7,6 +7,8 @@
 [![Version](https://img.shields.io/badge/version-0.4.3--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code style: ruff](https://img.shields.io/badge/ruff-⭐-purple)](https://github.com/astral-sh/ruff)
 
+**🌐 [English](README.md) | [简体中文](README_zh.md)**
+
 **A Unified Deep Learning Framework for Image Quality Assessment (IQA) and Video Quality Assessment (VQA).**
 
 This framework provides an end-to-end solution for training, evaluating, and deploying quality assessment models. It features a unified architecture that seamlessly handles both image and video inputs, multi-dataset support, cross-validation pipelines, and production-ready inference APIs.
@@ -325,10 +327,14 @@ deep-vqa-framework/
 
 ## System Overview <a id="system-overview"></a>
 
-For a detailed look at the system architecture and execution flow, we provide two viewing options:
+To help you quickly grasp the system architecture and execution flow, we provide an **interactive pipeline visualization**.
 
-- [**Interactive Architecture Map**](docs/pipeline.html)
-- [**Static Architecture Overview**](docs/pipeline.png)
+[**→ Open Interactive Architecture Map**](docs/pipeline.html)
+
+This map illustrates:
+- How data flows through each stage of the system
+- Key components and their interactions
+- Execution order of the entire workflow
 
 ---
 
@@ -438,9 +444,9 @@ If a `nohup`/background training run appears frozen with no new log lines and no
 | Name | Role | Contributions |
 | :--- | :--- | :--- |
 | **[@autentisitet](https://github.com/autentisitet)** | Project Lead / Core Developer | Framework architecture, training pipeline, inference engine, deployment API |
-| **[@yss0120](https://github.com/yss0120)** | Frontend Developer | Interactive frontend UI/UX (`index.html`), subjective blind rating system, quality passport visualization, data EDA pipeline |
-| **[@Zed-23](https://github.com/Zed-23)** | DevOps & QA Engineer | GitHub Actions CI configuration, shell script fixes, smoke testing, CUDA OOM debugging and memory optimization |
-| **[@bazhina-5566](https://github.com/bazhina-5566)** | Backend API Developer | FastAPI service (`deploy/api.py`), model checkpoint integration, inference API design |
+| **[@yss0120](https://github.com/yss0120)** | Frontend Developer | Interactive UI/UX (`index.html`), subjective blind rating system, quality passport visualization |
+| **[@Zed-23](https://github.com/Zed-23)** | DevOps & Quality Assurance | CI/CD pipeline, automated & smoke testing, Shell script fixes, CUDA OOM debugging |
+| **[@bazhina-5566](https://github.com/bazhina-5566)** | Backend API Developer | FastAPI service (`deploy/api.py`), model checkpoint loading, inference API design |
 
 > [!NOTE]
 > We welcome contributions! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md) for guidelines.

@@ -89,4 +89,4 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y zip unzip
 
       - name: Test smart_extract logic (mock ZIP)
-        run: bash scripts/ci_test_smart_extract.sh
+        run: bash scripts/ci_test_extract.sh

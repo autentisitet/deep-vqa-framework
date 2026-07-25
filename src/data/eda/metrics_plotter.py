@@ -10,12 +10,12 @@ from loguru import logger
 
 # Targets: (可视化)
 #   1. 绘制loss曲线，残差图，每个epoch的 loss output，RMSE、R2 score
-#   2. 绘制SSIM、VIF、DLM、VMAF、NIQE   <-- 🚀 传统指标对账热力分布图/箱线图
+#   2. 绘制SSIM、VIF、DLM、VMAF、NIQE
 #
 # Notes:
-#   1. 存储的img注意文件名不要乱七八糟，要保留生成时间、model的信息 <-- 🚀 已锁定年月日_task_model规范
+#   1. 存储的img注意文件名不要乱七八糟，要保留生成时间、model的信息
 #   2. 以py文件所在的文件路径为基准：
-#      img文件存储到../results/plots/中   <-- 🚀 完美对齐你的 results/plots 目录
+#      img文件存储到../results/plots/中
 
 
 class MetricsPlotter:

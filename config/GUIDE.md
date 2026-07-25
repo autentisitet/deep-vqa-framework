@@ -57,7 +57,7 @@ deep_update 递归合并
 #### 主要字段
 
 | 字段 | 说明 | 示例 |
-|------|------|------|
+| ------ | ------ | ------ |
 | `name` | 数据集显示名称 | "KoNViD-1k" |
 | `data_type` | `image` 或 `video` | "video" |
 | `file_extensions` | 支持的文件后缀 | `["mp4"]` |
@@ -83,6 +83,7 @@ deep_update 递归合并
 - `resolvers`：路径模板定义
 
 **使用示例**：
+
 ```python
 from src.utils.path_manager import PathManager
 

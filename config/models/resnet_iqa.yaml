@@ -8,7 +8,7 @@ model:
   pretrained: true
   dropout: 0.3
   input_size: 224
-  num_frames: 8               # IQA 不需要，但保留无害
+  num_frames: 8               
 
 preprocessing:
   batch_size: 32

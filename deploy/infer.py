@@ -3,15 +3,6 @@
 """
 独立推理脚本：加载训练好的 checkpoint，对单张图片或单个视频文件进行质量评分预测。
 
-设计原则：
-- checkpoint 里已经保存了完整的 config（见 src/core/engine.py `_save_checkpoint` 中的
-  `state["config"] = self.config`），所以推理时不需要重新走 load_system_config /
-  dataset_config.yaml 那一套，直接从 checkpoint 里还原配置和模型结构，避免"训练用的配置"
-  和"推理用的配置"再次出现不一致。
-- 不依赖 DataEDA / config_loader / trainer / engine / path_manager，只依赖
-  src.models.iqavqa_net.IQAVQANet 这一个项目内文件，方便单独交付给后端组部署。
-- 后端组在部署时需在项目根目录执行 `uv sync` 同步依赖，然后启动 `api.py` 服务。
-
 模型路由方式：
     forward(self, x: torch.Tensor) -> torch.Tensor
     - 4D Tensor [B, 3, H, W]    -> 图片，走单帧空间特征提取分支
@@ -36,7 +27,7 @@
     uv run python -m deploy.infer -i test.mp4
     uv run python -m deploy.infer -i ./mixed_dir/ -o results.json  # 混合目录自动分组
 
-    # 手动指定模型（所有文件用同一个）
+    # 手动指定模型
     uv run python -m deploy.infer -c model.pt -i test.jpg
 
     # 对比两个模型（ResNet50 vs Swin-T）
@@ -44,55 +35,6 @@
 
     # 对比模式 + 导出 CSV
     uv run python -m deploy.infer --compare -i ./test_dir/ --csv results.csv
-
-============================================================
-快速开始（后端同学看这里）
-============================================================
-
-1. 部署目录结构（必须）：
-
-    deploy/
-    ├── infer.py
-    ├── api.py                       # 你们要写的服务层
-    ├── iqa-models/
-    │   └── tid2013_best.pt          # IQA 模型权重，文件名必须完全匹配
-    └── vqa-models/
-        └── konvid_best.pt           # VQA 模型权重，文件名必须完全匹配
-
-    路径常量见下方 DEFAULT_IQA_MODEL / DEFAULT_VQA_MODEL，
-    如果实际文件名不一样，改这两个常量就行，不用改其他代码。
-
-2. 如果要做成常驻服务（实时推理），不要每次请求都跑一遍这个脚本，
-   而是复用里面的两个函数：
-
-        from deploy.infer import load_checkpoint, predict_single
-
-        # 服务启动时只执行一次（耗时操作：读盘 + 模型搬到 GPU）
-        model, config = load_checkpoint("iqa-models/tid2013_best.pt", device="cuda")
-
-        # 每次收到请求时只调用这个，很快
-        result = predict_single(model, file_path, config, device="cuda")
-        # result 形如:
-        # {"file": "...", "raw_score": 0.62, "mos_score": 3.41,
-        #  "task_type": "iqa", "model_name": "IQAVQANet"}
-
-   图片和视频要用不同的 model/config（分别来自 load_checkpoint(iqa_path) 和
-   load_checkpoint(vqa_path)），不能用同一个模型混着推，参考 main() 里
-   "自动模式"那部分分组逻辑。
-
-3. mos_score 为 None 是正常情况，发生在 checkpoint 里没有保存
-   mos_min/mos_max 的情况下（早期训练出的模型），此时只能拿到 raw_score
-   （[0,1] 区间），不代表推理失败，前端展示时要分别处理这两种情况。
-
-4. 完整性检查只会在控制台打 logger.warning，不会中断流程、不会让
-   predict_single 报错 —— 除非文件本身完全无法解码 / 分辨率非法 / 颜色种类
-   过少，这几种情况才会抛 ValueError，需要在 api.py 里 try/except 接住，
-   返回给前端一个明确的"文件无效"错误，而不是 500。
-
-5. CLI 跑通自检（建议先在本地这样测一遍，确认环境装对了再接服务层）：
-
-        uv run python -m deploy.infer -i test.jpg
-        uv run python -m deploy.infer -i test.mp4
 """
 
 import argparse

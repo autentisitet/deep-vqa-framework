@@ -251,8 +251,8 @@ class TrainerExecutionPipeline:
             logger.info(f"🌀 [Fold {current_fold}/{n_splits}] 开始...")
 
             self.config["current_fold"] = current_fold
-            # ✅ 修复：不加 fold，保持 base_filename 干净
-            evaluator.base_filename = original_base_filename  # ← 改这里！
+            # 不加 fold，保持 base_filename 干净
+            evaluator.base_filename = original_base_filename
 
             train_sub_df = active_df.iloc[train_idx]
             val_sub_df = active_df.iloc[val_idx]
@@ -358,7 +358,7 @@ class TrainerExecutionPipeline:
             y_true = torch.cat(y_true_list).numpy()
             y_pred = torch.cat(y_pred_list).numpy()
 
-            # 💎 新增：反归一化回原始 MOS 量纲，让 RMSE 可以跟文献对比
+            # 反归一化回原始 MOS 量纲，让 RMSE 可以跟文献对比
             dataset_info = config_to_use.get("dataset_info", {}) or {}
             mos_min = dataset_info.get("mos_min")
             mos_max = dataset_info.get("mos_max")

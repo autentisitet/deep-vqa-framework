@@ -4,16 +4,17 @@ This guide provides step-by-step instructions for renting and configuring a clou
 
 ## Choosing the Right Instance
 
-For optimal training performance, select an instance that meets the following criteria:
+> [!WARNING]
+> The GPU/VRAM guidance below is a **rough rule of thumb, not benchmarked against this specific codebase**. Actual usage depends heavily on your exact config (`batch_size`, `num_frames`, `transformer_layers`, whether AMP is actually engaging). Treat these as a starting point for renting an instance, then profile your actual run.
 
-| Component | Minimum Specification | Recommended for VQA |
+| Component | IQA Only (Minimum, unverified) | VQA Training (Recommended, unverified) |
 | :--- | :--- | :--- |
-| **GPU** | **RTX 3060 / 4060** | **RTX 3090 / 4090** |
-| **VRAM** | **24GB** | **24GB - 80GB** |
-| **Disk** | **100GB SSD** | **200GB+ SSD (Dataset caching)** |
+| **GPU** | RTX 3060 (12GB) / RTX 4060 Ti (16GB) | RTX 3090 / RTX 4090 |
+| **VRAM** | 8GB – 16GB | 24GB |
+| **Disk** | 100GB SSD | 200GB+ SSD (Dataset caching) |
 
 > [!TIP]
-> **AutoDL Users**: Select the "PyTorch 2.x + CUDA 12.x + Python 3.10+" base image to save setup time.
+> **AutoDL Users**: Select the "PyTorch 2.x + CUDA 12.x" base image. The system Python version doesn't matter much — `setup_env.sh` pins the project to Python 3.12 via `uv` regardless of what the base image ships with.
 
 ---
 
@@ -39,6 +40,16 @@ Data Disk Mapping: Using AutoDL as an example, ensure that your repository and d
 # Example for AutoDL: Navigate to the data disk and clone the project
 cd /root/autodl-tmp/
 git clone https://github.com/autentisitet/deep-vqa-framework.git
+```
+
+> [!NOTE]
+> This isn't just a general best practice — `cache_clean.sh` computes its cache-redirect targets (`PROJECT_PARENT_DIR`) relative to wherever the repo is cloned. If the repo sits on the system disk, HuggingFace/ModelScope cache migration will still land on the system disk, defeating the purpose of that script.
+
+Quick self-check before you start training:
+
+```bash
+# Quick check: are you on the AutoDL data disk?
+df -h "$(pwd)" | grep -q "autodl-tmp" && echo "✅ On data disk" || echo "⚠️  Not on data disk — I/O will be slower"
 ```
 
 ---

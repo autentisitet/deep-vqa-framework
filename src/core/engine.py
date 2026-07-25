@@ -374,7 +374,7 @@ class TrainerEngine:
         }
 
         if is_best:
-            # ✅ 修复：先构建一个干净的基础名
+            # 先构建一个干净的基础名
             # 如果 base_name 已经包含 fold，就不重复添加
             if f"_fold{current_fold}" in base_name:
                 clean_base = base_name
@@ -387,7 +387,7 @@ class TrainerEngine:
             torch.save(state, target_path)
             logger.info(f"🏆 [Checkpoint] The weights have been saved to ──> {target_path.resolve()}")
 
-            # ✅ 删除旧的最佳模型文件（超过 top_k 个）
+            # 删除旧的最佳模型文件（超过 top_k 个）
             all_best_pts = list(save_dir.glob(f"{clean_base}_best_epoch*.pt"))
             if len(all_best_pts) > top_k:
                 reverse_flag = True if self.checkpoint_mode == "max" else False
@@ -396,13 +396,13 @@ class TrainerEngine:
                     low_pt.unlink()
                     logger.warning(f"🗑️  [Checkpoint] Delete old model files and keep only the K most recent ones ──> {low_pt.name}")
 
-            # ✅ 更新 *_best.pt 软链接（复制最新的最佳模型）
+            # 更新 *_best.pt 软链接（复制最新的最佳模型）
             standard_best_path = save_dir / f"{clean_base}_best.pt"
             shutil.copy(target_path, standard_best_path)
             logger.info(f"   └─ ✅ Best model symlink updated: {standard_best_path.name}")
 
         else:
-            # ✅ 非最佳模型的保存（不需要重复包含 fold）
+            # 非最佳模型的保存（不需要重复包含 fold）
             pt_name = f"{base_name}_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
             target_path = save_dir / pt_name
             torch.save(state, target_path)

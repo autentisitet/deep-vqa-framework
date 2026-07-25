@@ -35,39 +35,61 @@
     <div class="mermaid">
     graph TD
         classDef transitionLink stroke:#d32f2f,stroke-width:5px,stroke-dasharray:5;
+        classDef warn fill:#ffebee,stroke:#c62828,stroke-width:2px,stroke-dasharray:3;
 
         subgraph STAGE_1 [1. 基础设施 - 脚本层]
-            S1[setup_env.sh] --> S2[system_check.sh]
-            S2 --> S3[manage_data.sh]
-            S3 --> S4[optimize_env.sh]
-            S5[cache_clean.sh] -.-> S3
+            S1[setup_env.sh] --> S3[manage_data.sh]
+            S3 --> SL[setup_links.sh<br/>make link]
+            S2[system_check.sh] -.诊断.-> S1
+            S4[optimize_env.sh] -.网络/终端调优.-> S1
+            S5[cache_clean.sh] -.清理.-> S3
         end
+
         subgraph STAGE_2 [2. 配置驱动 - 参数层]
-            C1[basic.yaml] --> M[main.py]
-            C2[dataset_config.yaml] --> M
-            C3[models/*.yaml] --> M
+            C1[basic.yaml] --> CL[config_loader.py<br/>load_system_config]
+            C3[models/*.yaml] --> CL
+            C2[dataset_config.yaml] --> CL
+            CL -->|"合并 + validate_config_schema()"| M[main.py]
         end
-        subgraph STAGE_3 [3. 控制中枢 - 入口层]
-            M --> T[trainer.py]
-            T --> U[paths.yaml + src/utils/*.py]
+
+        subgraph STAGE_3 [3. 基础工具层]
+            PY[paths.yaml] --> PM[path_manager.py<br/>PathManager]
+            M --> PM
+            M --> LG[logging_utils.py<br/>log_prepare]
         end
-        subgraph STAGE_4 [4. 核心执行 - 逻辑层]
-            T --> E[engine.py]
-            E --> D[src/data/eda/*.py]
-            E --> N{iqavqa_net.py}
-            E --> EV[evaluator.py]
+
+        subgraph STAGE_4 [4. 数据处理层]
+            M --> DE[data_eda.py<br/>DataEDA]
+            DE --> MF[metadata_loader_factory.py] --> ML[metadata_loaders.py<br/>Tid2013/Konvid/T2Vqa Loader]
+            DE --> INT[eda/integrity.py<br/>黑白帧·跳帧·损坏检测]
+            DE --> SPL[eda/split.py<br/>分层K折切分]
+            DE --> STA[eda/statistics.py]
+            DE --> FL[file_loader.py<br/>CaseInsensitiveAssetResolver]
+            DE --> TY[types.py]
+            DE --> DF[(处理后的 DataFrame<br/>+ MOS归一化统计)]
+        end
+
+        subgraph STAGE_5 [5. 核心执行 - 训练层]
+            DF --> TR[trainer.py]
+            TR -->|"注入 evaluator 实例"| E[engine.py<br/>TrainerEngine]
+            E --> N{iqavqa_net.py<br/>IQAVQANet + IQAVQALoss}
+            TR --> EV[evaluator.py<br/>Evaluator]
             EV --> MP[metrics_plotter.py]
-            MP --> T
+            MP --> TR
         end
-        subgraph STAGE_5 [5. 成果归档 - 存储层]
-            T --> F[best_model.pt]
-            T --> AR[archive_result.sh]
+
+        subgraph STAGE_6 [6. 成果归档 - 存储层]
+            TR --> F[(best_model.pt<br/>results/model_outputs/)]
+            TR --> AR[archive_result.sh]
             AR --> LOG[(Log + Config + Plots + Weights)]
         end
-        subgraph STAGE_6 [6. 推理部署 - 交付层]
-            F --> INF[inference.py]
-            INF --> W[wrapper.py]
-            W --> U2[外部应用调用]
+
+        subgraph STAGE_7 [7. 推理部署 - 交付层]
+            F -.手动拷贝.-> BM[(backend/iqa-models/<br/>backend/vqa-models/)]
+            BM --> INF[backend/infer.py<br/>Preprocessor + predict_*]
+            INF --> API[backend/api.py<br/>FastAPI /evaluate /health]
+            API --> WEB[index.html<br/>前端可视化 Demo]
+            API --> EXT[外部应用调用]
         end
 
         STAGE_1 ==> STAGE_2
@@ -75,16 +97,19 @@
         STAGE_3 ==> STAGE_4
         STAGE_4 ==> STAGE_5
         STAGE_5 ==> STAGE_6
+        STAGE_6 ==> STAGE_7
 
-        class STAGE_1,STAGE_2,STAGE_3,STAGE_4,STAGE_5,STAGE_6 transitionLink
+        class STAGE_1,STAGE_2,STAGE_3,STAGE_4,STAGE_5,STAGE_6,STAGE_7 transitionLink
 
         style STAGE_1 fill:#f5f5f5,stroke:#333
         style STAGE_2 fill:#e1f5fe,stroke:#01579b
-        style STAGE_3 fill:#fff9c4,stroke:#fbc02d
-        style STAGE_4 fill:#e8f5e9,stroke:#2e7d32
-        style STAGE_5 fill:#fce4ec,stroke:#c2185b
-        style STAGE_6 fill:#ede7f6,stroke:#512da8
+        style STAGE_3 fill:#fffde7,stroke:#f9a825
+        style STAGE_4 fill:#fff3e0,stroke:#ef6c00
+        style STAGE_5 fill:#e8f5e9,stroke:#2e7d32
+        style STAGE_6 fill:#fce4ec,stroke:#c2185b
+        style STAGE_7 fill:#ede7f6,stroke:#512da8
         style F fill:#ff9800,stroke:#e65100,stroke-width:4px
+        style API fill:#ffcdd2,stroke:#c62828,stroke-width:3px
     </div>
 </body>
 </html>

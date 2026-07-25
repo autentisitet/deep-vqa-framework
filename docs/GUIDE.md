@@ -7,7 +7,7 @@
 ## 📚 文档导航
 
 | 模块 | 文档 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | **项目总览** | [docs/GUIDE.md](GUIDE.md) | 当前文档（总入口） |
 | **配置系统** | [config/GUIDE.md](../config/GUIDE.md) | 配置加载、路径管理、数据集与模型配置 |
 | **数据模块** | [src/data/GUIDE.md](../src/data/GUIDE.md) | DataEDA 主模块（加载、划分、预处理） |
@@ -26,4 +26,3 @@
 
 ### 其他资源
 - [README.md](../README.md) — 项目概述与安装说明
-- [CHANGELOG.md](../CHANGELOG.md) — 版本更新记录（待补充）

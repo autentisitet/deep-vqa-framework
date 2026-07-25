@@ -73,7 +73,7 @@ Trainer / Dataset 使用 eda.df + resolver 进行训练
 #### 主要方法
 
 | 方法 | 功能 | 推荐参数 |
-|------|------|----------|
+| ------ | ------ | ---------- |
 | `load_metadata()` | 加载并解析元数据 | - |
 | `run_full_eda(skip_integrity=False)` | 一键执行完整 EDA 流程 | `skip_integrity=True` 可显著加速 |
 | `check_integrity(skip_video_check=True)` | 文件完整性检查 | 建议默认跳过视频深度检查 |
@@ -90,6 +90,7 @@ Trainer / Dataset 使用 eda.df + resolver 进行训练
 **工厂模式**，统一管理各数据集加载器。
 
 **新增数据集方法**：
+
 ```python
 # 在 _REGISTRY 中添加一行即可
 _REGISTRY = {
@@ -165,8 +166,6 @@ print(f"MOS 范围: {stats['mos_range']}")
 ```
 
 ---
-
-## ⚠️ 注意事项
 
 ## ⚠️ 注意事项
 
