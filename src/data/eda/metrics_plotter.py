@@ -23,7 +23,12 @@ class MetricsPlotter:
 
     _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
-    def __init__(self, task_type: str = "iqa", model_name: str = "resnet50", plots_dir: Path = None):
+    def __init__(
+        self,
+        task_type: str = "iqa",
+        model_name: str = "resnet50",
+        plots_dir: Path = None,
+    ):
         """Initialization: Set output directory, filename prefix, and plotting backend."""
         self.task_type = task_type
         self.model_name = model_name
@@ -183,10 +188,23 @@ class MetricsPlotter:
             axes[1, 1].set_ylim(min_krocc - 0.05, 1.05)
             axes[1, 1].legend()
         else:
-            axes[1, 1].text(0.5, 0.5, "KROCC Metric Not Cached", ha="center", va="center", fontsize=12, color="gray")
+            axes[1, 1].text(
+                0.5,
+                0.5,
+                "KROCC Metric Not Cached",
+                ha="center",
+                va="center",
+                fontsize=12,
+                color="gray",
+            )
             axes[1, 1].axis("off")
 
-        plt.suptitle(f"Framework History | Model: {self.model_name} ({version})", fontsize=14, fontweight="bold", y=0.98)
+        plt.suptitle(
+            f"Framework History | Model: {self.model_name} ({version})",
+            fontsize=14,
+            fontweight="bold",
+            y=0.98,
+        )
         plt.tight_layout()
 
         save_path = self.plots_dir / f"{self.base_prefix}_{version}_training_history.png"
@@ -221,29 +239,64 @@ class MetricsPlotter:
         fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
         # 1. Scatter test of residual variance
-        axes[0].scatter(y_pred, residuals, alpha=0.5, s=20, color="dodgerblue", edgecolors="w", linewidths=0.3)
+        axes[0].scatter(
+            y_pred,
+            residuals,
+            alpha=0.5,
+            s=20,
+            color="dodgerblue",
+            edgecolors="w",
+            linewidths=0.3,
+        )
         axes[0].axhline(y=0, color="crimson", linestyle="--", linewidth=1.5)
         axes[0].set_xlabel("Predicted Quality Score (MOS)")
         axes[0].set_ylabel("Residuals (True - Pred)")
         axes[0].set_title("Residuals Scatter (Homoscedasticity)", fontsize=11, fontweight="bold")
 
         # 2. Actual Value vs. Predicted Value: Linear Regression Check
-        axes[1].scatter(y_true, y_pred, alpha=0.5, s=20, color="darkgreen", edgecolors="w", linewidths=0.3)
+        axes[1].scatter(
+            y_true,
+            y_pred,
+            alpha=0.5,
+            s=20,
+            color="darkgreen",
+            edgecolors="w",
+            linewidths=0.3,
+        )
         min_val, max_val = min(y_true.min(), y_pred.min()), max(y_true.max(), y_pred.max())
-        axes[1].plot([min_val, max_val], [min_val, max_val], "crimson", linestyle="--", linewidth=1.5, label="Perfect Alignment")
+        axes[1].plot(
+            [min_val, max_val],
+            [min_val, max_val],
+            "crimson",
+            linestyle="--",
+            linewidth=1.5,
+            label="Perfect Alignment",
+        )
         axes[1].set_xlabel("True Human MOS")
         axes[1].set_ylabel("Predicted Network MOS")
         axes[1].set_title("Linearity Alignment (MOS Accuracy)", fontsize=11, fontweight="bold")
         axes[1].legend()
 
         # 3. One-dimensional marginal Gaussian probability density distribution of residuals
-        sns.histplot(residuals, kde=True, ax=axes[2], color="purple", edgecolor="black", alpha=0.6, bins=20)
+        sns.histplot(
+            residuals,
+            kde=True,
+            ax=axes[2],
+            color="purple",
+            edgecolor="black",
+            alpha=0.6,
+            bins=20,
+        )
         axes[2].axvline(x=0, color="crimson", linestyle="--", linewidth=1.5)
         axes[2].set_xlabel("Residual Error Value")
         axes[2].set_ylabel("Density / Count")
         axes[2].set_title("Error Distribution (Normality Check)", fontsize=11, fontweight="bold")
 
-        plt.suptitle(f"Residual & Linearity Diagnostics | Model: {self.model_name}", fontsize=13, fontweight="bold")
+        plt.suptitle(
+            f"Residual & Linearity Diagnostics | Model: {self.model_name}",
+            fontsize=13,
+            fontweight="bold",
+        )
         plt.tight_layout()
 
         save_path = self.plots_dir / f"{self.base_prefix}_{version}_residuals.png"
@@ -251,7 +304,9 @@ class MetricsPlotter:
         plt.close()
         logger.info(f"✅ Saved residual diagnostics plot: {save_path}")
 
-    def plot_traditional_metrics_distribution(self, data_df: pd.DataFrame, dataset_name: str, score_column: str = "mos"):
+    def plot_traditional_metrics_distribution(
+        self, data_df: pd.DataFrame, dataset_name: str, score_column: str = "mos"
+    ):
         """Find the score column based on score_column, supporting case-insensitive matching."""
         target_metrics = ["ssim", "vif", "dlm", "vmaf", "niqe"]
         available_metrics = []
@@ -297,11 +352,20 @@ class MetricsPlotter:
                 scatter_kws={"alpha": 0.4, "s": 15, "color": "purple"},
                 line_kws={"color": "crimson", "linestyle": "-."},
             )
-            axes[0, i].set_title(f"{metric.upper()} vs {resolved_score.upper()}", fontsize=11, fontweight="bold")
+            axes[0, i].set_title(
+                f"{metric.upper()} vs {resolved_score.upper()}",
+                fontsize=11,
+                fontweight="bold",
+            )
             axes[0, i].set_xlabel(metric.upper())
             axes[0, i].set_ylabel(resolved_score.upper())
 
-        plt.suptitle(f"Traditional Academic Benchmarks Distribution on [{dataset_name}]", fontsize=13, fontweight="bold", y=1.02)
+        plt.suptitle(
+            f"Traditional Academic Benchmarks Distribution on [{dataset_name}]",
+            fontsize=13,
+            fontweight="bold",
+            y=1.02,
+        )
         plt.tight_layout()
 
         save_path = self.plots_dir / f"{self.current_date}_{dataset_name}_traditional_benchmarks.png"
@@ -348,15 +412,37 @@ class MetricsPlotter:
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
         metrics_payload = [
-            {"data": plcc_list, "title": "PLCC Comparison (Higher is better)", "color": "seagreen", "ax": axes[0]},
-            {"data": srocc_list, "title": "SROCC Comparison (Higher is better)", "color": "royalblue", "ax": axes[1]},
-            {"data": rmse_list, "title": "RMSE Comparison (Lower is better)", "color": "crimson", "ax": axes[2]},
+            {
+                "data": plcc_list,
+                "title": "PLCC Comparison (Higher is better)",
+                "color": "seagreen",
+                "ax": axes[0],
+            },
+            {
+                "data": srocc_list,
+                "title": "SROCC Comparison (Higher is better)",
+                "color": "royalblue",
+                "ax": axes[1],
+            },
+            {
+                "data": rmse_list,
+                "title": "RMSE Comparison (Lower is better)",
+                "color": "crimson",
+                "ax": axes[2],
+            },
         ]
 
         for payload in metrics_payload:
             ax = payload["ax"]
             # Perform drawing
-            bars = ax.bar(models, payload["data"], color=payload["color"], alpha=0.75, edgecolor="black", linewidth=0.5)
+            bars = ax.bar(
+                models,
+                payload["data"],
+                color=payload["color"],
+                alpha=0.75,
+                edgecolor="black",
+                linewidth=0.5,
+            )
             ax.set_title(payload["title"], fontsize=11, fontweight="bold")
             ax.tick_params(axis="x", rotation=15)
 
@@ -381,7 +467,12 @@ class MetricsPlotter:
                     fontweight="semibold",
                 )
 
-        plt.suptitle(f"Cross-Model Benchmark Arena on Dataset: {dataset_name}", fontsize=14, fontweight="bold", y=1.02)
+        plt.suptitle(
+            f"Cross-Model Benchmark Arena on Dataset: {dataset_name}",
+            fontsize=14,
+            fontweight="bold",
+            y=1.02,
+        )
         plt.tight_layout()
 
         save_path = self.plots_dir / f"comparison_arena_{dataset_name}_{self.current_date}.png"

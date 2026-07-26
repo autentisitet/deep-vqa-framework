@@ -36,7 +36,14 @@ class VQA_IQADataset(Dataset):
     Reads DataFrames processed by DataEDA and decodes image or video frames as needed.
     """
 
-    def __init__(self, df: pd.DataFrame, data_dir: Path, config: Dict = None, transform: Any = None, resolver: Any = None):
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        data_dir: Path,
+        config: Dict = None,
+        transform: Any = None,
+        resolver: Any = None,
+    ):
         self.df = df.reset_index(drop=True)
         self.data_dir = data_dir
         self.transform = transform
@@ -47,7 +54,9 @@ class VQA_IQADataset(Dataset):
 
         self.traditional_cols = [c for c in ["ssim", "vif", "dlm", "vmaf", "niqe"] if c in self.df.columns]
 
-        self.is_video_mode = any(str(sample).endswith((".mp4", ".avi", ".mov", ".mkv")) for sample in self.df["sample_id"].head(10))
+        self.is_video_mode = any(
+            str(sample).endswith((".mp4", ".avi", ".mov", ".mkv")) for sample in self.df["sample_id"].head(10)
+        )
 
     def __len__(self) -> int:
         return len(self.df)
@@ -196,7 +205,13 @@ class TrainerExecutionPipeline:
     Managing the training process of K-fold cross-validation
     """
 
-    def __init__(self, config: Dict[str, Any], eda_df: pd.DataFrame, data_dir: Path, resolver: Any = None):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        eda_df: pd.DataFrame,
+        data_dir: Path,
+        resolver: Any = None,
+    ):
         self.config = config
         self.eda_df = eda_df
         self.data_dir = Path(data_dir).resolve()
@@ -268,7 +283,13 @@ class TrainerExecutionPipeline:
                 pin_memory=True,
                 worker_init_fn=worker_init_fn,
             )
-            val_loader = DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
+            val_loader = DataLoader(
+                val_dataset,
+                batch_size=self.batch_size,
+                shuffle=False,
+                num_workers=self.num_workers,
+                pin_memory=True,
+            )
 
             model_config = self.config.get("model", {}).copy()
             model_config["num_frames"] = self.config.get("preprocessing", {}).get("num_frames", 8)
@@ -316,7 +337,14 @@ class TrainerExecutionPipeline:
             logger.info("🧪 Start test set evaluation...")
             self._evaluate_test_set(test_df, evaluator, original_base_filename, n_splits, original_config)
 
-    def _evaluate_test_set(self, test_df: pd.DataFrame, evaluator: Any, base_filename: str, n_splits: int, original_config: Dict = None):
+    def _evaluate_test_set(
+        self,
+        test_df: pd.DataFrame,
+        evaluator: Any,
+        base_filename: str,
+        n_splits: int,
+        original_config: Dict = None,
+    ):
         """Test set evaluation"""
         # Use the original configuration (without pollution such as current_fold).
         config_to_use = original_config if original_config else self.config
@@ -343,7 +371,12 @@ class TrainerExecutionPipeline:
             model.eval()
 
             test_dataset = VQA_IQADataset(test_df, self.data_dir, config=config_to_use, resolver=self.resolver)
-            test_loader = DataLoader(test_dataset, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False)
+            test_loader = DataLoader(
+                test_dataset,
+                batch_size=self.batch_size,
+                num_workers=self.num_workers,
+                shuffle=False,
+            )
 
             y_true_list, y_pred_list = [], []
 

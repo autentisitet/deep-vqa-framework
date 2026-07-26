@@ -4,8 +4,9 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.4.3--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
-[![Code style: ruff](https://img.shields.io/badge/ruff-⭐-purple)](https://github.com/astral-sh/ruff)
+[![Version](https://img.shields.io/badge/version-0.4.4--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
 **🌐 [English](README.md) | [简体中文](README_zh.md)**
 
@@ -29,6 +30,7 @@ This framework provides an end-to-end solution for training, evaluating, and dep
 - [System Overview](#system-overview)
 - [Configuration Guide](#configuration-guide)
 - [Troubleshooting](#troubleshooting)
+- [Dependency Security](#dependency-security)
 - [License](#license)
 - [Contributors](#contributors)
 - [Acknowledgements](#acknowledgments)
@@ -107,81 +109,48 @@ Total Loss = w_mse × MSE + w_rank × RankLoss + w_plcc × (1 − PLCC)
 
 ### Quick Start Training
 
-#### Step 1: Initialize Paths
+#### Step 1: Environment Setup
 
 ```bash
+# Initialize environment and install dependencies
+make setup
+
+# Check environment status
+make info
+
+# Make symbol links for datasets
 make link
 ```
 
 #### Step 2: Training Commands
 
-You can choose between running the direct uv command or using the make wrapper.
+Run training directly with uv:
 
-| Dataset | Model | uv Command | make Command |
-| :-------- | :------ | :----------- | :------------- |
-| TID2013 | `resnet_iqa` | `uv run python -m src.main --model resnet_iqa --dataset tid2013` | `make train DATASET=tid2013 MODEL=resnet_iqa` |
-| KoNViD-1k | `timeswin_vqa` | `uv run python -m src.main --model timeswin_vqa --dataset konvid-1k` | `make train DATASET=konvid-1k MODEL=timeswin_vqa` |
-| T2VQA-DB | `timeswin_vqa` | `uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db` | `make train DATASET=t2vqa-db MODEL=timeswin_vqa` |
+```bash
+# TID2013 (Image Quality Assessment)
+uv run python -m src.main --model resnet_iqa --dataset tid2013
+
+# KoNViD-1k (Video Quality Assessment)
+uv run python -m src.main --model timeswin_vqa --dataset konvid-1k
+
+# T2VQA-DB (Text-to-Video Quality Assessment)
+uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
+```
 
 *Note: By default, DEBUG=0 is applied in make commands. You can override it by appending DEBUG=1 if needed.*
 
 > [!NOTE]
 > Only two model configs ship today: `resnet_iqa` (image/ResNet50) and `timeswin_vqa` (video/Swin-T). Model configs are auto-discovered from `config/models/*.yaml` — drop a new YAML there (e.g. `resnet_vqa.yaml`) to register another combination before referencing it in commands.
 
-### Configuration Parameters
-
-```yaml
-# config/models/timeswin_vqa.yaml
-preprocessing:
-  batch_size: 8            # Reduce if OOM
-  num_workers: 4           # Data loading threads
-  k_fold: 5                 # Cross-validation folds
-
-model:
-  backbone: "swin_t"        # or "resnet50"
-  num_frames: 16            # Video frames per sample
-  transformer_layers: 2     # Temporal fusion depth
-
-train:
-  epochs: 30
-  lr: 0.00005
-  gradient_accumulation_steps: 4  # Effective batch = batch_size × steps
-  early_stop:
-    enabled: true
-    patience: 10
-    monitor: "val_srocc"
-    mode: "max"
-```
-
 ### Advanced Options
 
 You can extend the framework capabilities using the following training and debugging modes:
 
-| Mode | Use Case | uv / Shell Command | make Wrapper |
-| :----- | :--------- | :------------------- | :------------- |
-| **Smoke Test** | Quick functionality check | `uv run python -m src.main --smoke_test` | `make test` |
-| **Debug Mode** | Enable breakpoints & verbose logs | `LOG_LEVEL=DEBUG uv run python -m src.main` | `make train DEBUG=1` |
-| **Background** | Run on remote server persistently | `nohup uv run python -m src.main > results/scripts_logs/train.log 2>&1 &` | `make train` |
-
-## Detailed Execution
-
-- **Smoke Test**: Executes a single epoch with minimal data to verify pipeline integrity. Ideal for CI/CD or validating changes.
-
-```bash
-uv run python -m src.main --smoke_test
-```
-
-- **Debug Mode**: Runs with LOG_LEVEL=DEBUG to enable verbose logging and debugger breakpoints. Useful for troubleshooting.
-
-```bash
-LOG_LEVEL=DEBUG uv run python -m src.main
-```
-
-- **Background Training**: Uses nohup to ensure training continues after terminal closure. Output is redirected to results/scripts_logs/train.log.
-
-```bash
-nohup uv run python -m src.main > results/scripts_logs/train.log 2>&1 &
-```
+| Mode | Use Case | uv / Shell Command |
+| :----- | :--------- | :------------------- |
+| **Smoke Test** | Quick functionality check | `uv run python -m src.main --smoke_test` |
+| **Debug Mode** | Enable breakpoints & verbose logs | `LOG_LEVEL=DEBUG uv run python -m src.main` |
+| **Background** | Run on remote server persistently | `nohup uv run python -m src.main > results/scripts_logs/train.log 2>&1 &` |
 
 > [!TIP]
 > Monitor real-time training progress with:
@@ -431,11 +400,27 @@ If a `nohup`/background training run appears frozen with no new log lines and no
 
 ---
 
+## Dependency Security <a id="dependency-security"></a>
+
+The framework includes security tools to audit dependencies:
+
+| Command | Purpose |
+| :--- | :--- |
+| `make vuln-audit` | Scan dependencies for known vulnerabilities |
+| `make sbom` | Generate Software Bill of Materials (CycloneDX) |
+| `make safety` | Check dependencies with Safety (legacy, requires login) |
+| `make security-all` | Run all security checks |
+
+> [!NOTE]
+> `pip-audit` is the primary vulnerability scanner. `safety` requires registration or login.
+
+---
+
 ## 📄 License <a id="license"></a>
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.4.3-beta (pre-release)
+- **Version**: 0.4.4-beta (pre-release)
 
 ---
 

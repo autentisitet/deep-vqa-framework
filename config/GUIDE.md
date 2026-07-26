@@ -143,10 +143,7 @@ from src.utils.config_loader import load_system_config
 from src.utils.path_manager import PathManager
 
 # 加载完整配置
-config = load_system_config(
-    model_cfg_name="timeswin_vqa",
-    dataset_name="konvid-1k"
-)
+config = load_system_config(model_cfg_name="timeswin_vqa", dataset_name="konvid-1k")
 
 # 使用路径管理器
 data_dir = PathManager.resolve("dataset", dataset=config["dataset_name"])

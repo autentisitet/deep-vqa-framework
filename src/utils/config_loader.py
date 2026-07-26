@@ -12,28 +12,33 @@ REQUIRED_CONFIG_PATHS = [
     "train.early_stop.monitor",
     "train.early_stop.mode",
     "train.checkpoint.monitor",
-    "train.checkpoint.mode",        # 💎 补：你只查了 monitor，没查 mode，但这俩必须配套（min/max 不一致会让 best model 选反）
-
+    "train.checkpoint.mode",  # 💎 补：你只查了 monitor，没查 mode，但这俩必须配套（min/max 不一致会让 best model 选反）
     # preprocessing
     "preprocessing.seed",
     "preprocessing.k_fold",
-    "preprocessing.batch_size",     # 💎 补：batch_size 没了，DataLoader 可能用一个隐藏默认值跑
-
+    "preprocessing.batch_size",  # 💎 补：batch_size 没了，DataLoader 可能用一个隐藏默认值跑
     # model —— 第一次那个 bug（model 选错）schema check 完全没覆盖到，必须补
     "model.name",
     "model.backbone",
-
     # task_type —— 这是你第一次最致命的 bug 本体，必须显式校验存在
     "task_type",
-
     # dataset_info —— main.py 后面直接用它初始化 DataEDA，缺了会在很晚的阶段才崩
     "dataset_info",
 ]
 
 KNOWN_TOP_LEVEL_KEYS = {
-    "system", "preprocessing", "logging", "train", "evaluation",
-    "model", "loss", "task_type", "dataset_name", "dataset_info",
+    "system",
+    "preprocessing",
+    "logging",
+    "train",
+    "evaluation",
+    "model",
+    "loss",
+    "task_type",
+    "dataset_name",
+    "dataset_info",
 }
+
 
 def warn_orphan_keys(config: dict) -> None:
     orphans = set(config.keys()) - KNOWN_TOP_LEVEL_KEYS
@@ -86,7 +91,12 @@ def get_model_map(config_dir: Path) -> dict:
     if MODEL_MAP is None:
         MODEL_MAP = discover_models(config_dir)
         # Manual mapping as backup
-        MODEL_MAP.update({"resnet_iqa": "models/resnet_iqa.yaml", "timeswin_vqa": "models/timeswin_vqa.yaml"})
+        MODEL_MAP.update(
+            {
+                "resnet_iqa": "models/resnet_iqa.yaml",
+                "timeswin_vqa": "models/timeswin_vqa.yaml",
+            }
+        )
     return MODEL_MAP
 
 
@@ -129,18 +139,14 @@ def load_system_config(model_cfg_name: str, dataset_name: str) -> dict:
     model_map = get_model_map(config_dir)
 
     if model_key not in model_map:
-        logger.error(
-            f"❌ [Config] 未知的 model_key='{model_key}'，可用值: {list(model_map.keys())}"
-        )
+        logger.error(f"❌ [Config] 未知的 model_key='{model_key}'，可用值: {list(model_map.keys())}")
         raise ValueError(f"Unknown model_key '{model_key}'. Did you mean one of {list(model_map.keys())}?")
-
 
     if model_key not in model_map:
         available = list(model_map.keys())
         raise ValueError(f"❌ 未知模型: '{model_key}'. 可用模型: {available}")
     target_model_file = model_map[model_key]
     model_path = config_dir / target_model_file
-
 
     if not model_path.exists():
         logger.warning(f"⚠️ Model config [{model_path}] not found. Falling back to resnet_iqa.yaml")
@@ -149,7 +155,7 @@ def load_system_config(model_cfg_name: str, dataset_name: str) -> dict:
     model_config = safe_load_yaml(model_path, f"Model configuration file [{model_key}]")
     config = deep_update(config, model_config)
 
-    warn_orphan_keys(config)   # 💎 补上这一行！merge 完立刻检查孤儿 key
+    warn_orphan_keys(config)  # 💎 补上这一行！merge 完立刻检查孤儿 key
 
     # 3. Load dataset configuration
     dataset_cfg_path = config_dir / "dataset_config.yaml"
@@ -170,11 +176,12 @@ def load_system_config(model_cfg_name: str, dataset_name: str) -> dict:
     config["dataset_info"] = dataset_info
     config["dataset_name"] = dataset_name.lower()  # Command line arguments to lowercase
 
-    logger.info(f"⚙️ [Config Engine] Layered configuration successfully built for Model [{model_key}] & Dataset [{config['dataset_name']}]")
+    logger.info(
+        f"⚙️ [Config Engine] Layered configuration successfully built for Model [{model_key}] & Dataset [{config['dataset_name']}]"
+    )
 
     logger.debug(f"[Config] Model configuration: {model_key}, Dataset: {config['dataset_name']}")
     logger.debug(f"[Config] Training configuration: epochs={config.get('train', {}).get('epochs', 'N/A')}")
 
-
-    validate_config_schema(config)   # 💎 合并完立刻校验，而不是等训练跑了几个小时才发现
+    validate_config_schema(config)  # 💎 合并完立刻校验，而不是等训练跑了几个小时才发现
     return config

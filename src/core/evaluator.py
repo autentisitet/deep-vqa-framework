@@ -146,7 +146,14 @@ class Evaluator:
     def _compute_metrics(self, y_true, y_pred) -> dict:
         """Calculate PLCC, SROCC and other metrics, and handle boundary conditions such as all-zero input."""
         if len(y_true) == 0 or len(y_pred) == 0:
-            return {"plcc": 0.0, "srocc": 0.0, "krocc": 0.0, "rmse": 0.0, "r2": 0.0, "mae": 0.0}
+            return {
+                "plcc": 0.0,
+                "srocc": 0.0,
+                "krocc": 0.0,
+                "rmse": 0.0,
+                "r2": 0.0,
+                "mae": 0.0,
+            }
 
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
         r2 = r2_score(y_true, y_pred) if len(y_true) > 1 else 0.0
@@ -200,7 +207,9 @@ class Evaluator:
                 if len(clean_arr) == len(y_true):
                     manifest_data[metric_name.lower()] = clean_arr
                 else:
-                    logger.debug(f"⚠️ Metric {metric_name} length mismatch ({len(clean_arr)} vs {len(y_true)}), skipped.")
+                    logger.debug(
+                        f"⚠️ Metric {metric_name} length mismatch ({len(clean_arr)} vs {len(y_true)}), skipped."
+                    )
 
         df_manifest = pd.DataFrame(manifest_data)
         df_manifest.to_csv(self._manifest_path, index=False)

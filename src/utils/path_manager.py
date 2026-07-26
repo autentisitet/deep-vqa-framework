@@ -24,7 +24,9 @@ class PathManager:
             f"[PathManager] 路径配置文件不存在: {_CONFIG_FILE}\n   请确保项目根目录下有 config/paths.yaml 文件\n   当前项目根目录: {_PROJECT_ROOT}"
         )
     except yaml.YAMLError as e:
-        raise RuntimeError(f"[PathManager] paths.yaml 格式错误: {_CONFIG_FILE}\n   错误详情: {e}\n   请检查 YAML 语法，特别是缩进和特殊字符")
+        raise RuntimeError(
+            f"[PathManager] paths.yaml 格式错误: {_CONFIG_FILE}\n   错误详情: {e}\n   请检查 YAML 语法，特别是缩进和特殊字符"
+        )
     except Exception as e:
         raise RuntimeError(f"[PathManager] 加载路径配置失败: {e}")
 

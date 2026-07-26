@@ -75,8 +75,8 @@ src/utils/
 ```python
 resolver = CaseInsensitiveAssetResolver(data_dir, allowed_extensions=[".mp4", ".jpg"])
 
-asset = resolver.resolve("0001.mp4")        # 返回 AssetInfo
-path = resolver.resolve_path("0001")        # 仅路径
+asset = resolver.resolve("0001.mp4")  # 返回 AssetInfo
+path = resolver.resolve_path("0001")  # 仅路径
 ```
 
 ---
@@ -115,8 +115,7 @@ plots_dir = PathManager.resolve("plots", dataset="konvid-1k", mkdir=True)
 
 # 4. 文件解析器
 resolver = CaseInsensitiveAssetResolver(
-    target_dir=dataset_dir,
-    allowed_extensions=config["dataset_info"]["file_extensions"]
+    target_dir=dataset_dir, allowed_extensions=config["dataset_info"]["file_extensions"]
 )
 ```
 

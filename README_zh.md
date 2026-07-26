@@ -4,8 +4,9 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.4.3--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
-[![Code style: ruff](https://img.shields.io/badge/ruff-⭐-purple)](https://github.com/astral-sh/ruff)
+[![Version](https://img.shields.io/badge/version-0.4.4--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
 **🌐 [English](README.md) | [简体中文](README_zh.md)**
 
@@ -27,6 +28,7 @@
 - [系统概览](#system-overview)
 - [配置指南](#configuration-guide)
 - [故障排查](#troubleshooting)
+- [依赖项安全](#dependency-security)
 - [许可证](#license)
 - [贡献者](#contributors)
 - [致谢](#acknowledgments)
@@ -105,83 +107,48 @@
 
 ### 快速开始训练
 
-#### 第 1 步：初始化路径
+#### 第 1 步：环境设置
 
 ```bash
+# 初始化环境并安装依赖
+make setup
+
+# 检查环境状态
+make info
+
+# 创建数据集软链接
 make link
 ```
 
 #### 第 2 步：训练命令
 
-您可以选择直接运行 `uv` 命令，也可以使用 `make` 封装命令。
+直接使用 `uv` 运行训练：
 
-| 数据集 | 模型 | uv 命令 | make 命令 |
-| :-------- | :------ | :----------- | :------------- |
-| TID2013 | `resnet_iqa` | `uv run python -m src.main --model resnet_iqa --dataset tid2013` | `make train DATASET=tid2013 MODEL=resnet_iqa` |
-| KoNViD-1k | `timeswin_vqa` | `uv run python -m src.main --model timeswin_vqa --dataset konvid-1k` | `make train DATASET=konvid-1k MODEL=timeswin_vqa` |
-| T2VQA-DB | `timeswin_vqa` | `uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db` | `make train DATASET=t2vqa-db MODEL=timeswin_vqa` |
+```bash
+# TID2013 (图像质量评估)
+uv run python -m src.main --model resnet_iqa --dataset tid2013
 
-*注意：`make` 命令默认使用 `DEBUG=0`。如有需要，可通过追加 `DEBUG=1` 来覆盖此设置。*
+# KoNViD-1k (视频质量评估)
+uv run python -m src.main --model timeswin_vqa --dataset konvid-1k
+
+# T2VQA-DB (文生视频质量评估)
+uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
+```
+
+*注意：默认情况下，`make` 命令使用 `DEBUG=0`。如有需要，可通过追加 `DEBUG=1` 来覆盖此设置。*
 
 > [!NOTE]
 > 目前仅提供两种模型配置：`resnet_iqa` (图像/ResNet50) 和 `timeswin_vqa` (视频/Swin-T)。模型配置会自动从 `config/models/*.yaml` 加载——只需在该目录下放入新的 YAML 文件（例如 `resnet_vqa.yaml`）即可注册新的组合，随后即可在命令中引用。
-
-### 配置参数
-
-```yaml
-# config/models/timeswin_vqa.yaml
-preprocessing:
-batch_size: 8            # 若出现 OOM（显存不足）请减小此值
-num_workers: 4           # 数据加载线程数
-k_fold: 5                 # 交叉验证折数
-
-model:
-backbone: "swin_t"        # 或 "resnet50"
-num_frames: 16            # 每个样本的视频帧数
-transformer_layers: 2     # 时序融合深度
-
-train:
-epochs: 30
-lr: 0.00005
-gradient_accumulation_steps: 4  # 有效批次大小 = batch_size × steps
-early_stop:
-enabled: true
-patience: 10
-monitor: "val_srocc"
-mode: "max"
-```
 
 ### 进阶选项
 
 您可以使用以下训练和调试模式来扩展框架功能：
 
-| 模式 | 使用场景 | uv / Shell 命令 | make 包装命令 |
-| :----- | :--------- | :------------------- | :------------- |
-| **冒烟测试** | 快速功能检查 | `uv run python -m src.main --smoke_test` | `make test` |
-| **调试模式** | 启用断点与详细日志 | `LOG_LEVEL=DEBUG uv run python -m src.main` | `make train DEBUG=1` |
-| **后台运行** | 在远程服务器上持续运行 | `nohup uv run python -m src.main > results/scripts_logs/train.log 2>&1 &` | `make train` |
-
-## 详细执行说​​明
-
-- **冒烟测试 (Smoke Test)**：使用极少量数据运行单个 epoch，以验证流水线（pipeline）的完整性。适用于 CI/CD 流程或验证代码变更。
-
-```bash
-uv run python -m src.main --smoke_test
-```
-
-- **调试模式 (Debug Mode)**：设置 `LOG_LEVEL=DEBUG` 运行，以启用详细日志记录和调试器断点。有助于排查问题。
-
-```bash
-LOG_LEVEL=DEBUG uv run python -m src.main
-```
-
-- **后台训练 (Background Training)**：使用 `nohup` 确保终端关闭后训练仍能继续进行。输出内容被重定向至 `results/scripts_logs/train.log`。
-
-```bash
-nohup uv run python -m src.main > results/scripts_logs/train.log 2>&1 &
-```
-
-> [!TIP]
+| 模式 | 适用场景 | uv / Shell 命令 |
+| :----- | :--------- | :------------------- |
+| **冒烟测试** | 快速功能检查 | `uv run python -m src.main --smoke_test` |
+| **调试模式** | 启用断点和详细日志 | `LOG_LEVEL=DEBUG uv run python -m src.main` |
+| **后台运行** | 在远程服务器上持续运行 | `nohup uv run python -m src.main > results/scripts_logs/train.log 2>&1 &` | > [!TIP]
 > 使用以下命令监控实时训练进度：
 >
 > ```bash
@@ -428,11 +395,27 @@ Decord 已预配置为默认后端。如果不可用，框架会自动回退到 
 
 ---
 
+## 依赖项安全 <a id="dependency-security"></a>
+
+该框架包含用于审计依赖项的安全工具：
+
+| 命令 | 用途 |
+| :--- | :--- |
+| `make vuln-audit` | 扫描依赖项以查找已知漏洞 |
+| `make sbom` | 生成软件物料清单 (SBOM) (CycloneDX 格式) |
+| `make safety` | 使用 Safety 检查依赖项（旧版工具，需登录） |
+| `make security-all` | 运行所有安全检查 |
+
+> [!NOTE]
+> `pip-audit` 是主要的漏洞扫描工具。`safety` 工具需要注册或登录。
+
+---
+
 ## 📄 许可证 <a id="license"></a>
 
 - **框架**: [MIT](LICENSE)
 - **作者**: [@autentisitet](https://github.com/autentisitet)
-- **版本**: 0.4.3-beta (预发布版)
+- **版本**: 0.4.4-beta (预发布版)
 
 ---
 

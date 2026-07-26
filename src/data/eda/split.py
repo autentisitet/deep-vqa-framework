@@ -7,11 +7,11 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 
 
 def split_train_val_test(
-    df: pd.DataFrame, 
-    train_ratio: float = 0.8, 
+    df: pd.DataFrame,
+    train_ratio: float = 0.8,
     val_ratio: float = 0.1,
     random_state: int = 42,
-    score_col: str = "mos"
+    score_col: str = "mos",
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     划分训练/验证/测试集（分层采样）
@@ -37,17 +37,12 @@ def split_train_val_test(
     stratify_labels = create_stratified_labels(df, score_col=score_col)
 
     # 第一次划分：分出测试集
-    train_val, test = train_test_split(
-        df, 
-        test_size=test_ratio, 
-        random_state=random_state, 
-        stratify=stratify_labels
-    )
+    train_val, test = train_test_split(df, test_size=test_ratio, random_state=random_state, stratify=stratify_labels)
 
     # 第二次划分：从 train_val 中分出验证集
     relative_val_ratio = val_ratio / (train_ratio + val_ratio)
     train_val_stratify = stratify_labels.iloc[train_val.index]
-    
+
     train, val = train_test_split(
         train_val,
         test_size=relative_val_ratio,
@@ -56,7 +51,7 @@ def split_train_val_test(
     )
 
     logger.info(f"✅ 划分完成: Train={len(train)}, Val={len(val)}, Test={len(test)}")
-    
+
     return train, val, test
 
 
@@ -73,11 +68,11 @@ def create_stratified_labels(df: pd.DataFrame, bins: int = 10, score_col: str = 
 
 
 def check_fold_distribution(
-    df: pd.DataFrame, 
-    n_splits: int = 5, 
+    df: pd.DataFrame,
+    n_splits: int = 5,
     random_state: int = 42,
     score_col: str = "mos",
-    verbose: bool = True
+    verbose: bool = True,
 ) -> List[Dict]:
     """
     检查K折交叉验证的分布
@@ -105,13 +100,15 @@ def check_fold_distribution(
         train_std = df.iloc[train_idx][score_col].std()
         val_std = df.iloc[val_idx][score_col].std()
 
-        fold_stats.append({
-            "fold": fold + 1,
-            "train_mean": train_mean,
-            "val_mean": val_mean,
-            "train_std": train_std,
-            "val_std": val_std,
-        })
+        fold_stats.append(
+            {
+                "fold": fold + 1,
+                "train_mean": train_mean,
+                "val_mean": val_mean,
+                "train_std": train_std,
+                "val_std": val_std,
+            }
+        )
 
     if verbose:
         logger.info(f"✅ Cross-Validation -> Stratified {n_splits}-Fold distribution checked")
@@ -126,9 +123,7 @@ def check_fold_distribution(
 
 
 def split_from_config(
-    df: pd.DataFrame, 
-    config: Dict,
-    score_col: str = "mos"
+    df: pd.DataFrame, config: Dict, score_col: str = "mos"
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     从 YAML 配置读取划分比例
@@ -136,7 +131,7 @@ def split_from_config(
     split_cfg = config.get("split", {})
     train_ratio = split_cfg.get("train_ratio", 0.8)
     val_ratio = split_cfg.get("val_ratio", 0.1)
-    
+
     return split_train_val_test(df, train_ratio, val_ratio, score_col=score_col)
 
 
@@ -145,19 +140,19 @@ def add_split_column(
     train_ratio: float = 0.8,
     val_ratio: float = 0.1,
     random_state: int = 42,
-    score_col: str = "mos"
+    score_col: str = "mos",
 ) -> pd.DataFrame:
     """
     添加 'split' 列到 DataFrame
-    
+
     Returns:
         添加了 'split' 列的 DataFrame (train/val/test)
     """
     train, val, test = split_train_val_test(df, train_ratio, val_ratio, random_state, score_col)
-    
+
     df_copy = df.copy()
     df_copy["split"] = "test"  # 默认都是 test
     df_copy.loc[train.index, "split"] = "train"
     df_copy.loc[val.index, "split"] = "val"
-    
+
     return df_copy

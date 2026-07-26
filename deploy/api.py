@@ -5,31 +5,32 @@ FastAPI 多模型推理服务（统一0-5分尺度 + 媒体尺寸 + 跨媒体策
 启动： uv run python -m deploy.api
 """
 
-import sys
-import time
-import tempfile
 import shutil
+import sys
+import tempfile
+import time
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
 import cv2
 import torch
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+
+from deploy.infer import (
+    Preprocessor,
+    image_to_video_tensor,
+    load_checkpoint,
+    predict_single,
+    predict_with_resnet_style,
+)
 
 # ---------- 路径处理 ----------
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from deploy.infer import (
-    load_checkpoint,
-    predict_single,
-    predict_with_resnet_style,
-    image_to_video_tensor,
-    Preprocessor,
-)
 
 # ---------- 配置 ----------
 DEFAULT_IQA_MODEL_PATH = Path(__file__).resolve().parent / "iqa-models" / "tid2013_best.pt"
@@ -191,9 +192,7 @@ async def evaluate(
         # ---------- 根据模型和媒体类型选择推理策略 ----------
         if model == "resnet_iqa":
             # IQA 模型：图片直推，视频抽帧平均
-            result = predict_with_resnet_style(
-                dl_model, tmp_path, dl_config, DEVICE, mos_min, mos_max
-            )
+            result = predict_with_resnet_style(dl_model, tmp_path, dl_config, DEVICE, mos_min, mos_max)
         elif model == "timeswin_vqa":
             # VQA 模型：视频直推，图片扩展为伪视频
             if media_type == "image":
@@ -213,21 +212,19 @@ async def evaluate(
                 result = {
                     "file": str(tmp_path),
                     "raw_score": round(raw_score, 6),
-                    "mos_score": dataset_mos,   # 临时存储数据集 MOS
+                    "mos_score": dataset_mos,  # 临时存储数据集 MOS
                     "task_type": dl_config.get("task_type", "vqa"),
                     "model_name": dl_config.get("model", {}).get("name", "IQAVQANet"),
                 }
             else:
-                result = predict_single(
-                    dl_model, tmp_path, dl_config, DEVICE, mos_min, mos_max
-                )
+                result = predict_single(dl_model, tmp_path, dl_config, DEVICE, mos_min, mos_max)
         else:
             raise HTTPException(status_code=400, detail=f"未知模型: {model}")
 
         elapsed_ms = (time.time() - t_start) * 1000
 
         raw_score = result.get("raw_score")
-        dataset_mos = result.get("mos_score")   # 来自推理函数的数据集 MOS
+        dataset_mos = result.get("mos_score")  # 来自推理函数的数据集 MOS
 
         # ---------- 计算统一 0-5 分（raw_score * 5）----------
         unified_mos = round(raw_score * 5.0, 4) if raw_score is not None else None
@@ -245,12 +242,12 @@ async def evaluate(
             "model_name": result.get("model_name", model_name),
             "backbone": backbone,
             "dataset": dataset,
-            "mos": unified_mos,                     # ← 前端直接显示的统一0-5分
+            "mos": unified_mos,  # ← 前端直接显示的统一0-5分
             "mos_score": unified_mos,
             "raw_score": raw_score,
             "score": raw_score,
             "overall": unified_mos,
-            "dataset_mos": dataset_mos,             # ← 原始数据集尺度 MOS（仅供调试）
+            "dataset_mos": dataset_mos,  # ← 原始数据集尺度 MOS（仅供调试）
             "inference_ms": round(elapsed_ms, 2),
             "latency_ms": round(elapsed_ms, 2),
             "elapsed_ms": round(elapsed_ms, 2),
@@ -281,6 +278,7 @@ async def evaluate(
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "deploy.api:app",
         host="0.0.0.0",

@@ -97,7 +97,7 @@ _REGISTRY = {
     "konvid-1k": KonvidLoader,
     "t2vqa-db": T2VqaLoader,
     "tid2013": Tid2013Loader,
-    "your_new_dataset": YourNewLoader,   # ← 新增
+    "your_new_dataset": YourNewLoader,  # ← 新增
 }
 ```
 
@@ -152,11 +152,7 @@ from src.utils.config_loader import load_config
 
 config = load_config("configs/datasets/konvid.yaml")
 
-eda = DataEDA(
-    dataset_name="konvid-1k",
-    data_dir=Path("/data/KoNViD-1k"),
-    dataset_info=config["dataset"]
-)
+eda = DataEDA(dataset_name="konvid-1k", data_dir=Path("/data/KoNViD-1k"), dataset_info=config["dataset"])
 
 # 一键运行完整流程
 stats = eda.run_full_eda(skip_integrity=False)

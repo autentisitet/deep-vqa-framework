@@ -69,7 +69,9 @@ class TrainerEngine:
         early_stop_cfg = train_cfg.get("early_stop", {})
         self.early_stop_enabled = early_stop_cfg.get("enabled", True)
         self.patience = early_stop_cfg.get("patience", 10)
-        self.early_stop_monitor = early_stop_cfg.get("monitor", "val_srocc").lower()  # Unify the lowercase at the source
+        self.early_stop_monitor = early_stop_cfg.get(
+            "monitor", "val_srocc"
+        ).lower()  # Unify the lowercase at the source
         self.early_stop_mode = early_stop_cfg.get("mode", "min")
 
         self.early_stop_counter = 0
@@ -77,7 +79,9 @@ class TrainerEngine:
 
         # Checkpoint State Machine Monitoring Initialization
         checkpoint_cfg = train_cfg.get("checkpoint", {})
-        self.checkpoint_monitor = checkpoint_cfg.get("monitor", "val_srocc").lower()  # Unify the lowercase at the source
+        self.checkpoint_monitor = checkpoint_cfg.get(
+            "monitor", "val_srocc"
+        ).lower()  # Unify the lowercase at the source
         self.checkpoint_mode = checkpoint_cfg.get("mode", "max")
         self.best_checkpoint_score = float("inf") if self.checkpoint_mode == "min" else float("-inf")
 
@@ -97,7 +101,9 @@ class TrainerEngine:
 
             for key in keys:
                 if key not in config[section]:
-                    raise ValueError(f"🚨 The configuration file is missing necessary parameters: [{section}.{key}], Please check the YAML file.")
+                    raise ValueError(
+                        f"🚨 The configuration file is missing necessary parameters: [{section}.{key}], Please check the YAML file."
+                    )
 
         logger.info("✅ [System] Configuration item verification passed, everything is ready.")
 
@@ -236,7 +242,9 @@ class TrainerEngine:
             all_trues.extend(labels.cpu().numpy().flatten())
 
         val_loss = running_loss / len(val_loader)
-        traditional_metrics = {k: np.array(v) for k, v in traditional_metrics_payload.items()} if traditional_metrics_payload else None
+        traditional_metrics = (
+            {k: np.array(v) for k, v in traditional_metrics_payload.items()} if traditional_metrics_payload else None
+        )
 
         eval_fn = getattr(self.evaluator, "evaluate", None)
         if eval_fn is None:
@@ -296,7 +304,9 @@ class TrainerEngine:
                     f"Val Loss: {val_loss:.4f} | SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}"
                 )
             else:
-                logger.info(f"📊 [Epoch {epoch}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}")
+                logger.info(
+                    f"📊 [Epoch {epoch}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}"
+                )
 
             # Early cessation method
             if self.early_stop_enabled:
@@ -305,7 +315,9 @@ class TrainerEngine:
                 elif self.early_stop_monitor == "val_loss":
                     score = val_loss
                 else:
-                    logger.warning(f"The monitoring metric '{self.early_stop_monitor}' does not exist; use val_loss instead.")
+                    logger.warning(
+                        f"The monitoring metric '{self.early_stop_monitor}' does not exist; use val_loss instead."
+                    )
                     score = val_loss
 
                 if self._is_improved(score, self.best_early_stop_score, self.early_stop_mode):
@@ -342,7 +354,6 @@ class TrainerEngine:
             return current > best
         return False
 
-
     def _save_checkpoint(self, epoch: int, val_loss: float, metrics: Dict[str, Any], is_best: bool):
         """Save model checkpoints to the configured directory."""
         import re
@@ -357,12 +368,14 @@ class TrainerEngine:
 
         # NOTE：Make sure that the base_filename obtained here has already been aligned.
         base_name = self.evaluator.base_filename
-        current_fold = self.config.get('current_fold', '1')
+        current_fold = self.config.get("current_fold", "1")
         current_score = metrics.get(self.checkpoint_monitor, 0.0)
 
         def extract_score(path: Path):
             match = re.search(rf"{re.escape(self.checkpoint_monitor)}(-?\d+\.\d+)", path.name.lower())
-            return float(match.group(1)) if match else (-float("inf") if self.checkpoint_mode == "max" else float("inf"))
+            return (
+                float(match.group(1)) if match else (-float("inf") if self.checkpoint_mode == "max" else float("inf"))
+            )
 
         state = {
             "epoch": epoch,
@@ -380,7 +393,7 @@ class TrainerEngine:
                 clean_base = base_name
             else:
                 clean_base = f"{base_name}_fold{current_fold}"
-            
+
             pt_name = f"{clean_base}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
             target_path = save_dir / pt_name
 
@@ -394,7 +407,9 @@ class TrainerEngine:
                 all_best_pts.sort(key=extract_score, reverse=reverse_flag)
                 for low_pt in all_best_pts[top_k:]:
                     low_pt.unlink()
-                    logger.warning(f"🗑️  [Checkpoint] Delete old model files and keep only the K most recent ones ──> {low_pt.name}")
+                    logger.warning(
+                        f"🗑️  [Checkpoint] Delete old model files and keep only the K most recent ones ──> {low_pt.name}"
+                    )
 
             # 更新 *_best.pt 软链接（复制最新的最佳模型）
             standard_best_path = save_dir / f"{clean_base}_best.pt"

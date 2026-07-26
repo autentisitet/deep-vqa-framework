@@ -139,7 +139,12 @@ class T2VqaLoader(BaseMetadataLoader):
     def load(self, meta_file: Path) -> pd.DataFrame:
         # T2VQA 专用逻辑
         try:
-            df = pd.read_csv(meta_file, sep="|", header=None, names=["sample_id", "description", "mos"])
+            df = pd.read_csv(
+                meta_file,
+                sep="|",
+                header=None,
+                names=["sample_id", "description", "mos"],
+            )
             df["description"] = df["description"].str.strip()
             df = self._ensure_extension(df, ".mp4")
             return df[["sample_id", "mos"]]

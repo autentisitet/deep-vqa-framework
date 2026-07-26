@@ -10,24 +10,48 @@
 # 5. install uv, apt modules, python modules...etc
 # 6. set the environment configs
 # 7. write the base_config.yaml
-set -e
+set -e -o pipefail
 
 show_help() {
     echo "Usage: ./setup_env.sh [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --mirror     Use TUNA (Tsinghua University) mirror for faster downloads in China."
+    echo "  --mirror         Use TUNA mirror for faster downloads in China."
+    echo "  --dev            Install development tools (ruff, mypy, black, isort)."
+    echo "  --security       Install security tools (pip-audit, cyclonedx-bom, safety)."
+    echo "  --all            Install everything (mirror + dev + security)."
     echo "  --h, --help      Show this help message."
+    echo ""
+    echo "Examples:"
+    echo "  ./setup_env.sh --mirror             # Use mirror only"
+    echo "  ./setup_env.sh --dev                # Install dev tools"
+    echo "  ./setup_env.sh --security           # Install security tools"
+    echo "  ./setup_env.sh --all                # Install everything"
     echo ""
     exit 0
 }
 
 
 USE_MIRROR=false
+INSTALL_DEV=false
+INSTALL_SECURITY=false
+
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mirror)
             USE_MIRROR=true
+            shift ;;
+        --dev)
+            INSTALL_DEV=true
+            shift ;;
+        --security)
+            INSTALL_SECURITY=true
+            shift ;;
+        --all)
+            USE_MIRROR=true
+            INSTALL_DEV=true
+            INSTALL_SECURITY=true
             shift ;;
         --help|-h)
             show_help ;;
@@ -36,6 +60,8 @@ while [[ $# -gt 0 ]]; do
             show_help ;;
     esac
 done
+
+
 
 HAS_SUDO=false
 if command -v sudo &> /dev/null; then
@@ -78,7 +104,7 @@ detect_proxy_port() {
     fi
 
 
-    for port in 7890 10809 1080; do
+    for port in 7890 7897 10809 1080; do
         if curl -s -o /dev/null --max-time 2 --proxy "http://127.0.0.1:$port" "https://httpbin.org/get" 2>/dev/null; then
             echo "$port"
             return 0
@@ -103,6 +129,17 @@ setup_proxy() {
 }
 
 
+ensure_optional_deps() {
+    if ! grep -q "\[project.optional-dependencies\]" pyproject.toml 2>/dev/null; then
+        echo "" >> pyproject.toml
+        echo "[project.optional-dependencies]" >> pyproject.toml
+        echo "dev = []" >> pyproject.toml
+        echo "security = []" >> pyproject.toml
+    fi
+}
+
+
+
 # Output styling
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -110,6 +147,34 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 
+
+
+# ============================================================
+# Configure project directories
+# ============================================================
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_PARENT_DIR="$(dirname "$PROJECT_DIR")"
+DETECTED_PATH="${PROJECT_DIR}/datasets"
+
+
+
+# ============================================================
+# Configure uv cache directory, python version, and ensure the cache directory exists
+# ============================================================
+export UV_CACHE_DIR="$PROJECT_PARENT_DIR/.uv_cache"
+PYTHON_VERSION="3.12"
+export UV_CACHE_DIR
+
+mkdir -p "$PROJECT_DIR"
+mkdir -p "$DETECTED_PATH"
+cd "$PROJECT_DIR"
+
+
+
+# ============================================================
+# Configure package lists
+# ============================================================
 APT_PACKAGES=(
     curl
     wget
@@ -127,7 +192,7 @@ APT_PACKAGES=(
     imagemagick
     dos2unix
 )
-UV_PACKAGES=(
+UV_CORE_PACKAGES=(
     opencv-python decord
     pyyaml
     numpy pandas matplotlib pillow seaborn
@@ -135,19 +200,17 @@ UV_PACKAGES=(
     scikit-learn scipy
     gdown
 )
+UV_DEV_PACKAGES=(
+    ruff mypy black isort
+)
+UV_SECURITY_PACKAGES=(
+    pip-audit cyclonedx-bom safety
+)
 
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-PROJECT_PARENT_DIR="$(dirname "$PROJECT_DIR")"
-DETECTED_PATH="${PROJECT_DIR}/datasets"
-
-
-mkdir -p "$PROJECT_DIR"
-mkdir -p "$DETECTED_PATH"
-
-
-cd "$PROJECT_DIR"
+# ============================================================
+# Install basic tools and configure mirrors if needed
+# ===========================================================
 echo "⚙️ Installing basic tools..."
 if [ -f "/etc/network_environment" ]; then
     source /etc/network_environment
@@ -178,18 +241,83 @@ ${APP_SUDO} apt-get install -y ${APT_OPT[@]} "${APT_PACKAGES[@]}"
 
 
 
-export UV_CACHE_DIR="$PROJECT_PARENT_DIR/.uv_cache"
+
+# ============================================================
+# Install uv if not present
+# ============================================================
 if ! command -v uv &> /dev/null; then
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    if [ -f "$HOME/.cargo/env" ]; then
-        source "$HOME/.cargo/env"
+    UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    INSTALLED=false
+
+    if command -v aria2c &> /dev/null; then
+        echo "📥 Using aria2 for faster download..."
+        if aria2c -x 4 -s 4 \
+               -o /tmp/uv_install.sh \
+               --user-agent="$UA" \
+               --timeout=30 \
+               --max-tries=3 \
+               --console-log-level=error \
+               --allow-overwrite=true \
+               https://astral.sh/uv/install.sh; then
+            bash /tmp/uv_install.sh && rm -f /tmp/uv_install.sh && INSTALLED=true
+        else
+            echo "⚠️ aria2 failed, trying next method..."
+        fi
     fi
-    export PATH="$HOME/.local/bin:$PATH"
-    export PATH="$HOME/.cargo/bin:$PATH"
+
+
+    if [ "$INSTALLED" = false ] && command -v wget &> /dev/null; then
+        echo "📥 Using wget..."
+        if wget -q --show-progress \
+             -O /tmp/uv_install.sh \
+             -c \
+             -U "$UA" \
+             --timeout=30 \
+             --tries=3 \
+             https://astral.sh/uv/install.sh; then
+            bash /tmp/uv_install.sh && rm -f /tmp/uv_install.sh && INSTALLED=true
+        else
+            echo "⚠️ wget failed, trying next method..."
+        fi
+    fi
+
+
+    if [ "$INSTALLED" = false ] && command -v curl &> /dev/null; then
+        echo "📥 Using curl..."
+        if curl -# -L \
+             -A "$UA" \
+             --connect-timeout 30 \
+             --retry 3 \
+             --output /tmp/uv_install.sh \
+             https://astral.sh/uv/install.sh; then
+            bash /tmp/uv_install.sh && rm -f /tmp/uv_install.sh && INSTALLED=true
+        else
+            echo "⚠️ curl failed"
+        fi
+    fi
+
+
+    if [ "$INSTALLED" = true ]; then
+        if [ -f "$HOME/.cargo/env" ]; then
+            source "$HOME/.cargo/env"
+        fi
+        echo -e "${GREEN}✅ uv installed${NC}"
+    else
+        echo -e "${RED}❌ All download methods failed${NC}"
+        echo "   Please check your network connection and try again."
+        exit 1
+    fi
+else
+    echo -e "${GREEN}✅ uv already installed: $(uv --version)${NC}"
 fi
 
+export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.cargo/bin:$PATH"
 
-# ✅ Check if pyproject.toml exists.
+
+# ============================================================
+# Check if pyproject.toml exists and initialize uv if not
+# ============================================================
 if [ -f "pyproject.toml" ]; then
     echo -e "${GREEN}✅ pyproject.toml found. Skipping uv init.${NC}"
 else
@@ -200,80 +328,151 @@ fi
 # Ensure the project name is correct.
 sed -i 's/name = ".*"/name = "deep-vqa-framework"/' pyproject.toml
 
-# Detect GPU for PyTorch
+
+# ============================================================
+# Detect GPU for PyTorch and set the appropriate index URL for torch installation
+# ============================================================
 if command -v nvidia-smi &> /dev/null; then
-    echo "✔ Detected GPU: Configuring CUDA-enabled torch."
-    TORCH_INDEX="https://download.pytorch.org/whl/cu121"
+    CUDA_VERSION=$(nvidia-smi 2>/dev/null | grep -oP 'CUDA Version:\s*\K[0-9]+\.[0-9]+' | head -1)
+    if ! [[ "$CUDA_VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        echo "⚠ Could not reliably detect CUDA version, falling back to 12.1"
+        CUDA_VERSION="12.1"
+    fi
+
+    CUDA_MAJOR_MINOR=$(echo "$CUDA_VERSION" | tr -d '.')
+    TORCH_INDEX="https://download.pytorch.org/whl/cu${CUDA_MAJOR_MINOR}"
+    echo "✔ Detected GPU: Using CUDA $CUDA_VERSION"
+    USE_TORCH_INDEX=true
 else
     echo "⚠ Detected CPU only: Configuring standard torch."
-    TORCH_INDEX="https://download.pytorch.org/whl/cpu"
+    TORCH_INDEX=""
+    USE_TORCH_INDEX=false
 fi
 
+
+
+
+# ============================================================
+# Setup Python virtual environment and install dependencies
+# ============================================================
 echo "⚙️ Setting up Python environment..."
 
-# ============================================================
-# ✅ 核心逻辑：如果 .venv 存在 → 检查缺失包 → uv add
-#             如果 .venv 不存在 → 从头创建 → uv sync
-# ============================================================
-
 if [ -d ".venv" ] && [ -f ".venv/bin/python" ]; then
-    echo -e "${GREEN}✅ .venv already exists and is valid.${NC}"
-    source .venv/bin/activate
-    
-    echo "📌 Pinning Python version..."
-    uv python pin 3.12 2>/dev/null || true
-    
-    # ✅ 检查缺失的包，只添加缺失的
-    echo "Checking dependencies..."
-    MISSING_PACKAGES=()
-    for pkg in "${UV_PACKAGES[@]}"; do
-        if ! uv pip show "$pkg" &> /dev/null 2>&1; then
-            MISSING_PACKAGES+=("$pkg")
-        fi
-    done
-    
-    if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
-        echo -e "${BLUE}📦 Adding missing packages: ${MISSING_PACKAGES[*]}${NC}"
-        uv add "${MISSING_PACKAGES[@]}" --no-sync || { 
-            echo -e "${YELLOW}⚠️  Failed to add packages individually, trying full sync...${NC}"
-            uv sync --extra-index-url "$TORCH_INDEX" --no-dev --jobs 2
-        }
-        echo "Syncing dependencies..."
-        uv sync --extra-index-url "$TORCH_INDEX" --no-dev --jobs 2
-    else
-        echo -e "${GREEN}✅ All packages already present. Skipping sync.${NC}"
-    fi
-    
+    echo -e "${GREEN}✅ .venv already exists.${NC}"
 else
-    # ✅ .venv 不存在，从头创建
-    echo -e "${BLUE}📂 Creating new .venv...${NC}"
-    if command -v python3 &> /dev/null; then
-        uv venv .venv --python "$(which python3)" --seed --clear
-    else
-        uv venv .venv --python 3.12 --seed --clear
-    fi
-    source .venv/bin/activate
-    
-    echo "📌 Pinning Python version and syncing packages..."
-    uv python pin 3.12
-    
-    echo "Syncing dependencies..."
-    uv sync --extra-index-url "$TORCH_INDEX" --no-dev --jobs 2
+    echo -e "${BLUE}📂 Creating new .venv with Python ${PYTHON_VERSION}...${NC}"
+    uv venv .venv --python "$PYTHON_VERSION" --seed
 fi
+
+
+# Pin the Python version
+echo "📌 Pinning Python version to ${PYTHON_VERSION}..."
+uv python pin "$PYTHON_VERSION" 2>/dev/null || true
+
+
+# Check and install missing packages
+echo "Checking dependencies..."
+MISSING_PACKAGES=()
+for pkg in "${UV_CORE_PACKAGES[@]}"; do
+    if ! uv pip show "$pkg" &> /dev/null 2>&1; then
+        MISSING_PACKAGES+=("$pkg")
+    fi
+done
+
+# Install missing packages
+if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+    echo -e "${BLUE}📦 Adding missing packages: ${MISSING_PACKAGES[*]}${NC}"
+    if ! uv add "${MISSING_PACKAGES[@]}" --no-sync 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  Failed to add packages individually, trying full sync...${NC}"
+    fi
+    echo "Syncing dependencies..."
+    # 构建 sync 命令参数
+    SYNC_ARGS=""
+    if [ -n "$UV_INDEX_URL" ]; then
+        SYNC_ARGS="$SYNC_ARGS --index-url $UV_INDEX_URL"
+    fi
+    if [ "$USE_TORCH_INDEX" = true ] && [ -n "$TORCH_INDEX" ]; then
+        SYNC_ARGS="$SYNC_ARGS --extra-index-url $TORCH_INDEX"
+    fi
+    SYNC_ARGS="$SYNC_ARGS --no-dev"
+    # 直接执行
+    uv sync $SYNC_ARGS
+else
+    echo -e "${GREEN}✅ All packages already present. Skipping sync.${NC}"
+fi
+
+
+echo -e "${BLUE}🔧 Installing security tools...${NC}"
+
+# Check and create optional-dependencies configuration
+# Install development tools if requested
+if [ "$INSTALL_DEV" = true ]; then
+    echo -e "${BLUE}🔧 Installing development tools...${NC}"
+    ensure_optional_deps
+    
+    uv add --optional dev "${UV_DEV_PACKAGES[@]}" 2>/dev/null || true
+    
+    echo -e "${GREEN}✅ Development tools installed:${NC}"
+    echo "  • ruff (code linting & formatting)"
+    echo "  • mypy (type checking)"
+    echo "  • black (code formatter)"
+    echo "  • isort (import sorting)"
+else
+    echo -e "${YELLOW}ℹ️  Skipping development tools.${NC}"
+    echo "   Use --dev to install them."
+fi
+
+# Install security tools if requested
+if [ "$INSTALL_SECURITY" = true ]; then
+    echo -e "${BLUE}🔒 Installing security tools...${NC}"
+    ensure_optional_deps
+    
+    uv add --optional security "${UV_SECURITY_PACKAGES[@]}" 2>/dev/null || true
+    
+    echo -e "${GREEN}✅ Security tools installed:${NC}"
+    echo "  • pip-audit (vulnerability scanning)"
+    echo "  • cyclonedx-bom (SBOM generation)"
+    echo "  • safety (dependency security check)"
+else
+    echo -e "${YELLOW}ℹ️  Skipping security tools.${NC}"
+    echo "   Use --security to install them."
+fi
+
 
 # Non-intrusive configuration apt mirror source
 [ -n "$TEMP_SOURCES" ] && [ -f "$TEMP_SOURCES" ] && rm -f "$TEMP_SOURCES"
 
 
+
+# ============================================================
+# Verify installation and configuration
+# ============================================================
 echo "------------------------------------------------"
 echo "🔍 Verifying installation..."
 uv run python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
 uv run python -c "import cv2, numpy, pandas, loguru, tqdm, sklearn, scipy, gdown; print('✅ All dependencies imported successfully')"
+echo ""
 echo "------------------------------------------------"
-
-echo "------------------------------------------------"
-echo "🚀 Configuration complete! Execute the command to start training:"
-echo "   chmod +x ./manage_data.sh      "
-echo "   ./manage_data.sh               "
-echo "   nohup uv run python -m src.main > train.log 2>&1"
+echo "🚀 Configuration complete!"
+echo "   Python Version: ${PYTHON_VERSION}"
+echo "   Virtual Env: $(pwd)/.venv"
+echo "   Dev Tools: $([ "$INSTALL_DEV" = true ] && echo "${GREEN}Installed.${NC}" || echo "${YELLOW}Skipped.${NC}")"
+echo "   Security Tools: $([ "$INSTALL_SECURITY" = true ] && echo "${GREEN}Installed.${NC}" || echo "${YELLOW}Skipped.${NC}")"
+echo ""
+if [ "$INSTALL_DEV" = false ]; then
+    echo "💡 To install dev tools later:"
+    echo "   uv add --optional dev ruff mypy black isort"
+fi
+if [ "$INSTALL_SECURITY" = false ]; then
+    echo "💡 To install security tools later:"
+    echo "   uv add --optional security pip-audit cyclonedx-bom safety"
+fi
+echo ""
+echo "🔔 IMPORTANT: uv is installed at ~/.local/bin/uv"
+echo ""
+echo "   To use uv in your current shell, run:"
+echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
+echo ""
+echo "   To make this permanent, add to ~/.bashrc:"
+echo "   echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
 echo "------------------------------------------------"

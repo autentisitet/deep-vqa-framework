@@ -26,7 +26,12 @@ cv2.setNumThreads(0)  # or `cv2.setNumThreads(1)`
 def main():
     # 1. Command line argument parsing
     parser = argparse.ArgumentParser(description="Deep VQA/IQA General Data-Driven Framework")
-    parser.add_argument("--model", type=str, default="resnet_iqa", help="Model filename (e.g., resnet_iqa)")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="resnet_iqa",
+        help="Model filename (e.g., resnet_iqa)",
+    )
     parser.add_argument("--dataset", type=str, default="TID2013", help="Target dataset name")
     parser.add_argument("--smoke_test", action="store_true", help="Activate fast smoke check")
     args = parser.parse_args()
@@ -45,7 +50,9 @@ def main():
 
     config["dataset_name"] = args.dataset
 
-    logger.debug(f"[Main] Command line arguments: model={args.model}, dataset={args.dataset}, smoke_test={args.smoke_test}")
+    logger.debug(
+        f"[Main] Command line arguments: model={args.model}, dataset={args.dataset}, smoke_test={args.smoke_test}"
+    )
 
     dataset_name = config["dataset_name"]
     task_type = config.get("task_type", "vqa")
@@ -86,7 +93,9 @@ def main():
     plots_dir.mkdir(parents=True, exist_ok=True)
     model_outputs_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.debug(f"[Main] Result catalog preparation: train_logs={train_logs_dir}, plots={plots_dir}, outputs={model_outputs_dir}")
+    logger.debug(
+        f"[Main] Result catalog preparation: train_logs={train_logs_dir}, plots={plots_dir}, outputs={model_outputs_dir}"
+    )
 
     config.setdefault("logging", {}).update({"save_dir": str(model_outputs_dir), "log_dir": str(train_logs_dir)})
 
@@ -100,7 +109,11 @@ def main():
 
     # 4. Initialize core components
     base_fn = log_prepare(model_name=model_name, dataset_name=dataset_name)
-    eda_engine = DataEDA(dataset_name=args.dataset, data_dir=data_dir, dataset_info=config["dataset_info"])
+    eda_engine = DataEDA(
+        dataset_name=args.dataset,
+        data_dir=data_dir,
+        dataset_info=config["dataset_info"],
+    )
 
     eda_engine.run_full_eda(skip_integrity=True)
     if eda_engine.df is None or "split" not in eda_engine.df.columns:
@@ -113,14 +126,18 @@ def main():
     if "mos_min" in eda_engine.stats and "mos_max" in eda_engine.stats:
         config.setdefault("dataset_info", {})["mos_min"] = eda_engine.stats["mos_min"]
         config.setdefault("dataset_info", {})["mos_max"] = eda_engine.stats["mos_max"]
-        logger.info(f"📐 [Main] MOS 归一化范围已写入配置: [{eda_engine.stats['mos_min']:.3f}, {eda_engine.stats['mos_max']:.3f}]")
+        logger.info(
+            f"📐 [Main] MOS 归一化范围已写入配置: [{eda_engine.stats['mos_min']:.3f}, {eda_engine.stats['mos_max']:.3f}]"
+        )
 
     if args.smoke_test and eda_engine.df is not None:
         logger.info(f"⚡ [Main] Smoke sampling: Truncating metadata from {len(eda_engine.df)} to 16 samples.")
         eda_engine.df = eda_engine.df.sample(n=min(16, len(eda_engine.df)), random_state=42).reset_index(drop=True)
 
     if "split" not in eda_engine.df.columns:
-        logger.error("[Main] Critical error: Data EDA did not correctly split the split column, making it impossible to safely isolate the test set!")
+        logger.error(
+            "[Main] Critical error: Data EDA did not correctly split the split column, making it impossible to safely isolate the test set!"
+        )
         # Help: 查看数据框列名，输入 'p eda_engine.df.columns.tolist()'
         pdb.set_trace()
         return

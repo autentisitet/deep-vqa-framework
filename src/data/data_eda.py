@@ -13,7 +13,7 @@ from src.data.eda.integrity import check_media_integrity
 from src.data.eda.split import check_fold_distribution, split_train_val_test
 from src.data.eda.statistics import analyze_image_properties, analyze_video_properties, compute_mos_statistics
 from src.data.metadata_loader_factory import MetadataLoaderFactory
-from src.data.types import DatasetType
+from src.data.data_types import DatasetType
 from src.utils.config_loader import safe_load_yaml
 from src.utils.path_manager import PathManager
 
@@ -124,7 +124,7 @@ class DataEDA:
             logger.error(f"❌ Dataset '{self.dataset_name}' not found in config")
             raise KeyError(f"Dataset '{self.dataset_name}' missing. Available: {available}")
 
-        return lowered_config[target_key] 
+        return lowered_config[target_key]
 
     # ==================== 一、Basic Analysis ====================
 
@@ -178,7 +178,9 @@ class DataEDA:
 
         logger.info(f"⚙️ [Split] 按比例切分: Train={train_ratio}, Val={val_ratio}")
 
-        train_df, val_df, test_df = split_train_val_test(self.df, train_ratio=train_ratio, val_ratio=val_ratio, random_state=42)
+        train_df, val_df, test_df = split_train_val_test(
+            self.df, train_ratio=train_ratio, val_ratio=val_ratio, random_state=42
+        )
 
         self.df["split"] = "train"
         self.df.loc[val_df.index, "split"] = "val"
@@ -216,10 +218,10 @@ class DataEDA:
         if props and "error" not in props:
             logger.info(f"    Scanned Physical Videos on Disk: {props.get('total_files', 0)}")
             # ✅ 适配新格式：从嵌套字典中取值
-            width = props.get('resolution', {}).get('width', {}).get('mean', 0)
-            height = props.get('resolution', {}).get('height', {}).get('mean', 0)
-            fps = props.get('fps', {}).get('mean', 0)
-            frame_count = props.get('frame_count', {}).get('mean', 0)
+            width = props.get("resolution", {}).get("width", {}).get("mean", 0)
+            height = props.get("resolution", {}).get("height", {}).get("mean", 0)
+            fps = props.get("fps", {}).get("mean", 0)
+            frame_count = props.get("frame_count", {}).get("mean", 0)
             logger.info(f"    Sample Video Size: {int(width)}x{int(height)} | FPS: {fps:.2f}")
             logger.info(f"    Total Frame Count: {int(frame_count)}")
 
@@ -360,7 +362,9 @@ class DataEDA:
         logger.info(f"  Filename-Label Strict Complement Match: {match}")
         if not match:
             logger.warning(f"    Diff - Excess files on Disk: {len(physical_names - label_names)}")
-            logger.warning(f"    Diff - Deficit files on Disk (Missing from labels): {len(label_names - physical_names)}")
+            logger.warning(
+                f"    Diff - Deficit files on Disk (Missing from labels): {len(label_names - physical_names)}"
+            )
         return match
 
     def visualize_mos_distribution(self, save_dir: Path = Path("results/plots")):
@@ -372,7 +376,11 @@ class DataEDA:
         axes[0].hist(self.df["mos"], bins=25, edgecolor="black", alpha=0.75, color="steelblue")
         axes[0].set_xlabel("MOS / DMOS Score")
         axes[0].set_ylabel("Sample Frequency")
-        axes[0].set_title(f"{self.dataset_name} - Continuous Score Distribution", fontsize=11, fontweight="bold")
+        axes[0].set_title(
+            f"{self.dataset_name} - Continuous Score Distribution",
+            fontsize=11,
+            fontweight="bold",
+        )
         axes[0].grid(True, linestyle="--", alpha=0.4)
 
         axes[1].boxplot(
@@ -403,12 +411,12 @@ class DataEDA:
         else:
             min_val = self.df["mos"].min()
             max_val = self.df["mos"].max()
-            
+
         # 防零除防御
         denom = (max_val - min_val) if max_val != min_val else 1.0
         self.df["normalized_score"] = (self.df["mos"] - min_val) / denom
 
-        self.stats["mos_min"] = float(min_val)   # 加这两行
+        self.stats["mos_min"] = float(min_val)  # 加这两行
         self.stats["mos_max"] = float(max_val)
         logger.info("  Score Processing -> Scale normalizes [0, 1] completed.")
         return self.df
@@ -507,7 +515,9 @@ class DataEDA:
             if video_samples:
                 temporal_report = self.check_temporal_consistency_by_path(video_samples[0])
                 logger.info(f"   [Temporal Diagnostics Template] Sample: {video_samples[0].name}")
-                logger.info(f"   └─ Frame Delta Diff: {temporal_report['avg_frame_delta']} | Has Jumps/Drop: {temporal_report['has_jumps']}")
+                logger.info(
+                    f"   └─ Frame Delta Diff: {temporal_report['avg_frame_delta']} | Has Jumps/Drop: {temporal_report['has_jumps']}"
+                )
                 self.stats["sample_temporal_report"] = temporal_report
 
         self.stats.update({"integrity": integrity_res, "fold_variance": fold_res})

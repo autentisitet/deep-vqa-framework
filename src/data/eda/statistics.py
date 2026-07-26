@@ -1,20 +1,16 @@
 # src/data/eda/statistics.py
 
-import cv2
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from collections import Counter
 
+import cv2
 import numpy as np
 import pandas as pd
 from loguru import logger
 
 
-def analyze_image_properties(
-    image_paths: List[Path], 
-    sample_limit: int = 1000,
-    detailed: bool = False
-) -> Dict:
+def analyze_image_properties(image_paths: List[Path], sample_limit: int = 1000, detailed: bool = False) -> Dict:
     """
     分析图像属性
 
@@ -110,11 +106,7 @@ def analyze_image_properties(
     return result
 
 
-def analyze_video_properties(
-    video_paths: List[Path],
-    sample_limit: int = 50,
-    detailed: bool = False
-) -> Dict:
+def analyze_video_properties(video_paths: List[Path], sample_limit: int = 50, detailed: bool = False) -> Dict:
     """
     分析视频属性
 
@@ -333,10 +325,14 @@ def print_statistics_report(report: Dict):
         logger.info(f"    Files: {images.get('total_files', 0)} (sampled: {images.get('sampled_files', 0)})")
         res = images.get("resolution", {})
         if res:
-            logger.info(f"    Resolution: {res.get('min', 0)}x{res.get('min_h', 0)} ~ {res.get('max', 0)}x{res.get('max_h', 0)}")
+            logger.info(
+                f"    Resolution: {res.get('min', 0)}x{res.get('min_h', 0)} ~ {res.get('max', 0)}x{res.get('max_h', 0)}"
+            )
         size = images.get("file_size_mb", {})
         if size:
-            logger.info(f"    File Size: {size.get('min', 0):.2f}MB ~ {size.get('max', 0):.2f}MB (mean: {size.get('mean', 0):.2f}MB)")
+            logger.info(
+                f"    File Size: {size.get('min', 0):.2f}MB ~ {size.get('max', 0):.2f}MB (mean: {size.get('mean', 0):.2f}MB)"
+            )
 
     videos = report.get("videos", {})
     if videos and "error" not in videos:
@@ -348,7 +344,9 @@ def print_statistics_report(report: Dict):
             logger.info(f"    FPS: {fps.get('min', 0):.1f} ~ {fps.get('max', 0):.1f} (mean: {fps.get('mean', 0):.1f})")
         duration = videos.get("duration_sec", {})
         if duration:
-            logger.info(f"    Duration: {duration.get('min', 0):.1f}s ~ {duration.get('max', 0):.1f}s (mean: {duration.get('mean', 0):.1f}s)")
+            logger.info(
+                f"    Duration: {duration.get('min', 0):.1f}s ~ {duration.get('max', 0):.1f}s (mean: {duration.get('mean', 0):.1f}s)"
+            )
 
     scores = report.get("scores", {})
     if scores and "error" not in scores:
@@ -358,6 +356,8 @@ def print_statistics_report(report: Dict):
         logger.info(f"    Range: [{scores.get('mos_range', (0, 0))[0]:.3f}, {scores.get('mos_range', (0, 0))[1]:.3f}]")
         logger.info(f"    Mean: {scores.get('mos_mean', 0):.3f} | Std: {scores.get('mos_std', 0):.3f}")
         logger.info(f"    Skew: {scores.get('mos_skew', 0):.3f} | Kurtosis: {scores.get('mos_kurtosis', 0):.3f}")
-        logger.info(f"    Outliers (3σ): {scores.get('outlier_count', 0)} ({scores.get('outlier_ratio', 0)*100:.1f}%)")
+        logger.info(
+            f"    Outliers (3σ): {scores.get('outlier_count', 0)} ({scores.get('outlier_ratio', 0) * 100:.1f}%)"
+        )
 
     logger.info("=" * 60)

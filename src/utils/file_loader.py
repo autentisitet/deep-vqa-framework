@@ -5,7 +5,7 @@ from typing import Dict, Set, Tuple, Union
 
 from loguru import logger
 
-from src.data.types import DatasetType
+from src.data.data_types import DatasetType
 
 
 @dataclass

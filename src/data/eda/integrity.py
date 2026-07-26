@@ -5,7 +5,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 from loguru import logger
 
-from src.data.types import DatasetType
+from src.data.data_types import DatasetType
 
 # TODO:
 # 检查是否有sample data损坏、缺失、重复
@@ -39,12 +39,12 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
         "frame_count": 0,
         "bad_frames": 0,
         "black_frames": 0,
-        "white_frames": 0,           # 白帧计数
+        "white_frames": 0,  # 白帧计数
         "actual_frames": 0,
         "fps": 0,
         "resolution": (0, 0),
         "duration_sec": 0,
-        "frame_drops": False,        # 是否有跳帧
+        "frame_drops": False,  # 是否有跳帧
         "irregular_interval_ratio": 0.0,  # 帧间隔异常比例
     }
 
@@ -69,7 +69,7 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
 
         prev_frame = None
         consecutive_fail = 0
-        timestamps = []              # 记录时间戳用于跳帧检测
+        timestamps = []  # 记录时间戳用于跳帧检测
 
         for idx in sample_indices:
             try:
@@ -82,7 +82,7 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
                 try:
                     timestamp = vr.get_frame_timestamp(idx)[0] * 1000  # 秒转毫秒
                     timestamps.append(timestamp)
-                except:
+                except Exception:
                     # 如果 decord 不支持 get_frame_timestamp，用帧索引估算
                     timestamps.append(idx / diagnostics["fps"] * 1000)
 
@@ -117,11 +117,11 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
             intervals = np.diff(timestamps)
             mean_interval = np.mean(intervals)
             std_interval = np.std(intervals)
-            
+
             # 如果标准差 > 均值的 20%，说明帧间隔不均匀（可能有跳帧）
             irregular_ratio = std_interval / (mean_interval + 1e-6)
             diagnostics["irregular_interval_ratio"] = irregular_ratio
-            
+
             # 如果有某个间隔超过平均间隔的 1.5 倍，说明可能有跳帧
             max_interval = np.max(intervals)
             if max_interval > mean_interval * 1.5:
@@ -131,7 +131,11 @@ def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple
         sample_count = max(1, len(sample_indices))
         bad_ratio = diagnostics["bad_frames"] / sample_count
         if bad_ratio > 0.3:
-            return False, f"Too high percentage of bad frames: {bad_ratio:.2%}", diagnostics
+            return (
+                False,
+                f"Too high percentage of bad frames: {bad_ratio:.2%}",
+                diagnostics,
+            )
 
         return True, None, diagnostics
 
@@ -153,12 +157,15 @@ def check_video_integrity_fallback(path: Path, sample_interval: int = 30) -> Tup
         "frame_count": int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
         "bad_frames": 0,
         "black_frames": 0,
-        "white_frames": 0,           # 白帧计数
+        "white_frames": 0,  # 白帧计数
         "actual_frames": 0,
         "fps": cap.get(cv2.CAP_PROP_FPS),
-        "resolution": (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))),
+        "resolution": (
+            int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+        ),
         "duration_sec": 0,
-        "frame_drops": False,        # 是否有跳帧
+        "frame_drops": False,  # 是否有跳帧
         "irregular_interval_ratio": 0.0,  # 帧间隔异常比例
     }
 
@@ -173,7 +180,7 @@ def check_video_integrity_fallback(path: Path, sample_interval: int = 30) -> Tup
     frame_idx = 0
     prev_gray = None
     consecutive_fail = 0
-    timestamps = []                  # 记录时间戳
+    timestamps = []  # 记录时间戳
     prev_timestamp = 0
 
     while True:
@@ -222,10 +229,10 @@ def check_video_integrity_fallback(path: Path, sample_interval: int = 30) -> Tup
         intervals = np.diff(timestamps)
         mean_interval = np.mean(intervals)
         std_interval = np.std(intervals)
-        
+
         irregular_ratio = std_interval / (mean_interval + 1e-6)
         diagnostics["irregular_interval_ratio"] = irregular_ratio
-        
+
         max_interval = np.max(intervals)
         if max_interval > mean_interval * 1.5:
             diagnostics["frame_drops"] = True
@@ -284,7 +291,9 @@ def check_image_integrity(path: Path) -> Tuple[bool, Optional[str], Dict]:
         return False, str(e), {}
 
 
-def check_media_integrity(path: Path, media_type: DatasetType, sample_interval: int = 30) -> Tuple[bool, Optional[str], Dict]:
+def check_media_integrity(
+    path: Path, media_type: DatasetType, sample_interval: int = 30
+) -> Tuple[bool, Optional[str], Dict]:
     """
     Unified Media Integrity Check Entry Point
 

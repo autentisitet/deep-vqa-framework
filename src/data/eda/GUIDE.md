@@ -38,15 +38,15 @@
 
 ```python
 {
-    "frame_count": 240,                # 文件声称的帧数
-    "actual_frames": 240,              # 实际成功解码的帧数
-    "black_frames": 0,                 # 黑帧数量
-    "white_frames": 0,                 # 白帧数量
-    "bad_frames": 2,                   # 坏帧数量（帧间差异 < 0.5）
-    "frame_drops": False,              # 是否检测到跳帧
+    "frame_count": 240,  # 文件声称的帧数
+    "actual_frames": 240,  # 实际成功解码的帧数
+    "black_frames": 0,  # 黑帧数量
+    "white_frames": 0,  # 白帧数量
+    "bad_frames": 2,  # 坏帧数量（帧间差异 < 0.5）
+    "frame_drops": False,  # 是否检测到跳帧
     "irregular_interval_ratio": 0.08,  # 帧间隔异常比例（> 0.2 表示明显跳帧）
     "fps": 30.0,
-    "resolution": (1920, 1080)
+    "resolution": (1920, 1080),
 }
 ```
 

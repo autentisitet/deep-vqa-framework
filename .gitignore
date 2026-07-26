@@ -6,14 +6,18 @@
 
 datasets/
 results/
+reports/
 .download_cache/
 scripts/download_flag
 
 
 .venv/
 venv/
+env/
+.env/
 .ruff_cache/
 .uv_cache/
+.mypy_cache/
 .cache/
 __pycache__/
 *.py[cod]
@@ -30,3 +34,5 @@ Thumbs.db
 
 .markdownlint.json
 .markdownlintignore
+Makefile.local
+config.mk

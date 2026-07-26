@@ -49,8 +49,11 @@ import numpy as np
 import torch
 from loguru import logger
 
+from src.models.iqavqa_net import IQAVQANet
+
 try:
     from decord import VideoReader, cpu
+
     DECORD_AVAILABLE = True
 except ImportError:
     DECORD_AVAILABLE = False
@@ -63,7 +66,6 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 _DEPLOY_ROOT = Path(__file__).resolve().parent
 
-from src.models.iqavqa_net import IQAVQANet
 
 # ==================== 文件类型常量 ====================
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".wmv"}
@@ -203,7 +205,9 @@ class Preprocessor:
                 if claimed_frames > 0:
                     deviation = abs(total_frames - claimed_frames) / max(claimed_frames, 1)
                     if deviation > MAX_FRAME_DEVIATION:
-                        logger.warning(f"⚠️ 帧数偏差 {deviation*100:.1f}%（声称={claimed_frames}, 实际={total_frames}）")
+                        logger.warning(
+                            f"⚠️ 帧数偏差 {deviation * 100:.1f}%（声称={claimed_frames}, 实际={total_frames}）"
+                        )
 
                 if total_frames >= self.num_frames:
                     indices = np.linspace(0, total_frames - 1, self.num_frames, dtype=int).tolist()
@@ -229,11 +233,11 @@ class Preprocessor:
                 bad_ratio = frame_stats["bad"] / max(total, 1)
 
                 if black_ratio > MAX_BLACK_WHITE_RATIO:
-                    logger.warning(f"⚠️ 黑帧比例过高: {black_ratio*100:.1f}%")
+                    logger.warning(f"⚠️ 黑帧比例过高: {black_ratio * 100:.1f}%")
                 if white_ratio > MAX_BLACK_WHITE_RATIO:
-                    logger.warning(f"⚠️ 白帧比例过高: {white_ratio*100:.1f}%")
+                    logger.warning(f"⚠️ 白帧比例过高: {white_ratio * 100:.1f}%")
                 if bad_ratio > MAX_BAD_RATIO:
-                    logger.warning(f"⚠️ 坏帧比例过高: {bad_ratio*100:.1f}%")
+                    logger.warning(f"⚠️ 坏帧比例过高: {bad_ratio * 100:.1f}%")
 
                 if len(frames) < self.num_frames:
                     logger.warning(f"⚠️ 帧数不足 {len(frames)}/{self.num_frames}，将用最后一帧填充")
@@ -283,7 +287,7 @@ class Preprocessor:
             actual = len(frames)
             deviation = abs(actual - claimed_frames) / max(claimed_frames, 1)
             if deviation > MAX_FRAME_DEVIATION:
-                logger.warning(f"⚠️ 帧数偏差 {deviation*100:.1f}%（声称={claimed_frames}, 实际={actual}）")
+                logger.warning(f"⚠️ 帧数偏差 {deviation * 100:.1f}%（声称={claimed_frames}, 实际={actual}）")
 
         if len(timestamps) > 2:
             intervals = np.diff(timestamps)
@@ -299,11 +303,11 @@ class Preprocessor:
         bad_ratio = frame_stats["bad"] / max(total, 1)
 
         if black_ratio > MAX_BLACK_WHITE_RATIO:
-            logger.warning(f"⚠️ 黑帧比例过高: {black_ratio*100:.1f}%")
+            logger.warning(f"⚠️ 黑帧比例过高: {black_ratio * 100:.1f}%")
         if white_ratio > MAX_BLACK_WHITE_RATIO:
-            logger.warning(f"⚠️ 白帧比例过高: {white_ratio*100:.1f}%")
+            logger.warning(f"⚠️ 白帧比例过高: {white_ratio * 100:.1f}%")
         if bad_ratio > MAX_BAD_RATIO:
-            logger.warning(f"⚠️ 坏帧比例过高: {bad_ratio*100:.1f}%")
+            logger.warning(f"⚠️ 坏帧比例过高: {bad_ratio * 100:.1f}%")
 
         if len(frames) < self.num_frames:
             logger.warning(f"⚠️ 帧数不足 {len(frames)}/{self.num_frames}，将用最后一帧填充")
@@ -544,21 +548,15 @@ def compare_models(
     result = {"file": str(file_path), "media_type": media_type}
 
     # IQA 模型（ResNet 类）
-    result["iqa"] = predict_with_resnet_style(
-        iqa_model, file_path, iqa_config, device, iqa_mos_min, iqa_mos_max
-    )
+    result["iqa"] = predict_with_resnet_style(iqa_model, file_path, iqa_config, device, iqa_mos_min, iqa_mos_max)
 
     # VQA 模型（Swin-T 类）
-    result["vqa"] = predict_single(
-        vqa_model, file_path, vqa_config, device, vqa_mos_min, vqa_mos_max
-    )
+    result["vqa"] = predict_single(vqa_model, file_path, vqa_config, device, vqa_mos_min, vqa_mos_max)
 
     # 结构化 delta
     delta = {}
     if "raw_score" in result["iqa"] and "raw_score" in result["vqa"]:
-        delta["raw_score"] = round(
-            result["vqa"]["raw_score"] - result["iqa"]["raw_score"], 6
-        )
+        delta["raw_score"] = round(result["vqa"]["raw_score"] - result["iqa"]["raw_score"], 6)
     else:
         delta["raw_score"] = None
 
@@ -583,28 +581,27 @@ def export_compare_to_csv(results: List[Dict[str, Any]], csv_path: Path):
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "filename", "media_type",
-            "iqa_raw", "iqa_mos",
-            "vqa_raw", "vqa_mos",
-            "delta_raw", "delta_mos"
-        ])
+        writer.writerow(
+            ["filename", "media_type", "iqa_raw", "iqa_mos", "vqa_raw", "vqa_mos", "delta_raw", "delta_mos"]
+        )
         for r in results:
             if "error" in r:
                 continue
             iqa = r.get("iqa", {})
             vqa = r.get("vqa", {})
             delta = r.get("delta", {})
-            writer.writerow([
-                r.get("file", ""),
-                r.get("media_type", ""),
-                iqa.get("raw_score", ""),
-                iqa.get("mos_score", ""),
-                vqa.get("raw_score", ""),
-                vqa.get("mos_score", ""),
-                delta.get("raw_score", ""),
-                delta.get("mos_score", ""),
-            ])
+            writer.writerow(
+                [
+                    r.get("file", ""),
+                    r.get("media_type", ""),
+                    iqa.get("raw_score", ""),
+                    iqa.get("mos_score", ""),
+                    vqa.get("raw_score", ""),
+                    vqa.get("mos_score", ""),
+                    delta.get("raw_score", ""),
+                    delta.get("mos_score", ""),
+                ]
+            )
     logger.info(f"💾 CSV 已导出: {csv_path}")
 
 
@@ -630,7 +627,7 @@ def main():
 
   # 对比模式 + 导出 CSV
   uv run python -m deploy.infer --compare -i ./test_dir/ --csv results.csv
-"""
+""",
     )
     parser.add_argument("-c", "--checkpoint", type=str, default=None, help="模型路径 (可选，不指定则自动选择)")
     parser.add_argument("-i", "--input", type=str, required=True, help="输入文件或目录路径")
@@ -640,22 +637,12 @@ def main():
     parser.add_argument("-o", "--output", type=str, default=None, help="结果 JSON 输出路径")
     parser.add_argument("--csv", type=str, default=None, help="对比模式下导出 CSV 结果")
     parser.add_argument("--cpu", action="store_true", help="强制使用 CPU")
+    parser.add_argument("--compare", action="store_true", help="对比 ResNet50 和 Swin-T 两个模型的表现")
     parser.add_argument(
-        "--compare",
-        action="store_true",
-        help="对比 ResNet50 和 Swin-T 两个模型的表现"
+        "--iqa-ckpt", type=str, default=None, help="对比模式下 IQA 模型路径（覆盖默认 iqa-models/tid2013_best.pt）"
     )
     parser.add_argument(
-        "--iqa-ckpt",
-        type=str,
-        default=None,
-        help="对比模式下 IQA 模型路径（覆盖默认 iqa-models/tid2013_best.pt）"
-    )
-    parser.add_argument(
-        "--vqa-ckpt",
-        type=str,
-        default=None,
-        help="对比模式下 VQA 模型路径（覆盖默认 vqa-models/konvid_best.pt）"
+        "--vqa-ckpt", type=str, default=None, help="对比模式下 VQA 模型路径（覆盖默认 vqa-models/konvid_best.pt）"
     )
     args = parser.parse_args()
 
@@ -780,7 +767,9 @@ def main():
                 logger.info(f"      Swin-T (VQA):  raw={r['vqa']['raw_score']:.4f} | mos={r['vqa']['mos_score']}")
                 delta = r.get("delta", {})
                 if delta.get("raw_score") is not None:
-                    logger.info(f"      Delta (VQA - IQA): raw={delta['raw_score']:+.4f} | mos={delta['mos_score']:+.4f}")
+                    logger.info(
+                        f"      Delta (VQA - IQA): raw={delta['raw_score']:+.4f} | mos={delta['mos_score']:+.4f}"
+                    )
             else:
                 mos_str = f"{r['mos_score']:.4f}" if r.get("mos_score") is not None else "N/A"
                 logger.info(f"  ✅ {r['file']}: raw={r['raw_score']:.4f} | mos={mos_str}")
