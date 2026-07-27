@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # --- manage_data.sh ---
 
-set -e
+set -e -o pipefail
 
-# Set default values ​​to prevent undefined variables.
+# Set default values to prevent undefined variables.
 http_proxy="${http_proxy:-}"
 https_proxy="${https_proxy:-}"
 USER="${USER:-root}"
@@ -64,27 +64,13 @@ proxy_on() {
     local port="${1:-7890}"
     export http_proxy="http://127.0.0.1:${port}"
     export https_proxy="${http_proxy}"
-    echo "Proxy on (port ${port})"
-}
-
-
-proxy_off() {
-    unset http_proxy https_proxy
-    echo "Proxy off"
+    echo "Proxy enabled on port ${port}"
 }
 
 
 detect_proxy_port() {
-    if [ -n "$http_proxy" ]; then
-        local port=$(echo "$http_proxy" | sed -E 's/.*:([0-9]+).*/\1/')
-        if curl -s -o /dev/null --max-time 2 --proxy "$http_proxy" "https://httpbin.org/get" 2>/dev/null; then
-            echo "$port"
-            return 0
-        fi
-    fi
-
-    for port in 7890 10809 1080; do
-        if curl -s -o /dev/null --max-time 2 --proxy "http://127.0.0.1:$port" "https://httpbin.org/get" 2>/dev/null; then
+    for port in 7890 7897 10809 1080 22741; do
+        if curl -s -o /dev/null --max-time 2 --proxy "http://127.0.0.1:$port" "https://www.baidu.com" 2>/dev/null; then
             echo "$port"
             return 0
         fi
@@ -102,7 +88,7 @@ T2V_SOURCE_URL="https://drive.google.com/file/d/1aak5hgYsXock19d1rVufss3_X6eEA4W
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-PROJECT_PARENT_DIR="$(dirname "$PROJECT_DIR")"
+DATASETS_DIR="${PROJECT_DIR}/datasets"
 
 SEARCH_DIRS_=(
     "/root/autodl-pub/dataset"
@@ -158,18 +144,45 @@ is_dataset_valid() {
     if [ ! -d "$dir" ]; then
         return 1
     fi
-    # Check if the directory is empty.
+
     if [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
         return 1
     fi
-    # You can add more checks, such as whether there are image files.
-    # Check for common image or video files.
-    local file_count=$(find "$dir" -type f \( -iname "*.png" -o -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.bmp" -o -iname "*.npy" -o -iname "*.mat" \) 2>/dev/null | head -1)
-    if [ -n "$file_count" ]; then
+
+    local found=$(find "$dir" -maxdepth 1 -type f \( \
+        -iname "*.png" -o \
+        -iname "*.PNG" -o \
+        -iname "*.jpg" -o \
+        -iname "*.JPG" -o \
+        -iname "*.jpeg" -o \
+        -iname "*.JPEG" -o \
+        -iname "*.bmp" -o \
+        -iname "*.BMP" -o \
+        -iname "*.tif" -o \
+        -iname "*.tiff" -o \
+        -iname "*.TIF" -o \
+        -iname "*.TIFF" -o \
+        -iname "*.webp" -o \
+        -iname "*.WEBP" -o \
+        -iname "*.ppm" -o \
+        -iname "*.PPM" -o \
+        -iname "*.mp4" -o \
+        -iname "*.MP4" -o \
+        -iname "*.avi" -o \
+        -iname "*.AVI" -o \
+        -iname "*.mov" -o \
+        -iname "*.MOV" -o \
+        -iname "*.mkv" -o \
+        -iname "*.MKV" -o \
+        -iname "*.webm" -o \
+        -iname "*.WEBM" \
+    \) 2>/dev/null | head -1)
+
+    if [ -n "$found" ]; then
         return 0
     fi
-    # If there are no image files but the directory is not empty, it is still considered valid (as the files might be in other formats).
-    return 0
+
+    return 1
 }
 
 
@@ -236,13 +249,16 @@ DOWNLOAD_FLAG=false
 [ "$T2V_DOWNLOAD_FLAG" = true ] && DOWNLOAD_FLAG=true
 
 
-# Check proxy; continue on failure.
-PROXY_PORT=$(detect_proxy_port 2>/dev/null) || true
-if [ -n "$PROXY_PORT" ]; then
-    proxy_on "$PROXY_PORT"
+# --- 代理处理核心修复点 ---
+if [ -n "$http_proxy" ] || [ -n "$HTTP_PROXY" ]; then
+    echo "✅ Using existing environment proxy: ${http_proxy:-$HTTP_PROXY}"
 else
-    proxy_off
-    echo "No proxy, using direct connection"
+    PROXY_PORT=$(detect_proxy_port 2>/dev/null) || true
+    if [ -n "$PROXY_PORT" ]; then
+        proxy_on "$PROXY_PORT"
+    else
+        echo "ℹ️  No active proxy detected, proceeding with direct connection."
+    fi
 fi
 
 
@@ -255,13 +271,25 @@ if [ "$DOWNLOAD_FLAG" = true ]; then
 
     if [ "$KON_DATA_DOWNLOAD_FLAG" = true ]; then
         echo "Downloading the konvid-1k videos dataset..."
+
+        if [ -f "${DOWNLOAD_CACHE}/KoNViD_1k_videos.zip" ]; then
+            if ! unzip -t "${DOWNLOAD_CACHE}/KoNViD_1k_videos.zip" &>/dev/null; then
+                echo "⚠️  Existing cache file is corrupted, removing..."
+                rm -f "${DOWNLOAD_CACHE}/KoNViD_1k_videos.zip"
+            fi
+        fi
+
         aria2c --check-certificate=false \
             --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
             --header="Referer: https://datasets.vqa.mmsp-kn.de/" \
             --header="Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
             --header="Accept-Language: en-US,en;q=0.9" \
-            -x 4 -s 4 -k 2M \
-            --max-tries=3 --retry-wait=10 \
+            -x 16 -s 16 -k 1M \
+            --min-split-size=1M \
+            --max-connection-per-server=16 \
+            --max-tries=99 \
+            --retry-wait=10 \
+            --timeout=60 \
             -c \
             -d "$DOWNLOAD_CACHE" \
             -o "KoNViD_1k_videos.zip" \
@@ -273,8 +301,10 @@ if [ "$DOWNLOAD_FLAG" = true ]; then
         aria2c --check-certificate=false \
             --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
             --header="Referer: https://datasets.vqa.mmsp-kn.de/" \
-            -x 4 -s 4 -k 2M \
-            --max-tries=3 --retry-wait=10 \
+            -x 16 -s 16 -k 1M \
+            --min-split-size=1M \
+            --max-connection-per-server=16 \
+            --max-tries=5 --retry-wait=5 \
             -c \
             -d "$DOWNLOAD_CACHE" \
             -o "KoNViD_1k_metadata.zip" \
@@ -286,8 +316,10 @@ if [ "$DOWNLOAD_FLAG" = true ]; then
         aria2c --check-certificate=false \
             --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
             --header="Referer: https://www.ponomarenko.info/tid2013/" \
-            -x 4 -s 4 -k 2M \
-            --max-tries=3 --retry-wait=10 \
+            -x 16 -s 16 -k 1M \
+            --min-split-size=1M \
+            --max-connection-per-server=16 \
+            --max-tries=5 --retry-wait=5 \
             -c \
             -d "$DOWNLOAD_CACHE" \
             -o "tid2013.rar" \
@@ -330,4 +362,12 @@ for dir in "$TID_TARGET_PATH" "$KON_DATA_TARGET_PATH" "$KON_METADATA_TARGET_PATH
 done
 
 echo "Dataset preparation completed."
-echo "DOWNLOAD_FLAG=$DOWNLOAD_FLAG" > "./download_flag"
+mkdir -p "${PROJECT_DIR}/results/scripts_logs"
+echo "DOWNLOAD_FLAG=$DOWNLOAD_FLAG" > "${PROJECT_DIR}/results/scripts_logs/.download_flag"
+
+cd "$DATASETS_DIR"
+ln -snf TID2013 tid2013
+ln -snf KoNViD-1k konvid-1k
+ln -snf T2VQA-DB t2vqa-db
+
+ls -la | grep "^l"

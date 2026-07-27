@@ -8,7 +8,6 @@ datasets/
 results/
 reports/
 .download_cache/
-scripts/download_flag
 
 
 .venv/

@@ -2,7 +2,7 @@
 # --- cache_clean.sh ---
 # Description: Deep cleaning tool for AutoDL ecosystem with "absolute safety" and "system disk space optimization"
 
-set -e
+set -e -o pipefail
 
 # --- 1. Core path definitions ---
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"

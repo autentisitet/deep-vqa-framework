@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 # --- setup_env.sh ---
+#
+# Purpose: Set up and configure the project development environment
+#
+# Key tasks:
+# 1. Install system dependencies (apt)
+# 2. Install the uv package manager
+# 3. Create a Python virtual environment (.venv)
+# 4. Install core Python dependencies
+# 5. Install optional tools (dev/security)
+# 6. Configure PyTorch (GPU/CPU)
+# 7. Verify installation
+#
+# Note: Dataset downloading is handled separately by manage_data.sh
+# Usage: ./setup_env.sh [--mirror] [--dev] [--security] [--all]
 
 
-# Tasks:
-# 1. switch the correct file path
-# 2. Download datasets unless AutoDL isn't exist
-# 3. verify the dataset hash
-# 4. unzip the dataset
-# 5. install uv, apt modules, python modules...etc
-# 6. set the environment configs
-# 7. write the base_config.yaml
 set -e -o pipefail
 
 show_help() {

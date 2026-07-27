@@ -17,13 +17,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check scripts/*.sh syntax (bash -n)
+      - name: Check all shell scripts syntax (bash -n)
         run: |
-          echo "Running bash -n on scripts/*.sh ..."
+          echo "Running bash -n on scripts/**/*.sh ..."
           failed=0
-          for f in scripts/*.sh; do
+          # Recursively find all .sh files under scripts/
+          while IFS= read -r -d '' f; do
             bash -n "$f" && echo "  OK: $f" || { echo "  FAIL: $f"; failed=1; }
-          done
+          done < <(find scripts -type f -name "*.sh" -print0)
           exit $failed
 
   dataset-url-reachability:
@@ -35,12 +36,15 @@ jobs:
       - name: Verify and probe download URLs in manage_data.sh
         run: |
           set +e
+          declare -A URLS
+
           for var in TID_SOURCE_URL KON_VIDEOS_SOURCE_URL KON_METADATA_SOURCE_URL T2V_SOURCE_URL; do
             url=$(grep -E "^${var}=" scripts/manage_data.sh | head -1 | sed -E 's/^[^"]*"([^"]+)".*/\1/')
             if [ -z "$url" ]; then
               echo "FAIL: ${var} not defined in manage_data.sh"
               exit 1
             fi
+            URLS["$var"]="$url"
             echo "Defined: ${var}=${url}"
           done
 
@@ -61,14 +65,15 @@ jobs:
           }
 
           echo ""
-          echo "Probing download endpoints..."
-          check_url "TID2013" "http://www.ponomarenko.info/tid2013/tid2013.rar"
-          check_url "KoNViD-1k videos" "https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_videos.zip"
-          check_url "KoNViD-1k metadata" "https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_metadata.zip"
+          echo "Probing download endpoints dynamically from script..."
+          check_url "TID2013" "${URLS[TID_SOURCE_URL]}"
+          check_url "KoNViD-1k videos" "${URLS[KON_VIDEOS_SOURCE_URL]}"
+          check_url "KoNViD-1k metadata" "${URLS[KON_METADATA_SOURCE_URL]}"
 
+          # Google Drive link probe
           gcode=$(curl --silent --location --max-time 25 \
             -o /dev/null -w "%{http_code}" \
-            "https://drive.google.com/file/d/1aak5hgYsXock19d1rVufss3_X6eEA4Wx/view" 2>/dev/null)
+            "${URLS[T2V_SOURCE_URL]}" 2>/dev/null)
           grc=$?
           if [ "$grc" -eq 0 ] && [[ "$gcode" =~ ^(200|301|302|303)$ ]]; then
             echo "  OK: T2VQA-DB Google Drive (HTTP ${gcode})"

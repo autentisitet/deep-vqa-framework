@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.4.4--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.4.5--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -15,7 +15,14 @@
 该框架为质量评估模型的训练、评估和部署提供了一站式（端到端）解决方案。它采用统一架构，能够无缝处理图像和视频输入，并支持多数据集、交叉验证流程以及生产级推理 API。
 
 > [!NOTE]
-> 本框架主要在 AutoDL 云 GPU 实例上进行了测试。 ---
+> 本框架主要在 AutoDL 云 GPU 实例上进行了测试。
+> 您可以运行以下命令，在 AutoDL 云实例上开启代理：
+
+```bash
+source /etc/network_turbo
+```
+
+---
 
 ## 目录
 
@@ -116,8 +123,8 @@ make setup
 # 检查环境状态
 make info
 
-# 创建数据集软链接
-make link
+# 下载数据集、解压并创建符号链接
+make data
 ```
 
 #### 第 2 步：训练命令
@@ -263,7 +270,7 @@ deep-vqa-framework/
 │
 ├── results/                  # 全局输出与日志
 │   ├── model_outputs/           # 训练检查点 (checkpoints)
-│   ├── train_logs/               # 执行与性能历史记录
+│   ├── scripts_logs/
 │   └── plots/                     # 可视化图表（损失、残差等）
 │
 ├── scripts/                  # 基础设施自动化脚本
@@ -279,12 +286,11 @@ deep-vqa-framework/
 │   └── vqa-models/                # 由 api.py 提供的 VQA .pt 检查点
 │
 └── src/                       # 核心框架逻辑
-├── main.py                   # 全局执行入口点
-├── core/                        # 训练引擎与评估流程
-├── data/
-``` # 数据加载器、EDA（探索性数据分析）及完整性分析
-├── models/                      # 架构定义 (IQAVQA-Net)
-└── utils/                        # 配置、日志记录及路径管理
+    ├── main.py                   # 全局执行入口点
+    ├── core/                        # 训练引擎与评估流程
+    ├── data/                       # 数据加载器、EDA（探索性数据分析）及完整性分析
+    ├── models/                      # 架构定义 (IQAVQA-Net)
+    └── utils/                        # 配置、日志记录及路径管理
 ```
 
 ---
@@ -349,21 +355,6 @@ amp: true                  # 启用混合精度训练 (AMP)
 > [!NOTE]
 > `IQAVQANet` 尚未实现梯度检查点（gradient checkpointing）功能 —— 请勿在配置中设置 `gradient_checkpointing: true`，该设置目前无效。
 
-### 找不到数据集
-
-如果在使用 `--dataset xxx` 参数时遇到 `FileNotFoundError`，说明数据集的符号链接缺失或不正确。
-
-```bash
-make link
-```
-
-或者执行：
-
-```bash
-cd scripts
-bash setup_links.sh
-```
-
 ### 视频加载后端（AutoDL 专用）
 
 > [!WARNING]
@@ -415,7 +406,7 @@ Decord 已预配置为默认后端。如果不可用，框架会自动回退到 
 
 - **框架**: [MIT](LICENSE)
 - **作者**: [@autentisitet](https://github.com/autentisitet)
-- **版本**: 0.4.4-beta (预发布版)
+- **版本**: 0.4.5-beta (预发布版)
 
 ---
 

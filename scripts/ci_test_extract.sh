@@ -3,8 +3,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Load only smart_extract (not the rest of manage_data.sh which may download data)
-eval "$(sed -n '/^smart_extract() {/,/^}$/p' "${SCRIPT_DIR}/manage_data.sh")"
+
+# Safely source smart_extract without executing manage_data.sh main logic
+MANAGE_DATA_SOURCE_ONLY=true source "${SCRIPT_DIR}/manage_data.sh"
 
 if ! command -v zip >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
   echo "FAIL: zip and unzip are required"
@@ -24,7 +25,7 @@ TARGET="${WORKDIR}/extract_output"
 smart_extract "${WORKDIR}/mock_dataset.zip" "${TARGET}"
 
 [ -f "${TARGET}/img001.png" ] || { echo "FAIL: flatten - img001.png missing"; ls -laR "${TARGET}"; exit 1; }
-[ -f "${TARGET}/mos.csv" ]    || { echo "FAIL: flatten - mos.csv missing"; exit 1; }
+[ -f "${TARGET}/mos.csv" ]     || { echo "FAIL: flatten - mos.csv missing"; exit 1; }
 echo "PASS: smart_extract flatten logic"
 
 TARGET2="${WORKDIR}/already_exists"

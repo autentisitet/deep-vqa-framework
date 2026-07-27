@@ -50,8 +50,7 @@ help:
 	@echo ""
 	@echo "$(BOLD)$(GREEN)📦 Environment:$(RESET)"
 	@echo "  $(GREEN)make setup$(RESET)         - Install dependencies and setup environment"
-	@echo "  $(GREEN)make data$(RESET)          - Prepare datasets"
-	@echo "  $(GREEN)make link$(RESET)          - Set up symbolic links"
+	@echo "  $(GREEN)make data$(RESET)          - Prepare datasets and set up symbolic links"
 	@echo "  $(GREEN)make optimize$(RESET)      - Optimize network/Jupyter settings"
 	@echo ""
 	@echo "$(BOLD)$(BLUE)🔍 Status:$(RESET)"
@@ -109,28 +108,22 @@ data:
 	@cd $(ROOT_DIR)/scripts && bash manage_data.sh 2>&1 | tee $(LOG_DIR)/manage_data.log
 	@echo "$(GREEN)✅ Data ready$(RESET)"
 
-# 3. Symbolic Links
-link:
-	@echo "🔗 $(BLUE)Setting up symbolic links...$(RESET) (Log: $(LOG_DIR)/setup_links.log)"
-	@cd $(ROOT_DIR)/scripts && bash setup_links.sh --all 2>&1 | tee $(LOG_DIR)/setup_links.log	
-	@echo "$(GREEN)✅ Symbolic links ready$(RESET)"
 
-
-# 4. Status Audit
+# 3. Status Audit
 check-system:
 	@echo "🔍 $(BLUE)Checking system status...$(RESET) (Log: $(LOG_DIR)/system_check.log)"
-	@cd $(ROOT_DIR)/scripts && bash system_check.sh 2>&1 | tee $(LOG_DIR)/system_check.log	
+	@cd $(ROOT_DIR)/scripts && bash system_check.sh 2>&1 | tee $(LOG_DIR)/system_check.log
 	@echo "$(GREEN)✅ System check completed$(RESET)"
 
 
-# 5. Optimize Environment (network/Jupyter settings)
+# 4. Optimize Environment (network/Jupyter settings)
 optimize:
 	@echo "🔧 $(BLUE)Optimizing Environment...$(RESET) (Log: $(LOG_DIR)/optimize_env.log)"
 	@cd $(ROOT_DIR)/scripts && bash optimize_env.sh 2>&1 | tee $(LOG_DIR)/optimize_env.log
 	@echo "$(GREEN)✅ Optimization completed$(RESET)"
 
 
-# 6. Clear cache
+# 5. Clear cache
 clean:
 	@echo "🧹 $(RED)Cleaning caches...$(RESET)"
 	@read -p "$(YELLOW)⚠️ Are you sure you want to clean all caches? [y/N] $(RESET)" confirm; \
@@ -143,7 +136,7 @@ clean:
 	fi
 
 
-# 7. Packaging Results
+# 6. Packaging Results
 archive:
 	@echo "📦 $(BLUE)Archiving...$(RESET) (Log: $(LOG_DIR)/archive.log)"
 	@if [ -f "$(LOG_DIR)/archive.log" ]; then \
@@ -157,7 +150,7 @@ archive:
 # ============================================================
 # Code Quality
 # ============================================================
-# 8. Validate code style and specifications
+# 7. Validate code style and specifications
 check-code:
 	@echo "📝 $(YELLOW)Verifying code style and specifications...$(RESET)"
 	@if [ ! -d "$(ROOT_DIR)/.venv" ]; then \
@@ -173,7 +166,7 @@ check-code:
 	@echo "$(GREEN)✅ Verification completed, code quality is good!$(RESET)"
 
 
-# 9. Format code with ruff
+# 8. Format code with ruff
 fmt:
 	@echo "📝 $(YELLOW)Formatting code...$(RESET)"
 	@if [ ! -d "$(ROOT_DIR)/.venv" ]; then \
@@ -189,7 +182,7 @@ fmt:
 	@echo "$(GREEN)✅ Code formatted successfully!$(RESET)"
 
 
-# 10. Format code with black
+# 9. Format code with black
 black:
 	@echo "🖤 $(YELLOW)Formatting code with black...$(RESET)"
 	@if [ ! -d "$(ROOT_DIR)/.venv" ]; then \
@@ -204,7 +197,7 @@ black:
 	@echo "$(GREEN)✅ Code formatted with black!$(RESET)"
 
 
-# 11. Sort imports with isort
+# 10. Sort imports with isort
 isort:
 	@echo "📋 $(YELLOW)Sorting imports with isort...$(RESET)"
 	@if [ ! -d "$(ROOT_DIR)/.venv" ]; then \
@@ -219,7 +212,7 @@ isort:
 	@echo "$(GREEN)✅ Imports sorted with isort!$(RESET)"
 
 
-# 12. Run all formatters
+# 11. Run all formatters
 format-all: black isort fmt
 	@echo "$(GREEN)✅ All formatters completed!$(RESET)"
 	@echo ""
@@ -229,7 +222,7 @@ format-all: black isort fmt
 	@echo "  $(GREEN)•$(RESET) ruff (code formatting & fixing)"
 
 
-# 13. Type checking with mypy
+# 12. Type checking with mypy
 typecheck:
 	@echo "🔍 $(YELLOW)Performing type checking with mypy...$(RESET)"
 	@if [ ! -d "$(ROOT_DIR)/.venv" ]; then \
@@ -244,13 +237,13 @@ typecheck:
 	@echo "$(GREEN)✅ Type checking completed!$(RESET)"
 
 
-	
+
 
 
 # ============================================================
 # Security
 # ============================================================
-# 14. Audit dependencies for vulnerabilities
+# 13. Audit dependencies for vulnerabilities
 vuln-audit:
 	@echo "🔒 $(MAGENTA)Auditing dependencies for vulnerabilities...$(RESET)"
 	@echo "📂 Reports saved to: $(CYAN)$(SECURITY_DIR)$(RESET)"
@@ -290,7 +283,7 @@ vuln-audit:
 	fi
 
 
-# 15. Generate SBOM (Software Bill of Materials)
+# 14. Generate SBOM (Software Bill of Materials)
 sbom:
 	@echo "📋 $(MAGENTA)Generating Software Bill of Materials (SBOM)...$(RESET)"
 	@echo "📂 Reports saved to: $(CYAN)$(SECURITY_DIR)$(RESET)"
@@ -338,7 +331,7 @@ sbom:
 
 
 
-# 16. Safety check for known vulnerabilities
+# 15. Safety check for known vulnerabilities
 safety:
 	@echo "🛡️ $(MAGENTA)Running safety scan...$(RESET)"
 	@echo "📂 Reports saved to: $(CYAN)$(SECURITY_DIR)$(RESET)"
@@ -372,7 +365,7 @@ safety:
 
 
 
-# 17. Run all security checks
+# 16. Run all security checks
 security-all: vuln-audit sbom safety
 	@echo ""
 	@echo "🔒 $(GREEN)All security checks completed!$(RESET)"
@@ -391,7 +384,7 @@ security-all: vuln-audit sbom safety
 
 
 # ============================================================
-# 18. Show current environment info
+# 17. Show current environment info
 # ============================================================
 info:
 	@echo "$(BOLD)$(CYAN)📊 Environment Information:$(RESET)"

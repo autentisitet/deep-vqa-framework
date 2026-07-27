@@ -6,26 +6,26 @@
 # 2. change network cards' mtu
 # 3. check proxy; set http/https config if needed
 # 4. Websocket control
-#   - iopub_data_rate_limit
-#   - rate_limit_window
-#   - terminado_settings: inactive_timeout, ping_interval
-#   - tornado_settings
-#   - websocket_ping_interval
-#   - websocket_ping_timeout
-#   - iopub_msg_rate_limit
-#   - allow_origin
-#   - allow_remote_access
-#   - disable_check_xsrf
+#    - iopub_data_rate_limit
+#    - rate_limit_window
+#    - terminado_settings: inactive_timeout, ping_interval
+#    - tornado_settings
+#    - websocket_ping_interval
+#    - websocket_ping_timeout
+#    - iopub_msg_rate_limit
+#    - allow_origin
+#    - allow_remote_access
+#    - disable_check_xsrf
 # 5. Terminal silencing and flow control
 # 6. Kernel idle cleanup
-#   - cull_idle_timeout
-#   - cull_connected
-#   - cull_busy
+#    - cull_idle_timeout
+#    - cull_connected
+#    - cull_busy
 
 
 # Notes:
 # YAML/JSON separated "data-driven" programming is terrible in that case.
-set -e
+set -e -o pipefail
 
 # Color definitions
 GREEN='\033[0;32m'
@@ -62,7 +62,7 @@ echo -e "\n${YELLOW}[1/6] Releasing common ports...${NC}"
 COMMON_PORTS=(6006 8888 8080 8000 7860)
 for port in "${COMMON_PORTS[@]}"; do
     # Find PID using the port
-    PID=$(ss -tlnp 2>/dev/null | grep -E ":$port " | grep -oP 'pid=\K[0-9]+' | head -1)
+    PID=$(ss -tlnp 2>/dev/null | grep -E ":$port " | grep -oP 'pid=\K[0-9]+' | head -1 || true)
     if [ -n "$PID" ]; then
         echo -e "  Port $port: killing process $PID"
         kill -9 "$PID" 2>/dev/null || true
@@ -89,74 +89,84 @@ done
 # 3. Check proxy; set http/https config if needed
 # -----------------------------------------------------------------------------
 echo -e "\n${YELLOW}[3/6] Checking proxy configuration...${NC}"
-if curl -s -I --max-time 3 "https://www.google.com" -o /dev/null -w "%{http_code}" | grep -qE "200|301|302"; then
-    echo -e "  ${GREEN}[√] Direct internet connection works, no proxy needed${NC}"
-    unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+
+if [ -n "$http_proxy" ] || [ -n "$HTTP_PROXY" ]; then
+    echo -e "  ${GREEN}[√] Active environment proxy detected: ${http_proxy:-$HTTP_PROXY}${NC}"
+elif curl -s -I --max-time 3 "https://www.google.com" -o /dev/null -w "%{http_code}" 2>/dev/null | grep -qE "200|301|302"; then
+    echo -e "  ${GREEN}[√] Direct internet connection works, no local proxy needed${NC}"
 else
-    echo -e "  ${YELLOW}[!] Direct connection failed, attempting to set proxy...${NC}"
-    # Common proxy ports: 7890 (Clash), 10809 (v2ray), 8118 (Tor)
-    for proxy_port in 7890 7897 10809 8118; do
+    echo -e "  ${YELLOW}[!] Direct connection failed and no proxy set. Searching local proxy ports...${NC}"
+    FOUND_PROXY=""
+    for proxy_port in 7890 7897 10809 8118 12639; do
         if curl -s -I --max-time 2 --proxy "http://127.0.0.1:$proxy_port" \
             "https://www.google.com" -o /dev/null -w "%{http_code}" 2>/dev/null | grep -qE "200|301|302"; then
             export http_proxy="http://127.0.0.1:$proxy_port"
             export https_proxy="$http_proxy"
-            echo -e "  ${GREEN}[√] Proxy configured: http://127.0.0.1:$proxy_port${NC}"
+            FOUND_PROXY="http://127.0.0.1:$proxy_port"
+            echo -e "  ${GREEN}[√] Local proxy found & configured: $FOUND_PROXY${NC}"
             break
         fi
     done
+    if [ -z "$FOUND_PROXY" ]; then
+        echo -e "  ${YELLOW}[!] No local proxy detected. If using AutoDL, consider running 'source /etc/network_turbo'${NC}"
+    fi
 fi
 
 # -----------------------------------------------------------------------------
-# 4. Jupyter/WebSocket optimization (full configuration)
+# 4. Jupyter/WebSocket optimization (full configuration with compatibility)
 # -----------------------------------------------------------------------------
 echo -e "\n${YELLOW}[4/6] Configuring Jupyter WebSocket settings...${NC}"
 mkdir -p ~/.jupyter
 
-# Generate config if not exists
-if [ ! -f ~/.jupyter/jupyter_server_config.py ]; then
-    jupyter server --generate-config --confirm-exit 2>/dev/null || true
-fi
-
-# Write comprehensive Jupyter configuration
+# Write dual-compatible Jupyter configurations
 python3 -c '
 import os
-config_files = ["jupyter_server_config.py", "jupyter_notebook_config.py"]
+
 jupyter_dir = os.path.expanduser("~/.jupyter")
 
-config_block = """
-# ========== Network & WebSocket Optimization for AutoDL ==========
-
-# 1. WebSocket message size limit (prevents kernel disconnection on large outputs)
+# Config block for jupyter_server_config.py (JupyterLab / Server v2+)
+server_block = """
+# ========== Network & WebSocket Optimization for Jupyter Server ==========
 c.ServerApp.tornado_settings = {
     "websocket_max_message_size": 500 * 1024 * 1024,   # 500MB
-    "websocket_ping_interval": 30000,                   # 30s ping interval (ms)
-    "websocket_ping_timeout": 30000,                    # 30s timeout
+    "websocket_ping_interval": 30000,                  # 30s
+    "websocket_ping_timeout": 30000,                   # 30s
 }
-
-# 2. Output rate limits (prevents kernel from being killed by excessive prints)
 c.ServerApp.iopub_data_rate_limit = 10000000           # 10MB/s
-c.ServerApp.rate_limit_window = 3.0                    # 3 seconds window
-c.ServerApp.iopub_msg_rate_limit = 5000                # 5000 messages/second
-
-# 3. Terminal session keep-alive
+c.ServerApp.rate_limit_window = 3.0
+c.ServerApp.iopub_msg_rate_limit = 5000
 c.ServerApp.terminado_settings = {
-    "inactive_timeout": 600,        # 10 minutes inactivity -> disconnect
-    "ping_interval": 60,            # ping every 60 seconds
+    "inactive_timeout": 600,
+    "ping_interval": 60,
 }
+c.ServerApp.allow_origin = "*"
+c.ServerApp.allow_remote_access = True
+"""
 
-# 4. Kernel idle policy (keep long training alive)
+# Config block for jupyter_notebook_config.py (Classic Notebook v6)
+notebook_block = """
+# ========== Network & WebSocket Optimization for Classic Notebook ==========
+c.NotebookApp.tornado_settings = {
+    "websocket_max_message_size": 500 * 1024 * 1024,
+    "websocket_ping_interval": 30000,
+    "websocket_ping_timeout": 30000,
+}
+c.NotebookApp.iopub_data_rate_limit = 10000000
+c.NotebookApp.rate_limit_window = 3.0
+c.NotebookApp.iopub_msg_rate_limit = 5000
+c.NotebookApp.allow_origin = "*"
+c.NotebookApp.allow_remote_access = True
+"""
+
+kernel_cull_block = """
+# ========== Kernel Idle Cleanup Policy ==========
 c.MappingKernelManager.cull_idle_timeout = 86400       # 24 hours idle timeout
 c.MappingKernelManager.cull_connected = False          # Don"t cull connected kernels
 c.MappingKernelManager.cull_busy = False               # Don"t cull busy kernels
-
-# 5. Cross-origin / proxy support (for trusted internal networks)
-c.ServerApp.allow_origin = "*"
-c.ServerApp.allow_remote_access = True
-# c.ServerApp.disable_check_xsrf = True   # Only enable for internal networks!
 """
 
-for fname in config_files:
-    path = os.path.join(jupyter_dir, fname)
+def apply_config(filename, main_block):
+    path = os.path.join(jupyter_dir, filename)
     if not os.path.exists(path):
         with open(path, "w") as f:
             f.write("# Generated by Network Control Script\n")
@@ -164,10 +174,14 @@ for fname in config_files:
     content = open(path).read()
     if "websocket_max_message_size" not in content:
         with open(path, "a") as f:
-            f.write(config_block)
-        print(f"  [√] Applied to {fname}")
+            f.write(main_block)
+            f.write(kernel_cull_block)
+        print(f"  [√] Applied to {filename}")
     else:
-        print(f"  [i] {fname} already optimized")
+        print(f"  [i] {filename} already optimized")
+
+apply_config("jupyter_server_config.py", server_block)
+apply_config("jupyter_notebook_config.py", notebook_block)
 '
 
 # -----------------------------------------------------------------------------
@@ -182,17 +196,18 @@ if ! grep -q "stty -ixon" "$BASHRC" 2>/dev/null; then
 
 # ========== Terminal Optimization for AutoDL ==========
 # Disable Ctrl+S flow control (prevents accidental terminal freeze)
-stty -ixon
+stty -ixon 2>/dev/null
 
 # Colorful prompt: green user@host, blue path
 export PS1="\[\e[32m\]\u@autodl\[\e[m\]:\[\e[34m\]\w\[\e[m\]\$ "
 
 # Quick switch agent
+alias turbo_on='source /etc/network_turbo 2>/dev/null || echo "network_turbo not found"'
 alias proxy_on='export http_proxy=http://127.0.0.1:7890; export https_proxy=http://127.0.0.1:7890; echo "Proxy ON (127.0.0.1:7890)"'
-alias proxy_off='unset http_proxy https_proxy; echo "Proxy OFF"'
+alias proxy_off='unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; echo "Proxy OFF"'
 
-# The optimized aria2 alias forces the use of a proxy and increases stability.
-alias aria2p='aria2c --all-proxy="http://127.0.0.1:7890" --check-certificate=false -x 16 -s 16'
+# High performance aria2 alias (uses current environment proxy dynamically)
+alias aria2p='aria2c --check-certificate=false -x 16 -s 16 -k 1M'
 
 ulimit -n 65535
 EOF

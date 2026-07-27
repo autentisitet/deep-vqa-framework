@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.4.4--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.4.5--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -16,6 +16,11 @@ This framework provides an end-to-end solution for training, evaluating, and dep
 
 > [!NOTE]
 > This framework is primarily tested on AutoDL cloud GPU instances.
+> You can run the command below to open proxy on AutoDL cloud instances:
+
+```bash
+source /etc/network_turbo
+```
 
 ---
 
@@ -118,8 +123,8 @@ make setup
 # Check environment status
 make info
 
-# Make symbol links for datasets
-make link
+# Download datasets, unrar and make symbol links
+make data
 ```
 
 #### Step 2: Training Commands
@@ -269,7 +274,7 @@ deep-vqa-framework/
 │
 ├── results/                  # Global outputs & logs
 │   ├── model_outputs/           # Training checkpoints
-│   ├── train_logs/               # Execution & performance history
+│   ├── scripts_logs/
 │   └── plots/                     # Visualization (loss, residuals, etc.)
 │
 ├── scripts/                  # Infrastructure automation
@@ -354,21 +359,6 @@ train:
 > [!NOTE]
 > Gradient checkpointing is not currently implemented in `IQAVQANet` — don't set `gradient_checkpointing: true` in configs yet; it has no effect.
 
-### Dataset Not Found
-
-If you encounter `FileNotFoundError` when passing `--dataset xxx`, it means the dataset symlink is missing or incorrect.
-
-```bash
-make link
-```
-
-or you can:
-
-```bash
-cd scripts
-bash setup_links.sh
-```
-
 ### Video Loading Backend (AutoDL Specific)
 
 > [!WARNING]
@@ -420,7 +410,7 @@ The framework includes security tools to audit dependencies:
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.4.4-beta (pre-release)
+- **Version**: 0.4.5-beta (pre-release)
 
 ---
 
