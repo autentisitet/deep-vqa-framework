@@ -6,6 +6,8 @@ set -e -o pipefail
 # Set default values to prevent undefined variables.
 http_proxy="${http_proxy:-}"
 https_proxy="${https_proxy:-}"
+HTTP_PROXY="${HTTP_PROXY:-}"
+HTTPS_PROXY="${HTTPS_PROXY:-}"
 USER="${USER:-root}"
 
 
@@ -249,7 +251,7 @@ DOWNLOAD_FLAG=false
 [ "$T2V_DOWNLOAD_FLAG" = true ] && DOWNLOAD_FLAG=true
 
 
-# --- 代理处理核心修复点 ---
+
 if [ -n "$http_proxy" ] || [ -n "$HTTP_PROXY" ]; then
     echo "✅ Using existing environment proxy: ${http_proxy:-$HTTP_PROXY}"
 else
