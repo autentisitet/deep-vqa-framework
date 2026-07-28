@@ -51,10 +51,8 @@ help:
 	@echo "$(BOLD)$(GREEN)📦 Environment:$(RESET)"
 	@echo "  $(GREEN)make setup$(RESET)         - Install dependencies and setup environment"
 	@echo "  $(GREEN)make data$(RESET)          - Prepare datasets and set up symbolic links"
-	@echo "  $(GREEN)make optimize$(RESET)      - Optimize network/Jupyter settings"
 	@echo ""
 	@echo "$(BOLD)$(BLUE)🔍 Status:$(RESET)"
-	@echo "  $(BLUE)make check-system$(RESET)   - Check system status (GPU/memory/process)"
 	@echo "  $(BLUE)make info$(RESET)           - Show environment information"
 	@echo ""
 	@echo "$(BOLD)$(YELLOW)📝 Code Quality:$(RESET)"
@@ -109,21 +107,7 @@ data:
 	@echo "$(GREEN)✅ Data ready$(RESET)"
 
 
-# 3. Status Audit
-check-system:
-	@echo "🔍 $(BLUE)Checking system status...$(RESET) (Log: $(LOG_DIR)/system_check.log)"
-	@cd $(ROOT_DIR)/scripts && bash system_check.sh 2>&1 | tee $(LOG_DIR)/system_check.log
-	@echo "$(GREEN)✅ System check completed$(RESET)"
-
-
-# 4. Optimize Environment (network/Jupyter settings)
-optimize:
-	@echo "🔧 $(BLUE)Optimizing Environment...$(RESET) (Log: $(LOG_DIR)/optimize_env.log)"
-	@cd $(ROOT_DIR)/scripts && bash optimize_env.sh 2>&1 | tee $(LOG_DIR)/optimize_env.log
-	@echo "$(GREEN)✅ Optimization completed$(RESET)"
-
-
-# 5. Clear cache
+# 3. Clear cache
 clean:
 	@echo "🧹 $(RED)Cleaning caches...$(RESET)"
 	@read -p "$(YELLOW)⚠️ Are you sure you want to clean all caches? [y/N] $(RESET)" confirm; \
@@ -136,7 +120,7 @@ clean:
 	fi
 
 
-# 6. Packaging Results
+# 4. Packaging Results
 archive:
 	@echo "📦 $(BLUE)Archiving...$(RESET) (Log: $(LOG_DIR)/archive.log)"
 	@if [ -f "$(LOG_DIR)/archive.log" ]; then \
@@ -150,7 +134,7 @@ archive:
 # ============================================================
 # Code Quality
 # ============================================================
-# 7. Validate code style and specifications
+# 5. Validate code style and specifications
 check-code:
 	@echo "📝 $(YELLOW)Verifying code style and specifications...$(RESET)"
 	@if [ ! -d "$(ROOT_DIR)/.venv" ]; then \
@@ -166,7 +150,7 @@ check-code:
 	@echo "$(GREEN)✅ Verification completed, code quality is good!$(RESET)"
 
 
-# 8. Format code with ruff
+# 6. Format code with ruff
 fmt:
 	@echo "📝 $(YELLOW)Formatting code...$(RESET)"
 	@if [ ! -d "$(ROOT_DIR)/.venv" ]; then \
@@ -182,7 +166,7 @@ fmt:
 	@echo "$(GREEN)✅ Code formatted successfully!$(RESET)"
 
 
-# 9. Format code with black
+# 7. Format code with black
 black:
 	@echo "🖤 $(YELLOW)Formatting code with black...$(RESET)"
 	@if [ ! -d "$(ROOT_DIR)/.venv" ]; then \
@@ -197,7 +181,7 @@ black:
 	@echo "$(GREEN)✅ Code formatted with black!$(RESET)"
 
 
-# 10. Sort imports with isort
+# 8. Sort imports with isort
 isort:
 	@echo "📋 $(YELLOW)Sorting imports with isort...$(RESET)"
 	@if [ ! -d "$(ROOT_DIR)/.venv" ]; then \
@@ -212,7 +196,7 @@ isort:
 	@echo "$(GREEN)✅ Imports sorted with isort!$(RESET)"
 
 
-# 11. Run all formatters
+# 9. Run all formatters
 format-all: black isort fmt
 	@echo "$(GREEN)✅ All formatters completed!$(RESET)"
 	@echo ""
@@ -222,7 +206,7 @@ format-all: black isort fmt
 	@echo "  $(GREEN)•$(RESET) ruff (code formatting & fixing)"
 
 
-# 12. Type checking with mypy
+# 10. Type checking with mypy
 typecheck:
 	@echo "🔍 $(YELLOW)Performing type checking with mypy...$(RESET)"
 	@if [ ! -d "$(ROOT_DIR)/.venv" ]; then \
@@ -243,7 +227,7 @@ typecheck:
 # ============================================================
 # Security
 # ============================================================
-# 13. Audit dependencies for vulnerabilities
+# 11. Audit dependencies for vulnerabilities
 vuln-audit:
 	@echo "🔒 $(MAGENTA)Auditing dependencies for vulnerabilities...$(RESET)"
 	@echo "📂 Reports saved to: $(CYAN)$(SECURITY_DIR)$(RESET)"
@@ -283,7 +267,7 @@ vuln-audit:
 	fi
 
 
-# 14. Generate SBOM (Software Bill of Materials)
+# 12. Generate SBOM (Software Bill of Materials)
 sbom:
 	@echo "📋 $(MAGENTA)Generating Software Bill of Materials (SBOM)...$(RESET)"
 	@echo "📂 Reports saved to: $(CYAN)$(SECURITY_DIR)$(RESET)"
@@ -331,7 +315,7 @@ sbom:
 
 
 
-# 15. Safety check for known vulnerabilities
+# 13. Safety check for known vulnerabilities
 safety:
 	@echo "🛡️ $(MAGENTA)Running safety scan...$(RESET)"
 	@echo "📂 Reports saved to: $(CYAN)$(SECURITY_DIR)$(RESET)"
@@ -365,7 +349,7 @@ safety:
 
 
 
-# 16. Run all security checks
+# 14. Run all security checks
 security-all: vuln-audit sbom safety
 	@echo ""
 	@echo "🔒 $(GREEN)All security checks completed!$(RESET)"
@@ -384,7 +368,7 @@ security-all: vuln-audit sbom safety
 
 
 # ============================================================
-# 17. Show current environment info
+# 15. Show current environment info
 # ============================================================
 info:
 	@echo "$(BOLD)$(CYAN)📊 Environment Information:$(RESET)"

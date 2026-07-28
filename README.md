@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.4.5--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.4.6--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -243,9 +243,6 @@ The response includes both `mos` (unified 0–5 scale, `raw_score × 5`) and `da
 > [!NOTE]
 > MOS denormalization uses `dataset_info.mos_min`/`mos_max` from the checkpoint's saved config if present, otherwise falls back to hardcoded constants (`DATASET_MOS_PARAMS`) for TID2013/KoNViD-1k only. Given the training pipeline doesn't currently guarantee `mos_min`/`mos_max` land in `dataset_info` (see the Configuration Guide note on `dataset_info` above), the hardcoded fallback is likely what's actually used in practice — verify the printed range in the startup log (`✅ ... 模型加载完成 (... MOS 范围: X~Y)`) matches your dataset before trusting `dataset_mos` output.
 
-> [!NOTE]
-> CORS is currently wide open (`allow_origins=["*"]`) — fine for local development, but tighten this before exposing the service beyond your own machine.
-
 ---
 
 ## Project Main Structure <a id="project-main-structure"></a>
@@ -410,7 +407,7 @@ The framework includes security tools to audit dependencies:
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.4.5-beta (pre-release)
+- **Version**: 0.4.6-beta (pre-release)
 
 ---
 

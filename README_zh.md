@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.4.5--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.4.6--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -241,9 +241,6 @@ uv run python -m deploy.api
 > [!NOTE]
 > MOS 反归一化优先使用检查点（checkpoint）保存的配置中的 `dataset_info.mos_min`/`mos_max`；若缺失，则回退使用硬编码常量（`DATASET_MOS_PARAMS`，仅适用于 TID2013/KoNViD-1k）。鉴于目前的训练流程无法保证 `dataset_info` 中包含 `mos_min`/`mos_max`（参见上文关于 `dataset_info` 的配置指南说明），实际运行中很可能使用的是硬编码的回退值——因此，在信任 `dataset_mos` 输出之前，请务必核实启动日志中打印的范围（`✅ ... 模型加载完成 (... MOS 范围: X~Y)`）是否与您的数据集相符。
 
-> [!NOTE]
-> 目前 CORS 设置为完全开放（`allow_origins=["*"]`）——这适用于本地开发，但在将服务暴露给本机以外的环境之前，请务必收紧此设置。 ---
-
 ## 项目主要结构 <a id="project-main-structure"></a>
 
 ```text
@@ -406,7 +403,7 @@ Decord 已预配置为默认后端。如果不可用，框架会自动回退到 
 
 - **框架**: [MIT](LICENSE)
 - **作者**: [@autentisitet](https://github.com/autentisitet)
-- **版本**: 0.4.5-beta (预发布版)
+- **版本**: 0.4.6-beta (预发布版)
 
 ---
 

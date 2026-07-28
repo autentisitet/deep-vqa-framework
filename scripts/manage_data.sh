@@ -238,6 +238,9 @@ handle_dataset_initialization() {
     esac
 }
 
+if [ "${MANAGE_DATA_SOURCE_ONLY:-false}" = "true" ]; then
+    return 0 2>/dev/null || exit 0
+fi
 
 handle_dataset_initialization "tid2013" "$TID_TARGET_PATH" "TID2013" || TID_DOWNLOAD_FLAG=true
 handle_dataset_initialization "konvid-1k-videos" "$KON_DATA_TARGET_PATH" "KoNViD-1k" || KON_DATA_DOWNLOAD_FLAG=true
