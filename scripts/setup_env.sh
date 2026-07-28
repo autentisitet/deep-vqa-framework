@@ -98,39 +98,18 @@ else
 fi
 
 
-
-
-detect_proxy_port() {
-    if [ -n "$http_proxy" ]; then
-        local port=$(echo "$http_proxy" | sed -E 's/.*:([0-9]+).*/\1/')
-        if curl -s -o /dev/null --max-time 2 --proxy "$http_proxy" "https://httpbin.org/get" 2>/dev/null; then
-            echo "$port"
-            return 0
-        fi
-    fi
-
-
-    for port in 7890 7897 10809 1080; do
-        if curl -s -o /dev/null --max-time 2 --proxy "http://127.0.0.1:$port" "https://httpbin.org/get" 2>/dev/null; then
-            echo "$port"
-            return 0
-        fi
-    done
-
-    return 1
-}
-
-
-setup_proxy() {
-    local port
-    port=$(detect_proxy_port) || true
-    if [ -n "$port" ]; then
-        export http_proxy="http://127.0.0.1:$port"
-        export https_proxy="$http_proxy"
-        export no_proxy="127.0.0.1,localhost,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.cn,*.mirrors.edu.cn,mirrors.tuna.tsinghua.edu.cn"
-        echo "Proxy enabled on port $port"
+# ============================================================
+# Proxy configuration - respect user environment only
+# ============================================================
+check_proxy() {
+    if [ -n "$http_proxy" ] || [ -n "$HTTP_PROXY" ]; then
+        echo "✅ Using proxy from environment: ${http_proxy:-$HTTP_PROXY}"
+        return 0
     else
-        echo "No proxy detected, using direct connection"
+        echo "ℹ️  No proxy set. If you need one:"
+        echo "   - On AutoDL: source /etc/network_turbo"
+        echo "   - On other servers: set http_proxy/https_proxy environment variables"
+        return 1
     fi
 }
 
@@ -150,6 +129,7 @@ ensure_optional_deps() {
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
 
@@ -184,9 +164,6 @@ cd "$PROJECT_DIR"
 APT_PACKAGES=(
     curl
     wget
-    net-tools
-    iproute2
-    psmisc
     build-essential
     tar
     aria2
@@ -195,14 +172,12 @@ APT_PACKAGES=(
     tree
     bc
     ffmpeg
-    imagemagick
-    dos2unix
 )
 UV_CORE_PACKAGES=(
     opencv-python decord
     pyyaml
     numpy pandas matplotlib pillow seaborn
-    loguru tqdm rich PyYAML
+    loguru tqdm
     scikit-learn scipy
     gdown
 )
@@ -218,12 +193,9 @@ UV_SECURITY_PACKAGES=(
 # Install basic tools and configure mirrors if needed
 # ===========================================================
 echo "⚙️ Installing basic tools..."
-if [ -f "/etc/network_environment" ]; then
-    source /etc/network_environment
-else
-    setup_proxy
-fi
 
+# Check proxy status (informational only, no automatic setup)
+check_proxy
 
 if [ "$USE_MIRROR" = true ]; then
     echo -e "${GREEN}Using temporary TUNA mirror config...${NC}"
@@ -415,9 +387,9 @@ echo -e "${BLUE}🔧 Installing security tools...${NC}"
 if [ "$INSTALL_DEV" = true ]; then
     echo -e "${BLUE}🔧 Installing development tools...${NC}"
     ensure_optional_deps
-    
+
     uv add --optional dev "${UV_DEV_PACKAGES[@]}" 2>/dev/null || true
-    
+
     echo -e "${GREEN}✅ Development tools installed:${NC}"
     echo "  • ruff (code linting & formatting)"
     echo "  • mypy (type checking)"
@@ -432,9 +404,9 @@ fi
 if [ "$INSTALL_SECURITY" = true ]; then
     echo -e "${BLUE}🔒 Installing security tools...${NC}"
     ensure_optional_deps
-    
+
     uv add --optional security "${UV_SECURITY_PACKAGES[@]}" 2>/dev/null || true
-    
+
     echo -e "${GREEN}✅ Security tools installed:${NC}"
     echo "  • pip-audit (vulnerability scanning)"
     echo "  • cyclonedx-bom (SBOM generation)"

@@ -1,11 +1,14 @@
 [project]
 name = "deep-vqa-framework"
-version = "0.4.3-beta"
+version = "0.4.6-beta"
 description = "Unified deep learning framework for Image and Video Quality Assessment (IQA/VQA)"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
+    { name = "deep-vqa-framework" },
+    { name = "deep-vqa-framework" },
+    { name = "deep-vqa-framework" },
     { name = "deep-vqa-framework" },
 ]
 keywords = [
@@ -38,7 +41,6 @@ dependencies = [
     "pillow>=12.2.0",
     "python-multipart>=0.0.32",
     "pyyaml>=6.0.3",
-    "rich>=15.0.0",
     "scikit-learn>=1.8.0",
     "scipy>=1.17.1",
     "seaborn>=0.13.2",
