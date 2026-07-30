@@ -45,27 +45,27 @@
             S5[cache_clean.sh] -.清理.-> S3
         end
 
-        subgraph STAGE_2 [2. 配置驱动 - 参数层]
-            C1[basic.yaml] --> CL[config_loader.py<br/>load_system_config]
+        subgraph STAGE_2 [2. 配置驱动 - Pydantic 层]
+            C1[basic.yaml] --> CL[src/config/loader.py<br/>load_config]
             C3[models/*.yaml] --> CL
             C2[dataset_config.yaml] --> CL
-            CL -->|"合并 + validate_config_schema()"| M[main.py]
+            CL -->|"Pydantic 校验 + 类型安全"| M[main.py]
         end
 
         subgraph STAGE_3 [3. 基础工具层]
-            PY[paths.yaml] --> PM[path_manager.py<br/>PathManager]
-            M --> PM
             M --> LG[logging_utils.py<br/>log_prepare]
+            M --> CF[src/config/schemas.py<br/>Config + PathsConfig]
+            CF -->|"cfg.paths.xxx_dir()"| M
         end
 
         subgraph STAGE_4 [4. 数据处理层]
             M --> DE[data_eda.py<br/>DataEDA]
-            DE --> MF[metadata_loader_factory.py] --> ML[metadata_loaders.py<br/>Tid2013/Konvid/T2Vqa Loader]
+            DE --> MF[dataset_loaders.py] --> ML[metadata_loaders.py<br/>Tid2013/Konvid/T2Vqa Loader]
             DE --> INT[eda/integrity.py<br/>黑白帧·跳帧·损坏检测]
             DE --> SPL[eda/split.py<br/>分层K折切分]
             DE --> STA[eda/statistics.py]
             DE --> FL[file_loader.py<br/>CaseInsensitiveAssetResolver]
-            DE --> TY[types.py]
+            DE --> TY[dataset_types.py]
             DE --> DF[(处理后的 DataFrame<br/>+ MOS归一化统计)]
         end
 
@@ -79,16 +79,16 @@
         end
 
         subgraph STAGE_6 [6. 成果归档 - 存储层]
-            TR --> F[(best_model.pt<br/>results/model_outputs/)]
+            TR --> F[(best_model.pt<br/>results/{dataset}/model_outputs/)]
             TR --> AR[archive_result.sh]
-            AR --> LOG[(Log + Config + Plots + Weights)]
+            AR --> LOG[(Log + Config + Plots + Weights<br/>results/{dataset}/)]
         end
 
         subgraph STAGE_7 [7. 推理部署 - 交付层]
-            F -.手动拷贝.-> BM[(backend/iqa-models/<br/>backend/vqa-models/)]
-            BM --> INF[backend/infer.py<br/>Preprocessor + predict_*]
-            INF --> API[backend/api.py<br/>FastAPI /evaluate /health]
-            API --> WEB[index.html<br/>前端可视化 Demo]
+            F -.手动拷贝.-> BM[(deploy/iqa-models/<br/>deploy/vqa-models/)]
+            BM --> INF[deploy/infer.py<br/>Preprocessor + predict_*]
+            INF --> API[deploy/api.py<br/>FastAPI /evaluate /health]
+            API --> WEB[frontend/index.html<br/>前端可视化 Demo]
             API --> EXT[外部应用调用]
         end
 

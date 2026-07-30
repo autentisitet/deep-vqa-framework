@@ -1,5 +1,10 @@
 # Disclaimer
 
+**Last Updated:** July 2025
+**Applies to:** deep-vqa-framework v0.5.0-beta and later
+
+---
+
 ## 1. Data Integrity & Usage
 
 - **Datasets**: This framework provides automated scripts to download publicly available datasets (e.g., TID2013, KoNViD-1k). The author **does not host, distribute, or store** any of these datasets and assumes no responsibility for their availability, integrity, or compliance with the original licenses provided by their respective creators.
