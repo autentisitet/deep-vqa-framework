@@ -5,7 +5,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 from loguru import logger
 
-from src.data.data_types import DatasetType
+from src.data.dataset_types import DatasetType
 
 # TODO:
 # 检查是否有sample data损坏、缺失、重复

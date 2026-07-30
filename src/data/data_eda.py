@@ -3,180 +3,98 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import cv2
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 from loguru import logger
+from tqdm import tqdm
 
 from src.data.eda.integrity import check_media_integrity
 from src.data.eda.split import check_fold_distribution, split_train_val_test
 from src.data.eda.statistics import analyze_image_properties, analyze_video_properties, compute_mos_statistics
-from src.data.metadata_loader_factory import MetadataLoaderFactory
-from src.data.data_types import DatasetType
-from src.utils.config_loader import safe_load_yaml
-from src.utils.path_manager import PathManager
-
-# Location:
-#   1. 面向整个dataset
-#   2. 面向model的training
-
-
-# Targets:
-# 一、sampledata空间变换:
-#   1. 尺寸变换：
-#       - img: Random Crop
-#       - video: Resize + Center Crop
-#   2. 数据增强：
-#       - img: Random Flip, Color Jitter
-#       - video: Temporal Augmentation
-#   3. 帧采样:
-#       - img： N/A
-#       - video: Fragment Sampling
-#
-#
-#
-# 二、质量分数预处理:
-#   1. 归一化:
-#       - img：MOS → [0,1]
-#       - video: DMOS → [0,1]
-#   2. 异常值检测:
-#       - img: 3σ 原则剔除
-#       - video: 3σ 原则剔除
-#   3. 分数均衡:
-#       - img：检查各分数区间样本数
-#       - video：检查各分数区间样本数
-#
-#
-# 三、视频特有处理:
-#   1. 帧采样、时序一致性检查(计算相邻帧差异，检测跳帧、黑帧)
-#   2. 探索帧数 vs MOS 的关系  —————— pass
-#
-#
-# 四、数据加载:
-#   1. 预加载到RAM: 小数据集直接 np.load()
-#   2. 多进程 DataLoader: num_workers=4
-#   3. 缓存预处理结果: lmdb / h5py  —————— pass
-#
-#
-# 五、检查是否需要过采样/欠采样处理不平衡
-
-
-# TODO: 改进 check_filename_label_match 的后缀检测逻辑
-# 当前只检查第一个 label 是否包含点，如果数据集混合有后缀和无后缀的 label 会出错
-# 建议: 检查大多数 label 是否有后缀，或通过配置明确指定
-
-# TODO: 视频时序一致性检查可能性能较差
-# 对于长视频，逐帧读取所有帧可能很慢
-# 建议: 添加采样间隔参数（如每隔 N 帧检查一次），或添加 tqdm 进度条
-
-# TODO: 确保 results 目录存在后再写入报告
-# _write_integrity_report 中直接拼接 results 路径，但目录可能不存在
-# 建议: 在写入前调用 results_dir.mkdir(parents=True, exist_ok=True)
+from src.data.dataset_loaders import MetadataLoaderFactory
+from src.data.dataset_types import DatasetType
+from src.config.schemas import Config
+from src.utils.file_loader import CaseInsensitiveAssetResolver
 
 
 class DataEDA:
     """
-    Data exploration and analysis: loading metadata, cleaning samples, statistical analysis, and dataset partitioning.
+    Data exploration and analysis: loading metadata, cleaning samples,
+    statistical analysis, and dataset partitioning.
     """
 
-    _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-
-    def __init__(self, dataset_name: str, data_dir: Path, dataset_info: Optional[Dict] = None):
+    def __init__(
+        self,
+        cfg: Config,
+        dataset_name: str,
+        data_dir: Optional[Path] = None,
+    ):
+        self.cfg = cfg
         self.dataset_name = dataset_name.lower()
         self.df = None
         self.stats = {}
 
-        self.dataset_config = dataset_info if dataset_info else self._load_dataset_config_from_yaml(None)
+        self.dataset_info = cfg.dataset
+        self.is_video = self.dataset_info.data_type == "video"
 
-        self.is_video = self.dataset_config.get("data_type") == "video"
-        self.file_extensions = [ext.lower() for ext in self.dataset_config.get("file_extensions", ["*"])]
+        self.file_extensions = list(DatasetType.all_extensions())
 
-        if data_dir:
-            self.data_dir = Path(data_dir).resolve()
-        else:
-            # 从 YAML 配置的 paths.root 和 paths.data 动态构建
-            root = PathManager.resolve("dataset", dataset=self.dataset_name)
-            sub_path = self.dataset_config.get("paths", {}).get("data", "")
-            self.data_dir = (root / sub_path).resolve()
+        if data_dir is None:
+            data_dir = cfg.paths.datasets_dir / dataset_name
+        self.data_dir = Path(data_dir).resolve()
 
-        logger.info(f"🚀 [PathFix] Data directory: {self.data_dir}")
+        self.corrupted_dir = cfg.paths.corrupted_dir(dataset_name)
+        self.results_dir = cfg.paths.results_dir
+
+        logger.info(f"Data directory: {self.data_dir}")
         plt.switch_backend("Agg")
 
-        # 引入无视大小写资产解析网关
-        from src.utils.file_loader import CaseInsensitiveAssetResolver
+        self.resolver = CaseInsensitiveAssetResolver(target_dir=self.data_dir)
 
-        self.resolver = CaseInsensitiveAssetResolver(target_dir=self.data_dir, allowed_extensions=self.file_extensions)
-
-    def _load_dataset_config_from_yaml(self, config_path: Path) -> Dict:
-        if config_path is None:
-            config_path = PathManager.get_config_file("dataset_config.yaml")
-
-        # 使用 safe_load_yaml 加载
-        full_config = safe_load_yaml(config_path, "Dataset configuration file")
-
-        # 大小写不敏感查找
-        lowered_config = {k.lower(): v for k, v in full_config.items()}
-        target_key = self.dataset_name.lower()
-
-        if target_key not in lowered_config:
-            available = list(full_config.keys())
-            logger.error(f"❌ Dataset '{self.dataset_name}' not found in config")
-            raise KeyError(f"Dataset '{self.dataset_name}' missing. Available: {available}")
-
-        return lowered_config[target_key]
-
-    # ==================== 一、Basic Analysis ====================
 
     def load_metadata(self) -> pd.DataFrame:
+        """Load metadata file using the appropriate loader."""
         meta_file = (
-            PathManager.resolve("dataset", dataset=self.dataset_name)
-            / self.dataset_config["paths"].get("metadata", "")
-            / self.dataset_config["metadata"]["mos_file"]
+            Path(self.dataset_info.paths.root)
+            / self.dataset_info.paths.metadata
+            / self._get_mos_filename()
         )
 
         if not meta_file.exists():
-            logger.error(f"❌ Metadata file not found: {meta_file}")
+            logger.error(f"Metadata file not found: {meta_file}")
             return pd.DataFrame()
 
         try:
             loader = MetadataLoaderFactory.get_loader(self.dataset_name)
             df = loader.load(meta_file)
-            self.df = df  # 保存到 self.df
-            logger.info(f"✅ [Data Engine] Successfully loaded {len(df)} cleaned samples.")
+            self.df = df
+            logger.info(f"Loaded {len(df)} samples from metadata")
             return df
-
         except Exception as e:
-            logger.error(f"❌ Parsing failed: {e}")
+            logger.error(f"Failed to parse metadata: {e}")
             return pd.DataFrame()
 
+
+    def _get_mos_filename(self) -> str:
+        """Get MOS filename for the current dataset."""
+        default_mos_files = {
+            "tid2013": "mos_with_names.txt",
+            "konvid-1k": "KoNViD_1k_mos.csv",
+            "t2vqa-db": "info.txt",
+        }
+        return default_mos_files.get(self.dataset_name, "mos.txt")
+
+
     def ensure_split_column(self):
-        """
-        根据 dataset_config 中的比例执行切分。
-        如果 dataset_config 中定义了 split 参数，则使用定义的比例；
-        否则默认执行 8:1:1 划分。
-        """
-        # 如果已经存在有效的 split 列，则跳过
+        """Ensure DataFrame has a 'split' column for train/val/test."""
         if "split" in self.df.columns and not self.df["split"].isnull().all():
-            logger.info("✅ [Split] 已检测到划分列，跳过自动切分。")
+            logger.info("Split column already exists, skipping")
             return
 
-        split_cfg = self.dataset_config.get("split", {})
+        train_ratio = 0.8
+        val_ratio = 0.1
 
-        # 情况1：预定义划分（直接指定 sample_id 列表）
-        if "train" in split_cfg and isinstance(split_cfg["train"], list):
-            logger.info("⚙️ [Split] 使用预定义划分")
-            self.df["split"] = "test"  # 默认 test
-            self.df.loc[self.df["sample_id"].isin(split_cfg["train"]), "split"] = "train"
-            self.df.loc[self.df["sample_id"].isin(split_cfg.get("val", [])), "split"] = "val"
-            # test 保持默认
-            return
-
-        # 情况2：按比例划分
-        train_ratio = split_cfg.get("train_ratio", 0.8)
-        val_ratio = split_cfg.get("val_ratio", 0.1)
-
-        logger.info(f"⚙️ [Split] 按比例切分: Train={train_ratio}, Val={val_ratio}")
+        logger.info(f"Splitting: Train={train_ratio}, Val={val_ratio}")
 
         train_df, val_df, test_df = split_train_val_test(
             self.df, train_ratio=train_ratio, val_ratio=val_ratio, random_state=42
@@ -186,153 +104,132 @@ class DataEDA:
         self.df.loc[val_df.index, "split"] = "val"
         self.df.loc[test_df.index, "split"] = "test"
 
-        logger.info(f"✅ 划分完成: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
+        logger.info(f"Split complete: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
+
 
     def basic_statistics(self):
+        """Compute and log basic statistics."""
         if self.df is None or self.df.empty:
-            logger.error("❌ No data loaded. Run load_metadata() first.")
+            logger.error("No data loaded. Run load_metadata() first.")
             return
 
         mos_stats = compute_mos_statistics(self.df)
-        logger.info(f"\n{'=' * 50}\n[-] {self.dataset_name} Basic Statistics\n{'=' * 50}")
-        logger.info(f"  Total samples in Sheet: {mos_stats['total_samples']}")
-        logger.info(f"  MOS Range: [{mos_stats['mos_range'][0]:.3f}, {mos_stats['mos_range'][1]:.3f}]")
-        logger.info(f"  MOS Mean: {mos_stats['mos_mean']:.3f} | MOS Std: {mos_stats['mos_std']:.3f}")
+        logger.info(f"\n{'=' * 50}")
+        logger.info(f"Dataset: {self.dataset_name} Basic Statistics")
+        logger.info(f"{'=' * 50}")
+        logger.info(f"  Total samples: {mos_stats['total_samples']}")
+        logger.info(f"  MOS Range: [{mos_stats['range'][0]:.3f}, {mos_stats['range'][1]:.3f}]")
+        logger.info(f"  MOS Mean: {mos_stats['mean']:.3f} | MOS Std: {mos_stats['std']:.3f}")
 
-        self._analyze_media_properties()  # 统一调用
-
+        self._analyze_media_properties()
         self.stats["total_samples"] = mos_stats["total_samples"]
-        self.stats["mos_range"] = mos_stats["mos_range"]
+        self.stats["range"] = mos_stats["range"]
 
-    def _analyze_image_properties(self, image_paths):
-        props = analyze_image_properties(image_paths)
-        if props:
-            logger.info(f"    Scanned Physical Files on Disk: {props['total_files']}")
-            logger.info(
-                f"    Resolution boundary: {props['width']['min']}x{props['height']['min']} ~ "
-                f"{props['width']['max']}x{props['height']['max']}"
-            )
-
-    def _analyze_video_properties(self, video_paths):
-        props = analyze_video_properties(video_paths)
-        if props and "error" not in props:
-            logger.info(f"    Scanned Physical Videos on Disk: {props.get('total_files', 0)}")
-            # ✅ 适配新格式：从嵌套字典中取值
-            width = props.get("resolution", {}).get("width", {}).get("mean", 0)
-            height = props.get("resolution", {}).get("height", {}).get("mean", 0)
-            fps = props.get("fps", {}).get("mean", 0)
-            frame_count = props.get("frame_count", {}).get("mean", 0)
-            logger.info(f"    Sample Video Size: {int(width)}x{int(height)} | FPS: {fps:.2f}")
-            logger.info(f"    Total Frame Count: {int(frame_count)}")
 
     def _analyze_media_properties(self):
-        """Unified analysis of media attributes (based on dataset type)"""
-        # 收集文件
-        media_paths = set()
+        """Analyze media properties from disk."""
+        media_paths = []
         for ext in self.file_extensions:
-            media_paths.update(self.data_dir.rglob(f"*.{ext.lower()}"))
-            media_paths.update(self.data_dir.rglob(f"*.{ext.upper()}"))
-            media_paths.update(self.data_dir.rglob(f"*.{ext.capitalize()}"))
-
-        media_paths = list(media_paths)
+            ext = ext.lstrip(".")
+            media_paths.extend(self.data_dir.rglob(f"*.{ext.lower()}"))
+            media_paths.extend(self.data_dir.rglob(f"*.{ext.upper()}"))
 
         if not media_paths:
-            logger.warning(f"⚠️ No media files in {self.data_dir}")
+            logger.warning(f"No media files found in {self.data_dir}")
             return
 
-        if not hasattr(self, "dataset_type"):
-            try:
-                first_file = Path(media_paths[0]).name
-                asset = self.resolver.resolve(first_file)
-                self.dataset_type = asset.dataset_type
-            except Exception:
-                self.dataset_type = DatasetType.IMAGE if not self.is_video else DatasetType.VIDEO
+        try:
+            first_file = Path(media_paths[0]).name
+            asset = self.resolver.resolve(first_file)
+            dataset_type = asset.dataset_type
+        except Exception:
+            dataset_type = DatasetType.VIDEO if self.is_video else DatasetType.IMAGE
 
-        # 根据类型调用对应的分析函数
-        if self.dataset_type == DatasetType.IMAGE:
-            logger.info("\n  Image Properties:")
-            self._analyze_image_properties(media_paths)
-        elif self.dataset_type == DatasetType.VIDEO:
-            logger.info("\n  Video Properties:")
-            self._analyze_video_properties(media_paths)
-        else:
-            logger.warning(f"⚠️ Unknown dataset type: {self.dataset_type}")
+        if dataset_type == DatasetType.IMAGE:
+            props = analyze_image_properties(media_paths)
+            if props:
+                logger.info("  Image Properties:")
+                logger.info(f"    Files: {props['total_files']}")
+                logger.info(
+                    f"    Resolution: {props['width']['min']}x{props['height']['min']} ~ "
+                    f"{props['width']['max']}x{props['height']['max']}"
+                )
+        elif dataset_type == DatasetType.VIDEO:
+            props = analyze_video_properties(media_paths)
+            if props and "error" not in props:
+                logger.info("  Video Properties:")
+                logger.info(f"    Files: {props.get('total_files', 0)}")
+                w = props.get("resolution", {}).get("width", {}).get("mean", 0)
+                h = props.get("resolution", {}).get("height", {}).get("mean", 0)
+                fps = props.get("fps", {}).get("mean", 0)
+                logger.info(f"    Size: {int(w)}x{int(h)} | FPS: {fps:.2f}")
 
-    def check_integrity(self, max_samples: int = None, skip_video_check: bool = False) -> Dict:
-        """Check file integrity: missing, corrupted, duplicate"""
-        logger.info("\n 🔍 [Integrity] Integrity check started...")
 
-        # 如果指定了最大样本数，只检查部分
+    def check_integrity(self, max_samples: Optional[int] = None, skip_video_check: bool = False) -> Dict:
+        """Check file integrity: missing, corrupted, duplicate."""
+        logger.info("Integrity check started...")
+
         df_to_check = self.df if max_samples is None else self.df.head(max_samples)
 
         missing = []
         corrupted = []
-        # 使用 set 优化查找速度，提高性能
-        duplicates = self.df[self.df.duplicated(subset=["sample_id"])]["sample_id"].tolist()
+        valid_indices = []
 
-        quarantine_dir = self._PROJECT_ROOT / "quarantine"
-        quarantine_dir.mkdir(parents=True, exist_ok=True)
+        self.corrupted_dir.mkdir(parents=True, exist_ok=True)
 
-        valid_indices = []  # 记录合法的索引
-
-        # 添加进度条
-        from tqdm import tqdm
-
-        # 预先处理路径解析，避免循环内重复解析
-        for i, row in tqdm(df_to_check.iterrows(), total=len(df_to_check), desc="检查文件完整性"):
+        for i, row in tqdm(df_to_check.iterrows(), total=len(df_to_check), desc="Checking files"):
             sid = str(row["sample_id"])
 
-            # 1. 路径解析校验
             try:
                 asset = self.resolver.resolve(sid)
                 target_path = asset.path
                 is_video = asset.is_video
-            except Exception:  # 捕获解析器可能抛出的所有异常
+            except Exception:
                 missing.append(sid)
                 continue
 
-            # 2. 快速检查：文件是否存在
             if not target_path.exists():
                 missing.append(sid)
                 continue
 
-            # 3. 如果需要跳过视频内容检查，只检查存在性
             if skip_video_check and is_video:
                 valid_indices.append(i)
                 continue
 
-            # 4. 深度检查（图像或视频内容）
             dataset_type = DatasetType.VIDEO if is_video else DatasetType.IMAGE
             is_ok, error, _ = check_media_integrity(target_path, dataset_type)
-            # 2. 文件可读性校验 (改为只读模式，减少 I/O 开销)
+
             if not is_ok:
                 corrupted.append(sid)
-
-                # 只在确实文件存在且无法读取时移动
                 if target_path.exists():
-                    dest = quarantine_dir / target_path.name
+                    dest = self.corrupted_dir / target_path.name
                     if dest.exists():
-                        dest = quarantine_dir / f"{target_path.stem}_corrupted{target_path.suffix}"
+                        dest = self.corrupted_dir / f"{target_path.stem}_corrupted{target_path.suffix}"
                     shutil.move(str(target_path), str(dest))
-                    logger.warning(f"⚠️ Corrupted file has been quarantined: {target_path.name} ({error})")
+                    logger.warning(f"Corrupted file corrupted: {target_path.name} ({error})")
                 continue
 
             valid_indices.append(i)
 
-        # 3. 内存索引更新：只保留验证通过的行
         self.df = self.df.loc[valid_indices].reset_index(drop=True)
 
-        # 4. 生成审计报告 (使用更加紧凑的格式)
-        self._write_integrity_report(missing, corrupted)
+        duplicates = self.df[self.df.duplicated(subset=["sample_id"])]["sample_id"].tolist()
+
+        self._write_integrity_report(missing, corrupted, duplicates)
 
         logger.info(
-            f"✅ [Integrity] Cleaning complete. Retained samples: {len(self.df)} | Missing samples: {len(missing)} | Corrupted samples: {len(corrupted)}"
+            f"Integrity complete: Retained {len(self.df)} | "
+            f"Missing {len(missing)} | Corrupted {len(corrupted)} | Duplicates {len(duplicates)}"
         )
         return {"corrupted": corrupted, "missing": missing, "duplicates": duplicates}
 
+
     def _write_integrity_report(self, missing: List[str], corrupted: List[str]):
-        """Generate an integrity check report"""
-        report_path = (self._PROJECT_ROOT / "results") / f"{self.dataset_name}_integrity_report.txt"
+        """Write integrity report to file."""
+        report_dir = self.cfg.paths.train_logs_dir(self.dataset_name)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / f"{self.dataset_name}_integrity_report.txt"
+
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(f"--- Integrity Audit Report: {self.dataset_name} ---\n")
             f.write(f"Date: {pd.Timestamp.now()}\n")
@@ -342,15 +239,16 @@ class DataEDA:
             if corrupted:
                 f.write("Corrupted Files:\n" + "\n".join(corrupted) + "\n")
 
+
     def check_filename_label_match(self) -> bool:
-        # 检查磁盘上的文件和 metadata 中的 label 是否完全匹配
-        """Compares the disk filename with the tag filename to see if they match (case-insensitive)"""
+        """Check if filenames on disk match labels in metadata."""
         if self.df is None:
             return False
 
         physical_names = set()
         for ext in self.file_extensions:
-            physical_names.update({p.name.lower() for p in self.data_dir.rglob(f"*.{ext}")})
+            ext = ext.lstrip(".")
+            physical_names.update({p.name.lower() for p in self.data_dir.rglob(f"*.{ext.lower()}")})
             physical_names.update({p.name.lower() for p in self.data_dir.rglob(f"*.{ext.upper()}")})
 
         label_names = set(self.df["sample_id"].astype(str))
@@ -359,28 +257,28 @@ class DataEDA:
             physical_names = {Path(name).stem for name in physical_names}
 
         match = physical_names == label_names
-        logger.info(f"  Filename-Label Strict Complement Match: {match}")
+        logger.info(f"Filename-label match: {match}")
         if not match:
-            logger.warning(f"    Diff - Excess files on Disk: {len(physical_names - label_names)}")
-            logger.warning(
-                f"    Diff - Deficit files on Disk (Missing from labels): {len(label_names - physical_names)}"
-            )
+            logger.warning(f"Excess files on disk: {len(physical_names - label_names)}")
+            logger.warning(f"Missing from labels: {len(label_names - physical_names)}")
         return match
 
-    def visualize_mos_distribution(self, save_dir: Path = Path("results/plots")):
+
+    def visualize_mos_distribution(self, save_dir: Optional[Path] = None):
+        """Plot MOS distribution."""
         if self.df is None or self.df.empty:
             return
+
+        if save_dir is None:
+            save_dir = self.cfg.paths.plots_dir(self.dataset_name)
+
         save_dir.mkdir(parents=True, exist_ok=True)
         fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
 
         axes[0].hist(self.df["mos"], bins=25, edgecolor="black", alpha=0.75, color="steelblue")
-        axes[0].set_xlabel("MOS / DMOS Score")
-        axes[0].set_ylabel("Sample Frequency")
-        axes[0].set_title(
-            f"{self.dataset_name} - Continuous Score Distribution",
-            fontsize=11,
-            fontweight="bold",
-        )
+        axes[0].set_xlabel("MOS Score")
+        axes[0].set_ylabel("Frequency")
+        axes[0].set_title(f"{self.dataset_name} - MOS Distribution", fontsize=11, fontweight="bold")
         axes[0].grid(True, linestyle="--", alpha=0.4)
 
         axes[1].boxplot(
@@ -391,19 +289,18 @@ class DataEDA:
             medianprops=dict(color="crimson", linewidth=1.5),
         )
         axes[1].set_ylabel("MOS Range")
-        axes[1].set_title(f"{self.dataset_name} - Statistical Boxplot", fontsize=11, fontweight="bold")
+        axes[1].set_title(f"{self.dataset_name} - Boxplot", fontsize=11, fontweight="bold")
         axes[1].grid(True, linestyle="--", alpha=0.4)
 
         plt.tight_layout()
         output_path = save_dir / f"{self.dataset_name}_mos_distribution.png"
         plt.savefig(output_path, dpi=150, bbox_inches="tight")
         plt.close()
-        logger.info(f"📊 MOS distribution graph saved to: {output_path}")
+        logger.info(f"MOS distribution saved: {output_path}")
 
-    # ==================== 四、质量分数预处理 ====================
 
     def normalize_scores(self) -> pd.DataFrame:
-        # 如果有 split 列，只用 train 集计算 min/max
+        """Normalize MOS scores to [0, 1]."""
         if "split" in self.df.columns:
             train_df = self.df[self.df["split"] == "train"]
             min_val = train_df["mos"].min()
@@ -412,114 +309,64 @@ class DataEDA:
             min_val = self.df["mos"].min()
             max_val = self.df["mos"].max()
 
-        # 防零除防御
         denom = (max_val - min_val) if max_val != min_val else 1.0
         self.df["normalized_score"] = (self.df["mos"] - min_val) / denom
 
-        self.stats["mos_min"] = float(min_val)  # 加这两行
+        self.stats["mos_min"] = float(min_val)
         self.stats["mos_max"] = float(max_val)
-        logger.info("  Score Processing -> Scale normalizes [0, 1] completed.")
+        logger.info("MOS scores normalized to [0, 1]")
         return self.df
 
+
     def detect_outliers_3sigma(self) -> pd.DataFrame:
+        """Detect outliers using 3-sigma rule."""
         mean = self.df["mos"].mean()
         std = self.df["mos"].std() if self.df["mos"].std() > 0 else 1.0
         lower_bound = mean - 3 * std
         upper_bound = mean + 3 * std
 
         outliers = self.df[(self.df["mos"] < lower_bound) | (self.df["mos"] > upper_bound)]
-        logger.info(f"  Outlier Detection -> Found {len(outliers)} samples drifting beyond 3σ boundary.")
+        logger.info(f"Outliers detected: {len(outliers)} samples beyond 3σ")
         self.df["is_outlier"] = (self.df["mos"] < lower_bound) | (self.df["mos"] > upper_bound)
         return self.df
 
-    # ==================== 三、K折交叉验证 ====================
 
     def check_fold_score_distribution(self, n_splits: int = 5) -> List[Dict]:
-        """使用分位数进行分层多折，确保每一折回归分布高度一致"""
+        """Check K-fold cross-validation distribution."""
         return check_fold_distribution(df=self.df, n_splits=n_splits, random_state=42, verbose=True)
 
-    # ==================== 五、视频特有增强处理 ====================
 
-    def check_temporal_consistency_by_path(self, video_path: Path) -> Dict:
-        cap = cv2.VideoCapture(str(video_path))
-        if not cap.isOpened():
-            return {"avg_diff": 0, "has_black_frames": False, "has_jumps": False}
-
-        diffs = []
-        black_frames_count = 0
-        prev_frame = None
-
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            if np.mean(gray) < 8.0:
-                black_frames_count += 1
-
-            if prev_frame is not None:
-                frame_diff = np.mean(cv2.absdiff(gray, prev_frame))
-                diffs.append(frame_diff)
-            prev_frame = gray
-
-        cap.release()
-
-        avg_diff = np.mean(diffs) if diffs else 0
-        has_jumps = np.std(diffs) > (avg_diff * 2.5) if diffs else False
-
-        return {
-            "avg_frame_delta": round(float(avg_diff), 4),
-            "black_frame_hits": black_frames_count,
-            "has_black_frames": black_frames_count > 0,
-            "has_jumps": has_jumps,
-        }
-
-    # ==================== 主分析流一键呼叫 ====================
-
-    def run_full_eda(self, save_dir: Optional[Path] = None, skip_integrity: bool = False) -> Dict:
-        """Execute the complete data exploration and analysis process"""
+    def run_full_eda(
+        self,
+        save_dir: Optional[Path] = None,
+        skip_integrity: bool = False
+    ) -> Dict:
+        """Execute the complete data exploration and analysis pipeline."""
         if save_dir is None:
-            save_dir = self._PROJECT_ROOT / "results" / "plots"
+            save_dir = self.cfg.paths.plots_dir(self.dataset_name)
 
         save_dir.mkdir(parents=True, exist_ok=True)
+
         self.df = self.load_metadata()
         if self.df is None or self.df.empty:
-            logger.error(f"[EDA] Pipeline initialization failed for: {self.dataset_name}")
+            logger.error(f"EDA pipeline initialization failed for: {self.dataset_name}")
             return {}
 
         self.basic_statistics()
-        # TODO:
+
         if skip_integrity:
             integrity_res = {"corrupted": [], "missing": [], "duplicates": []}
-            logger.info("⏭️ [Integrity] Skip integrity check")
+            logger.info("Skipping integrity check")
         else:
-            # 只检查文件存在性，不检查视频内容（快很多）
             integrity_res = self.check_integrity(skip_video_check=True)
 
         self.ensure_split_column()
         self.check_filename_label_match()
-
         self.visualize_mos_distribution(save_dir)
-
         self.normalize_scores()
         self.detect_outliers_3sigma()
         fold_res = self.check_fold_score_distribution()
 
-        if self.is_video:
-            logger.info("🎬 Video dataset subtype detected. Sampling standard temporal consistency check...")
-            video_samples = []
-            for ext in self.file_extensions:
-                video_samples.extend(list(self.data_dir.rglob(f"*.{ext}")))
-                video_samples.extend(list(self.data_dir.rglob(f"*.{ext.upper()}")))
-            if video_samples:
-                temporal_report = self.check_temporal_consistency_by_path(video_samples[0])
-                logger.info(f"   [Temporal Diagnostics Template] Sample: {video_samples[0].name}")
-                logger.info(
-                    f"   └─ Frame Delta Diff: {temporal_report['avg_frame_delta']} | Has Jumps/Drop: {temporal_report['has_jumps']}"
-                )
-                self.stats["sample_temporal_report"] = temporal_report
-
         self.stats.update({"integrity": integrity_res, "fold_variance": fold_res})
-        logger.info(f"🏁 [EDA Complete] Mission perfectly accomplished on {self.dataset_name}.\n")
+        logger.info(f"EDA complete for {self.dataset_name}")
         return self.stats

@@ -1,4 +1,10 @@
-from typing import Any, Dict, Optional
+# src/core/engine.py
+from typing import Any, Optional
+
+import re
+import shutil
+from pathlib import Path
+import json
 
 import numpy as np
 import torch
@@ -8,31 +14,18 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-# NOTE: The torch dependency in Docker might be an older version, preventing the use of new APIs.
-# from torch.amp import autocast, GradScaler
+from src.config.schemas import Config
 
 
 class TrainerEngine:
     """
-    General Training/Validation Engine
+    General Training/Validation Engine.
 
-    ## Responsibilities:
-
-    - Training loop scheduling (forward/backward propagation, gradient update)
-
-    - Mixed Precision Training (AMP) and gradient pruning
-
-    - Validation set evaluation and metric collection
-
-    - Checkpoint saving and early stopping control
-
-    ## Not concerned with:
-
-    - Specific dataset format
-
-    - Model architecture details
-
-    - Loss function implementation
+    Responsibilities:
+    - Training loop (forward/backward, gradient update)
+    - Mixed precision training (AMP)
+    - Validation and metric collection
+    - Checkpoint saving and early stopping
     """
 
     def __init__(
@@ -41,11 +34,10 @@ class TrainerEngine:
         optimizer: torch.optim.Optimizer,
         criterion: nn.Module,
         evaluator: Any,
-        config: Dict[str, Any],
+        cfg: Config,
         device: str = "cuda",
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
     ):
-        self._validate_config(config)
         self.device = device
         self.device_type = "cuda" if "cuda" in str(device) else "cpu"
 
@@ -53,83 +45,76 @@ class TrainerEngine:
         self.optimizer = optimizer
         self.criterion = criterion
         self.evaluator = evaluator
-        self.config = config
+        self.cfg = cfg
         self.scheduler = scheduler
 
-        train_cfg = config.get("train", {})
-        self.epochs = train_cfg.get("epochs", 30)
-        self.grad_clip = train_cfg.get("grad_clip", None)
-        self.gradient_accumulation_steps = train_cfg.get("gradient_accumulation_steps", 1)
+        train_cfg = cfg.train
+        self.epochs = train_cfg.epochs
+        self.grad_clip = train_cfg.grad_clip
+        self.gradient_accumulation_steps = train_cfg.gradient_accumulation_steps
 
-        self.use_amp = self.config.get("system", {}).get("amp", True)
-        # self.scaler = GradScaler(device_type=self.device_type, enabled=self.use_amp)
-        self.scaler = GradScaler() if self.use_amp else None
+        self.use_amp = cfg.system.amp
+        self.scaler = GradScaler(enabled=self.use_amp)
 
-        # Early Stopping State Machine Initialization
-        early_stop_cfg = train_cfg.get("early_stop", {})
-        self.early_stop_enabled = early_stop_cfg.get("enabled", True)
-        self.patience = early_stop_cfg.get("patience", 10)
-        self.early_stop_monitor = early_stop_cfg.get(
-            "monitor", "val_srocc"
-        ).lower()  # Unify the lowercase at the source
-        self.early_stop_mode = early_stop_cfg.get("mode", "min")
+        # Early stopping
+        early_stop_cfg = train_cfg.early_stop
+        self.early_stop_enabled = early_stop_cfg.enabled
+        self.patience = early_stop_cfg.patience
+        self.early_stop_monitor = early_stop_cfg.monitor.lower()
+        self.early_stop_mode = early_stop_cfg.mode
 
         self.early_stop_counter = 0
-        self.best_early_stop_score = float("inf") if self.early_stop_mode == "min" else float("-inf")
+        self.best_early_stop_score = float("-inf") if self.early_stop_mode == "max" else float("inf")
 
-        # Checkpoint State Machine Monitoring Initialization
-        checkpoint_cfg = train_cfg.get("checkpoint", {})
-        self.checkpoint_monitor = checkpoint_cfg.get(
-            "monitor", "val_srocc"
-        ).lower()  # Unify the lowercase at the source
-        self.checkpoint_mode = checkpoint_cfg.get("mode", "max")
-        self.best_checkpoint_score = float("inf") if self.checkpoint_mode == "min" else float("-inf")
+        # Checkpoint
+        checkpoint_cfg = train_cfg.checkpoint
+        self.checkpoint_monitor = checkpoint_cfg.monitor.lower()
+        self.checkpoint_mode = checkpoint_cfg.mode
+        self.best_checkpoint_score = float("-inf") if self.checkpoint_mode == "max" else float("inf")
 
         logger.info(
-            f"🚀 [Engine] Training engine initialization successful."
-            f"Device: {self.device} | Monitoring metrics: {self.checkpoint_monitor} | "
-            f"Adaptive AMP: {self.use_amp}"
+            f"TrainerEngine initialized. Device: {self.device} | "
+            f"Monitor: {self.checkpoint_monitor} | AMP: {self.use_amp}"
         )
 
-    def _validate_config(self, config: Dict[str, Any]):
-        """Check if the configuration file contains required fields; if any are missing, an error will be reported."""
-        required_keys = {"train": ["epochs"], "logging": ["save_dir"]}
 
-        for section, keys in required_keys.items():
-            if section not in config:
-                raise ValueError(f"🚨 The configuration file is missing a first-level node: [{section}]")
+    def _sanitize_for_serialization(self, obj):
+        """Recursively convert Path objects to strings."""
+        if isinstance(obj, dict):
+            return {k: self._sanitize_for_serialization(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._sanitize_for_serialization(v) for v in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self._sanitize_for_serialization(v) for v in obj)
+        elif isinstance(obj, Path):
+            return str(obj)
+        elif hasattr(obj, "model_dump"):
+            return self._sanitize_for_serialization(obj.model_dump())
+        else:
+            return obj
 
-            for key in keys:
-                if key not in config[section]:
-                    raise ValueError(
-                        f"🚨 The configuration file is missing necessary parameters: [{section}.{key}], Please check the YAML file."
-                    )
 
-        logger.info("✅ [System] Configuration item verification passed, everything is ready.")
 
     def resume_training(self, checkpoint_path: str) -> int:
-        """Resume training from the checkpoint; if it fails, start from scratch."""
-        from pathlib import Path
-
+        """Resume training from checkpoint."""
         ckpt_file = Path(checkpoint_path)
-
         if not ckpt_file.exists():
-            logger.warning(f"⚠️ The breakpoint does not exist in {checkpoint_path}; reinitialize the training.")
+            logger.warning(f"Checkpoint not found: {checkpoint_path}. Starting from scratch.")
             return 1
 
-        logger.info(f"🔄 [Engine] Loading checkpoint: {ckpt_file} ...")
+        logger.info(f"Loading checkpoint: {ckpt_file}")
         checkpoint = torch.load(ckpt_file, map_location=self.device)
 
         self.model.load_state_dict(checkpoint["state_dict"])
-        logger.info("   ├─ [Model] The neural network tensor weights have been loaded.")
+        logger.info("  - Model weights loaded")
 
         if "optimizer" in checkpoint and self.optimizer:
             self.optimizer.load_state_dict(checkpoint["optimizer"])
-            logger.info("   ├─ [Optimizer] The optimizer status (momentum, gradient squared, etc.) has been restored.")
+            logger.info("  - Optimizer state loaded")
 
         if "scheduler" in checkpoint and self.scheduler and checkpoint["scheduler"] is not None:
             self.scheduler.load_state_dict(checkpoint["scheduler"])
-            logger.info("   ├─ [Scheduler] The Scheduler status has been restored.")
+            logger.info("  - Scheduler state loaded")
 
         resume_epoch = checkpoint.get("epoch", 0) + 1
 
@@ -139,15 +124,15 @@ class TrainerEngine:
             if self.early_stop_enabled:
                 self.best_early_stop_score = hist_metrics.get(self.early_stop_monitor, self.best_early_stop_score)
 
-        logger.info(f"   └─ [Time] Continue training from the {resume_epoch}th round.")
+        logger.info(f"Resuming from epoch {resume_epoch}")
         return resume_epoch
 
+
+
     def train_epoch(self, train_loader: DataLoader, epoch: int) -> float:
-        """Training loop that runs a single epoch"""
+        """Run one training epoch."""
         self.model.train()
         running_loss = 0.0
-
-        # Get gradient accumulation steps
         accum_steps = self.gradient_accumulation_steps
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{self.epochs} [Train]")
@@ -158,28 +143,25 @@ class TrainerEngine:
             else:
                 inputs, labels = batch_data[0].to(self.device), batch_data[1].to(self.device)
 
-            # 1. Forward propagation
             with autocast(enabled=self.use_amp):
                 outputs = self.model(inputs)
 
-            # 2. Loss Calculation
             with autocast(enabled=False):
                 outputs_f32 = outputs.float()
                 if outputs_f32.ndim > 1 and outputs_f32.size(-1) == 1:
                     outputs_f32 = outputs_f32.squeeze(-1)
                 labels = labels.view_as(outputs_f32).float()
-                loss_dict = self.criterion(outputs_f32, labels, model=self.model)
-                total_loss = loss_dict["total_loss"]
+                loss_dict = self.criterion(
+                    outputs_f32,
+                    labels,
+                    model=self.model,
+                    mode=self.cfg.task_type,
+                )
+                total_loss = loss_dict["total_loss"] / accum_steps
 
-                # NOTE: Divide by the cumulative number of steps to make the accumulated loss consistent with the normal loss magnitude.
-                total_loss = total_loss / accum_steps
-
-            # 3. Backpropagation (not updated immediately)
             self.scaler.scale(total_loss).backward()
 
-            # 4. Updated once every accum_steps
             if (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == len(train_loader):
-                # Gradient clipping
                 if self.grad_clip is not None:
                     self.scaler.unscale_(self.optimizer)
                     nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
@@ -188,25 +170,21 @@ class TrainerEngine:
                 self.scaler.update()
                 self.optimizer.zero_grad()
 
-            running_loss += total_loss.item() * accum_steps  # Recover the original loss
+            running_loss += total_loss.item() * accum_steps
 
-            # Log output
-            log_interval = self.config.get("logging", {}).get("log_interval", 10)
+            log_interval = self.cfg.logging.log_interval
             if batch_idx % log_interval == 0:
-                pbar.set_postfix(
-                    {
-                        "Loss": f"{total_loss.item() * accum_steps:.4f}",
-                        "MSE": f"{float(loss_dict.get('mse_loss', 0.0)):.4f}",
-                        "Rank": f"{float(loss_dict.get('rank_loss', 0.0)):.4f}",
-                    }
-                )
+                pbar.set_postfix({
+                    "Loss": f"{total_loss.item() * accum_steps:.4f}",
+                    "MSE": f"{float(loss_dict.get('mse_loss', 0.0)):.4f}",
+                    "Rank": f"{float(loss_dict.get('rank_loss', 0.0)):.4f}",
+                })
 
-        epoch_loss = running_loss / len(train_loader)
-        return epoch_loss
+        return running_loss / len(train_loader)
 
     @torch.no_grad()
-    def evaluate(self, val_loader: DataLoader, epoch: int) -> Dict[str, float]:
-        """Evaluate the model on the validation set and return the various metrics."""
+    def evaluate(self, val_loader: DataLoader, epoch: int) -> dict[str, float]:
+        """Evaluate on validation set."""
         self.model.eval()
         running_loss = 0.0
 
@@ -229,15 +207,17 @@ class TrainerEngine:
 
             with autocast(enabled=False):
                 outputs_f32 = outputs.float()
-
                 if outputs_f32.ndim > 1 and outputs_f32.size(-1) == 1:
                     outputs_f32 = outputs_f32.squeeze(-1)
                 labels = labels.view_as(outputs_f32).float()
+                loss_dict = self.criterion(
+                    outputs_f32,
+                    labels,
+                    model=self.model,
+                    mode=self.cfg.task_type,
+                )
 
-                loss_dict = self.criterion(outputs_f32, labels, model=self.model)
-                total_loss = loss_dict["total_loss"]
-
-            running_loss += total_loss.item()
+            running_loss += loss_dict["total_loss"].item()
             all_preds.extend(outputs_f32.cpu().numpy().flatten())
             all_trues.extend(labels.cpu().numpy().flatten())
 
@@ -248,14 +228,13 @@ class TrainerEngine:
 
         eval_fn = getattr(self.evaluator, "evaluate", None)
         if eval_fn is None:
-            for alt_name in ["compute", "compute_metrics", "run", "calculate"]:
-                alt_fn = getattr(self.evaluator, alt_name, None)
-                if alt_fn is not None:
-                    eval_fn = alt_fn
+            for alt_name in ["execute", "compute", "run"]:
+                if hasattr(self.evaluator, alt_name):
+                    eval_fn = getattr(self.evaluator, alt_name)
                     break
 
         if eval_fn is None:
-            raise AttributeError("🚨 The Evaluator class lacks a standard evaluation function path!")
+            raise AttributeError("Evaluator missing evaluate/execute method.")
 
         metrics = eval_fn(
             y_true=np.array(all_trues),
@@ -267,18 +246,21 @@ class TrainerEngine:
 
         return metrics
 
-    def fit(self, train_loader: DataLoader, val_loader: DataLoader, start_epoch: int = 1):
-        """Main training loop"""
-        logger.info(f"⏱️  [System] Training begins, starting epoch: {start_epoch}")
-        checkpoint_cfg = self.config.get("train", {}).get("checkpoint", {})
+    def fit(
+        self,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        start_epoch: int = 1,
+        current_fold: int = 1,
+    ) -> None:
+        """Main training loop."""
+        logger.info(f"Training started. Start epoch: {start_epoch}, Total epochs: {self.epochs}")
 
         for epoch in range(start_epoch, self.epochs + 1):
             train_loss = self.train_epoch(train_loader, epoch)
             raw_metrics = self.evaluate(val_loader, epoch)
 
-            # Convert indicator names to lowercase
             metrics = {k.lower(): v for k, v in raw_metrics.items()}
-
             val_loss = raw_metrics.get("val_loss", metrics.get("val_loss", 0.0))
             if val_loss == 0.0 and "loss" in metrics:
                 val_loss = metrics["loss"]
@@ -295,30 +277,26 @@ class TrainerEngine:
 
             if self.scheduler is not None:
                 if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    self.scheduler.step(val_loss)  # 动态传入监控指标
+                    self.scheduler.step(val_loss)
                 else:
                     self.scheduler.step()
                 current_lr = self.optimizer.param_groups[0]["lr"]
                 logger.info(
-                    f"📊 [Epoch {epoch}] LR: {current_lr:.6f} | Train Loss: {train_loss:.4f} | "
-                    f"Val Loss: {val_loss:.4f} | SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}"
+                    f"Epoch {epoch} | LR: {current_lr:.6f} | "
+                    f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
+                    f"SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}"
                 )
             else:
                 logger.info(
-                    f"📊 [Epoch {epoch}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}"
+                    f"Epoch {epoch} | Train Loss: {train_loss:.4f} | "
+                    f"Val Loss: {val_loss:.4f} | SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}"
                 )
 
-            # Early cessation method
+            # Early stopping
             if self.early_stop_enabled:
-                if self.early_stop_monitor in metrics:
-                    score = metrics[self.early_stop_monitor]
-                elif self.early_stop_monitor == "val_loss":
-                    score = val_loss
-                else:
-                    logger.warning(
-                        f"The monitoring metric '{self.early_stop_monitor}' does not exist; use val_loss instead."
-                    )
-                    score = val_loss
+                score = metrics.get(self.early_stop_monitor, val_loss)
+                if self.early_stop_monitor not in metrics:
+                    logger.warning(f"Monitor '{self.early_stop_monitor}' not found, using val_loss.")
 
                 if self._is_improved(score, self.best_early_stop_score, self.early_stop_mode):
                     self.best_early_stop_score = score
@@ -328,54 +306,64 @@ class TrainerEngine:
 
                 if self.early_stop_counter >= self.patience:
                     logger.warning(
-                        f"🛑 The [Early Stop] monitoring metric '{self.early_stop_monitor}' has shown no improvement "
-                        f"for several consecutive {self.early_stop_counter} rounds, triggering an overfitting prevention interception!"
+                        f"Early stopping triggered. No improvement in '{self.early_stop_monitor}' "
+                        f"for {self.early_stop_counter} epochs."
                     )
                     break
 
-            # Save model checkpoints
+            # Checkpoint
             ckpt_score = metrics.get(self.checkpoint_monitor, 0.0)
-
             if self._is_improved(ckpt_score, self.best_checkpoint_score, self.checkpoint_mode):
                 self.best_checkpoint_score = ckpt_score
-                if checkpoint_cfg.get("save_best", True):
-                    self._save_checkpoint(epoch, val_loss, metrics, is_best=True)
+                self._save_checkpoint(
+                    epoch,
+                    val_loss,
+                    metrics,
+                    is_best=True,
+                    current_fold=current_fold,
+                )
 
-            if checkpoint_cfg.get("save_last", True) and epoch == self.epochs:
-                self._save_checkpoint(epoch, val_loss, metrics, is_best=False)
+            if epoch == self.epochs:
+                self._save_checkpoint(
+                    epoch,
+                    val_loss,
+                    metrics,
+                    is_best=False,
+                    current_fold=current_fold,
+                )
 
-            # Clean up video memory fragmentation
             torch.cuda.empty_cache()
 
+
+
     def _is_improved(self, current: float, best: float, mode: str) -> bool:
-        if mode == "min":
-            return current < best
-        elif mode == "max":
-            return current > best
-        return False
+        return current < best if mode == "min" else current > best
 
-    def _save_checkpoint(self, epoch: int, val_loss: float, metrics: Dict[str, Any], is_best: bool):
-        """Save model checkpoints to the configured directory."""
-        import re
-        import shutil
-        from pathlib import Path
 
-        save_dir = Path(self.config.get("logging", {}).get("save_dir", "./results/model_outputs"))
+    def _save_checkpoint(
+        self,
+        epoch: int,
+        val_loss: float,
+        metrics: dict[str, Any],
+        is_best: bool,
+        current_fold: int = 1,
+    ) -> None:
+        """Save model checkpoint."""
+
+        save_dir = self.cfg.paths.model_outputs_dir(self.cfg.dataset.name)
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        checkpoint_cfg = self.config.get("train", {}).get("checkpoint", {})
-        top_k = checkpoint_cfg.get("save_top_k", 3)
+        train_cfg = self.cfg.train
+        top_k = train_cfg.checkpoint.save_top_k
 
-        # NOTE：Make sure that the base_filename obtained here has already been aligned.
         base_name = self.evaluator.base_filename
-        current_fold = self.config.get("current_fold", "1")
         current_score = metrics.get(self.checkpoint_monitor, 0.0)
 
-        def extract_score(path: Path):
+        def extract_score(path: Path) -> float:
             match = re.search(rf"{re.escape(self.checkpoint_monitor)}(-?\d+\.\d+)", path.name.lower())
-            return (
-                float(match.group(1)) if match else (-float("inf") if self.checkpoint_mode == "max" else float("inf"))
-            )
+            if match:
+                return float(match.group(1))
+            return float("-inf") if self.checkpoint_mode == "max" else float("inf")
 
         state = {
             "epoch": epoch,
@@ -383,12 +371,11 @@ class TrainerEngine:
             "optimizer": self.optimizer.state_dict(),
             "scheduler": self.scheduler.state_dict() if self.scheduler else None,
             "metrics": metrics,
-            "config": self.config,
+            # Convert Path objects to strings for safe loading with weights_only=True
+            "config": self._sanitize_for_serialization(self.cfg.model_dump()),
         }
 
         if is_best:
-            # 先构建一个干净的基础名
-            # 如果 base_name 已经包含 fold，就不重复添加
             if f"_fold{current_fold}" in base_name:
                 clean_base = base_name
             else:
@@ -396,29 +383,22 @@ class TrainerEngine:
 
             pt_name = f"{clean_base}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
             target_path = save_dir / pt_name
-
             torch.save(state, target_path)
-            logger.info(f"🏆 [Checkpoint] The weights have been saved to ──> {target_path.resolve()}")
+            logger.info(f"Best checkpoint saved: {target_path.name}")
 
-            # 删除旧的最佳模型文件（超过 top_k 个）
             all_best_pts = list(save_dir.glob(f"{clean_base}_best_epoch*.pt"))
             if len(all_best_pts) > top_k:
-                reverse_flag = True if self.checkpoint_mode == "max" else False
+                reverse_flag = self.checkpoint_mode == "max"
                 all_best_pts.sort(key=extract_score, reverse=reverse_flag)
-                for low_pt in all_best_pts[top_k:]:
-                    low_pt.unlink()
-                    logger.warning(
-                        f"🗑️  [Checkpoint] Delete old model files and keep only the K most recent ones ──> {low_pt.name}"
-                    )
+                for old_pt in all_best_pts[top_k:]:
+                    old_pt.unlink()
+                    logger.debug(f"Removed old checkpoint: {old_pt.name}")
 
-            # 更新 *_best.pt 软链接（复制最新的最佳模型）
             standard_best_path = save_dir / f"{clean_base}_best.pt"
             shutil.copy(target_path, standard_best_path)
-            logger.info(f"   └─ ✅ Best model symlink updated: {standard_best_path.name}")
 
         else:
-            # 非最佳模型的保存（不需要重复包含 fold）
             pt_name = f"{base_name}_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
             target_path = save_dir / pt_name
             torch.save(state, target_path)
-            logger.info(f"💾 [Checkpoint] The model snapshot has been saved to ──> {target_path.resolve()}")
+            logger.info(f"Checkpoint saved: {target_path.name}")
