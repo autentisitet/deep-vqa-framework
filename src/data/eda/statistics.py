@@ -1,8 +1,7 @@
 # src/data/eda/statistics.py
-
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -10,24 +9,12 @@ import pandas as pd
 from loguru import logger
 
 
-def analyze_image_properties(image_paths: List[Path], sample_limit: int = 1000, detailed: bool = False) -> Dict:
-    """
-    分析图像属性
-
-    Args:
-        image_paths: 图像文件路径列表
-        sample_limit: 采样数量限制（-1 表示全部）
-        detailed: 是否输出详细统计
-
-    Returns:
-        包含以下字段的字典:
-        - total_files: 总文件数
-        - sampled_files: 实际采样数
-        - resolutions: 分辨率统计 (min, max, mean)
-        - aspect_ratios: 宽高比统计
-        - color_spaces: 颜色空间分布 (如果 detailed=True)
-        - sizes_mb: 文件大小统计 (如果 detailed=True)
-    """
+def analyze_image_properties(
+    image_paths: List[Path],
+    sample_limit: int = 1000,
+    detailed: bool = False,
+) -> Dict:
+    """Analyze image properties: resolution, aspect ratio, file size."""
     if not image_paths:
         return {"total_files": 0, "error": "No images provided"}
 
@@ -63,7 +50,6 @@ def analyze_image_properties(image_paths: List[Path], sample_limit: int = 1000, 
                         color_channels.append("RGBA")
                     else:
                         color_channels.append(f"{c}channels")
-
         except Exception as e:
             logger.debug(f"Failed to analyze {img_path}: {e}")
             continue
@@ -106,25 +92,12 @@ def analyze_image_properties(image_paths: List[Path], sample_limit: int = 1000, 
     return result
 
 
-def analyze_video_properties(video_paths: List[Path], sample_limit: int = 50, detailed: bool = False) -> Dict:
-    """
-    分析视频属性
-
-    Args:
-        video_paths: 视频文件路径列表
-        sample_limit: 采样数量限制
-        detailed: 是否输出详细统计
-
-    Returns:
-        包含以下字段的字典:
-        - total_files: 总文件数
-        - sampled_files: 实际采样数
-        - fps: 帧率统计 (min, max, mean, std)
-        - frame_count: 帧数统计
-        - resolution: 分辨率统计
-        - duration_sec: 时长统计
-        - codec_info: 编码信息 (如果 detailed=True)
-    """
+def analyze_video_properties(
+    video_paths: List[Path],
+    sample_limit: int = 50,
+    detailed: bool = False,
+) -> Dict:
+    """Analyze video properties: FPS, frame count, resolution, duration, codec."""
     if not video_paths:
         return {"total_files": 0, "error": "No videos provided"}
 
@@ -156,13 +129,11 @@ def analyze_video_properties(video_paths: List[Path], sample_limit: int = 50, de
             durations.append(frame_count / fps if fps > 0 else 0)
 
             if detailed:
-                # 尝试获取编码信息
                 fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
                 codec_char = "".join([chr((fourcc >> 8 * i) & 0xFF) for i in range(4)])
                 codecs.append(codec_char)
 
             cap.release()
-
         except Exception as e:
             logger.debug(f"Failed to analyze {video_path}: {e}")
             continue
@@ -214,31 +185,11 @@ def analyze_video_properties(video_paths: List[Path], sample_limit: int = 50, de
 
 
 def compute_mos_statistics(df: pd.DataFrame, score_col: str = "mos") -> Dict:
-    """
-    计算 MOS/DMOS 统计信息
-
-    Args:
-        df: 包含评分列的数据框
-        score_col: 评分列名称（默认 "mos"）
-
-    Returns:
-        包含以下字段的字典:
-        - total_samples: 总样本数
-        - mos_range: (min, max)
-        - mos_mean: 均值
-        - mos_std: 标准差
-        - mos_median: 中位数
-        - mos_q1: 第一四分位数
-        - mos_q3: 第三四分位数
-        - mos_skew: 偏度
-        - mos_kurtosis: 峰度
-        - outlier_count: 离群值数量（3σ）
-    """
+    """Compute MOS statistics: distribution, outliers, skewness, kurtosis."""
     if df is None or df.empty or score_col not in df.columns:
         return {"error": f"Column '{score_col}' not found or DataFrame is empty"}
 
     scores = df[score_col].dropna()
-
     if scores.empty:
         return {"error": "No valid scores found"}
 
@@ -247,44 +198,32 @@ def compute_mos_statistics(df: pd.DataFrame, score_col: str = "mos") -> Dict:
     q1 = scores.quantile(0.25)
     q3 = scores.quantile(0.75)
 
-    # 3σ 离群值检测
     lower_bound = mean - 3 * std
     upper_bound = mean + 3 * std
     outliers = scores[(scores < lower_bound) | (scores > upper_bound)]
 
     return {
         "total_samples": len(scores),
-        "mos_range": (float(scores.min()), float(scores.max())),
-        "mos_mean": float(mean),
-        "mos_std": float(std),
-        "mos_median": float(scores.median()),
-        "mos_q1": float(q1),
-        "mos_q3": float(q3),
-        "mos_skew": float(scores.skew()),
-        "mos_kurtosis": float(scores.kurtosis()),
+        "range": (float(scores.min()), float(scores.max())),
+        "mean": float(mean),
+        "std": float(std),
+        "median": float(scores.median()),
+        "q1": float(q1),
+        "q3": float(q3),
+        "skew": float(scores.skew()),
+        "kurtosis": float(scores.kurtosis()),
         "outlier_count": len(outliers),
         "outlier_ratio": len(outliers) / len(scores) if len(scores) > 0 else 0,
     }
 
 
 def generate_full_statistics_report(
-    image_paths: List[Path] = None,
-    video_paths: List[Path] = None,
-    df: pd.DataFrame = None,
+    image_paths: Optional[List[Path]] = None,
+    video_paths: Optional[List[Path]] = None,
+    df: Optional[pd.DataFrame] = None,
     score_col: str = "mos",
 ) -> Dict:
-    """
-    生成完整的数据集统计报告
-
-    Args:
-        image_paths: 图像文件路径列表
-        video_paths: 视频文件路径列表
-        df: 包含评分的数据框
-        score_col: 评分列名称
-
-    Returns:
-        完整的统计报告字典
-    """
+    """Generate a complete dataset statistics report."""
     report = {}
 
     if image_paths:
@@ -296,7 +235,6 @@ def generate_full_statistics_report(
     if df is not None and not df.empty:
         report["scores"] = compute_mos_statistics(df, score_col)
 
-    # 数据集概览
     report["overview"] = {
         "total_images": len(image_paths) if image_paths else 0,
         "total_videos": len(video_paths) if video_paths else 0,
@@ -304,60 +242,3 @@ def generate_full_statistics_report(
     }
 
     return report
-
-
-def print_statistics_report(report: Dict):
-    """打印统计报告（人类可读格式）"""
-    logger.info("=" * 60)
-    logger.info("📊 Dataset Statistics Report")
-    logger.info("=" * 60)
-
-    overview = report.get("overview", {})
-    if overview:
-        logger.info(f"  Total Images: {overview.get('total_images', 0)}")
-        logger.info(f"  Total Videos: {overview.get('total_videos', 0)}")
-        logger.info(f"  Total Samples: {overview.get('total_samples', 0)}")
-
-    images = report.get("images", {})
-    if images and "error" not in images:
-        logger.info("")
-        logger.info("  📷 Image Properties:")
-        logger.info(f"    Files: {images.get('total_files', 0)} (sampled: {images.get('sampled_files', 0)})")
-        res = images.get("resolution", {})
-        if res:
-            logger.info(
-                f"    Resolution: {res.get('min', 0)}x{res.get('min_h', 0)} ~ {res.get('max', 0)}x{res.get('max_h', 0)}"
-            )
-        size = images.get("file_size_mb", {})
-        if size:
-            logger.info(
-                f"    File Size: {size.get('min', 0):.2f}MB ~ {size.get('max', 0):.2f}MB (mean: {size.get('mean', 0):.2f}MB)"
-            )
-
-    videos = report.get("videos", {})
-    if videos and "error" not in videos:
-        logger.info("")
-        logger.info("  🎬 Video Properties:")
-        logger.info(f"    Files: {videos.get('total_files', 0)} (sampled: {videos.get('sampled_files', 0)})")
-        fps = videos.get("fps", {})
-        if fps:
-            logger.info(f"    FPS: {fps.get('min', 0):.1f} ~ {fps.get('max', 0):.1f} (mean: {fps.get('mean', 0):.1f})")
-        duration = videos.get("duration_sec", {})
-        if duration:
-            logger.info(
-                f"    Duration: {duration.get('min', 0):.1f}s ~ {duration.get('max', 0):.1f}s (mean: {duration.get('mean', 0):.1f}s)"
-            )
-
-    scores = report.get("scores", {})
-    if scores and "error" not in scores:
-        logger.info("")
-        logger.info("  📈 MOS Distribution:")
-        logger.info(f"    Samples: {scores.get('total_samples', 0)}")
-        logger.info(f"    Range: [{scores.get('mos_range', (0, 0))[0]:.3f}, {scores.get('mos_range', (0, 0))[1]:.3f}]")
-        logger.info(f"    Mean: {scores.get('mos_mean', 0):.3f} | Std: {scores.get('mos_std', 0):.3f}")
-        logger.info(f"    Skew: {scores.get('mos_skew', 0):.3f} | Kurtosis: {scores.get('mos_kurtosis', 0):.3f}")
-        logger.info(
-            f"    Outliers (3σ): {scores.get('outlier_count', 0)} ({scores.get('outlier_ratio', 0) * 100:.1f}%)"
-        )
-
-    logger.info("=" * 60)

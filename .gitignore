@@ -7,8 +7,9 @@
 datasets/
 results/
 reports/
+logs/
 .download_cache/
-
+nohup.out
 
 .venv/
 venv/

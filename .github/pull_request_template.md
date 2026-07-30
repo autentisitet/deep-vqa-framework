@@ -1,34 +1,49 @@
 # Change content
+
 ---
+
 ## Screenshots/Visualizations
+
 ---
 
 ## Test situation
-- [ ] `make test` (Smoke Test) has been run locally
-- [ ] Passed `ruff check` code check
+
+- [ ] Smoke test passed locally (`uv run python -m src.main --smoke_test`)
+- [ ] Code style check passed (`make check-code` and `make typecheck`)
 
 ---
 
 ## Change type
-- [ ] Bug fixes
-- [ ] New features
+
+- [ ] Bug fix
+- [ ] New feature
 - [ ] Performance optimization
 - [ ] Documentation update
+- [ ] Refactor
 
 ---
 
 ## Commit message
-Follow [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <subject>`
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
-**Commonly used <type>:**
-- `feat`: new features
-- `fix`: fix bug
-- `docs`: Documentation changes
-- `refactor`: code refactoring (changes that do not affect functionality)
-- `perf`: performance optimization
-- `test`: add or modify tests
+```text
+<type>(<scope>): <subject>
+```
+
+**Common types:**
+
+| Type | Description |
+| :--- | :--- |
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `docs` | Documentation changes |
+| `refactor` | Code refactoring (no behavior change) |
+| `perf` | Performance optimization |
+| `test` | Add or modify tests |
+| `chore` | Maintenance tasks |
 
 **Example:**
+
 - `feat(model): add ResNet50 backbone`
 - `fix(engine): resolve OOM in gradient accumulation`
 - `docs(readme): update installation guide`
@@ -36,6 +51,9 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<sc
 ---
 
 ## Checklist
-- [ ] Commit message follows convention
-- [ ] I have updated the relevant README or documentation
-- [ ] I confirm that the code complies with the project code specifications
+
+- [ ] Commit message follows Conventional Commits
+- [ ] Documentation has been updated (if needed)
+- [ ] Code passes `make check-code`
+- [ ] Code is formatted with `make fmt`
+- [ ] Type checking passes `make typecheck` (if applicable)

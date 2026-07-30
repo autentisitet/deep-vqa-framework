@@ -14,32 +14,32 @@ def split_train_val_test(
     score_col: str = "mos",
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    划分训练/验证/测试集（分层采样）
+    Split DataFrame into train/val/test sets with stratified sampling.
 
     Args:
-        df: 包含评分列的 DataFrame
-        train_ratio: 训练集比例
-        val_ratio: 验证集比例
-        random_state: 随机种子
-        score_col: 评分列名称
+        df: DataFrame with MOS scores
+        train_ratio: Proportion for training set
+        val_ratio: Proportion for validation set
+        random_state: Random seed
+        score_col: Column name for MOS scores
 
     Returns:
         (train_df, val_df, test_df)
     """
     test_ratio = 1.0 - train_ratio - val_ratio
-
     if test_ratio <= 0:
-        raise ValueError(f"无效比例: train={train_ratio}, val={val_ratio}, test={test_ratio}")
+        raise ValueError(f"Invalid ratios: train={train_ratio}, val={val_ratio}, test={test_ratio}")
 
-    logger.info(f"📊 [Split] 按比例切分: Train={train_ratio:.2f}, Val={val_ratio:.2f}, Test={test_ratio:.2f}")
+    logger.info(f"Split: Train={train_ratio:.2f}, Val={val_ratio:.2f}, Test={test_ratio:.2f}")
 
-    # 创建分层标签
     stratify_labels = create_stratified_labels(df, score_col=score_col)
 
-    # 第一次划分：分出测试集
-    train_val, test = train_test_split(df, test_size=test_ratio, random_state=random_state, stratify=stratify_labels)
+    # First split: separate test set
+    train_val, test = train_test_split(
+        df, test_size=test_ratio, random_state=random_state, stratify=stratify_labels
+    )
 
-    # 第二次划分：从 train_val 中分出验证集
+    # Second split: separate val from train_val
     relative_val_ratio = val_ratio / (train_ratio + val_ratio)
     train_val_stratify = stratify_labels.iloc[train_val.index]
 
@@ -50,20 +50,20 @@ def split_train_val_test(
         stratify=train_val_stratify,
     )
 
-    logger.info(f"✅ 划分完成: Train={len(train)}, Val={len(val)}, Test={len(test)}")
-
+    logger.info(f"Split complete: Train={len(train)}, Val={len(val)}, Test={len(test)}")
     return train, val, test
 
 
 def create_stratified_labels(df: pd.DataFrame, bins: int = 10, score_col: str = "mos"):
     """
-    创建分层标签
-    优先使用分位数，失败时回退到均匀分箱
+    Create stratified labels for train_test_split.
+
+    Uses quantile-based binning, falls back to uniform binning if quantiles fail.
     """
     try:
         return pd.qcut(df[score_col], q=bins, labels=False, duplicates="drop")
-    except Exception as e:
-        logger.debug(f"分位数切分失败 ({e})，回退到均匀分箱")
+    except Exception:
+        logger.debug("Quantile binning failed, falling back to uniform binning")
         return pd.cut(df[score_col], bins=bins, labels=False)
 
 
@@ -75,17 +75,10 @@ def check_fold_distribution(
     verbose: bool = True,
 ) -> List[Dict]:
     """
-    检查K折交叉验证的分布
-
-    Args:
-        df: 包含评分列的 DataFrame
-        n_splits: K折数量
-        random_state: 随机种子
-        score_col: 评分列名称
-        verbose: 是否输出日志
+    Check distribution of K-fold cross-validation splits.
 
     Returns:
-        每折的统计信息列表
+        List of statistics per fold: fold number, train/val mean and std
     """
     if df is None or df.empty:
         return []
@@ -100,19 +93,16 @@ def check_fold_distribution(
         train_std = df.iloc[train_idx][score_col].std()
         val_std = df.iloc[val_idx][score_col].std()
 
-        fold_stats.append(
-            {
-                "fold": fold + 1,
-                "train_mean": train_mean,
-                "val_mean": val_mean,
-                "train_std": train_std,
-                "val_std": val_std,
-            }
-        )
+        fold_stats.append({
+            "fold": fold + 1,
+            "train_mean": train_mean,
+            "val_mean": val_mean,
+            "train_std": train_std,
+            "val_std": val_std,
+        })
 
     if verbose:
-        logger.info(f"✅ Cross-Validation -> Stratified {n_splits}-Fold distribution checked")
-        # 输出统计信息
+        logger.info(f"Stratified {n_splits}-Fold distribution checked")
         for stat in fold_stats:
             logger.debug(
                 f"  Fold {stat['fold']}: Train Mean={stat['train_mean']:.3f}±{stat['train_std']:.3f}, "
@@ -120,39 +110,3 @@ def check_fold_distribution(
             )
 
     return fold_stats
-
-
-def split_from_config(
-    df: pd.DataFrame, config: Dict, score_col: str = "mos"
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """
-    从 YAML 配置读取划分比例
-    """
-    split_cfg = config.get("split", {})
-    train_ratio = split_cfg.get("train_ratio", 0.8)
-    val_ratio = split_cfg.get("val_ratio", 0.1)
-
-    return split_train_val_test(df, train_ratio, val_ratio, score_col=score_col)
-
-
-def add_split_column(
-    df: pd.DataFrame,
-    train_ratio: float = 0.8,
-    val_ratio: float = 0.1,
-    random_state: int = 42,
-    score_col: str = "mos",
-) -> pd.DataFrame:
-    """
-    添加 'split' 列到 DataFrame
-
-    Returns:
-        添加了 'split' 列的 DataFrame (train/val/test)
-    """
-    train, val, test = split_train_val_test(df, train_ratio, val_ratio, random_state, score_col)
-
-    df_copy = df.copy()
-    df_copy["split"] = "test"  # 默认都是 test
-    df_copy.loc[train.index, "split"] = "train"
-    df_copy.loc[val.index, "split"] = "val"
-
-    return df_copy

@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.4.6--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.5.1--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -52,13 +52,14 @@ The framework implements a dimension-aware routing system that automatically swi
 
 | Decision | Implementation | Rationale |
 | :--- | :--- | :--- |
-| **Unified Model** | Single `IQAVQANet` handles both 4D and 5D inputs | Eliminates duplicate code, ensures consistent quality metrics |
-| **Flexible Backbones** | Swin-T / ResNet50 with automatic feature adaptation | Balances accuracy vs. memory consumption |
+| **Unified Model** | A single `IQAVQANet` handling both 4D and 5D inputs | Eliminates code duplication; ensures consistency in quality metrics |
+| **Flexible Backbone** | Swin-T / ResNet50 with automatic feature adaptation | Balances accuracy against GPU memory consumption |
 | **Temporal Fusion** | Transformer encoder for video frame aggregation | Captures long-range dependencies between frames |
-| **Task-Aware Loss** | MSE + Rank + PLCC, reweighted per `task_type` | Optimizes absolute prediction, relative ordering, and linear MOS alignment |
-| **Multi-Dataset Support** | YAML-based configuration with factory pattern | Easy addition of new datasets without code changes |
-| **Path Abstraction** | DSL-based `PathManager` with YAML routing | Eliminates hardcoded paths, supports symbolic links |
-| **Lazy Asset Resolution** | `CaseInsensitiveAssetResolver` with pre-built index | O(1) file lookup, case-insensitive matching |
+| **Task-Aware Loss** | MSE + Rank + PLCC, reweighted based on `task_type` | Simultaneously optimizes absolute prediction and relative ranking |
+| **Multi-dataset Support** | YAML-based configuration and Factory pattern | Allows easy addition of new datasets without code modification |
+| **Config & Path Management** | Pydantic-based `Config.paths` and typed methods | Single source of truth; eliminates hard-coding; enables dataset-isolated storage |
+| **File Index Resolution** | `CaseInsensitiveAssetResolver` pre-builds a case-insensitive index | Reduces O(n) directory traversal to O(1) memory lookup; resolves parsing failures caused by filename case inconsistencies |
+| **Model Serving** | FastAPI + secure loading via `weights_only=True` | Decouples training from inference; provides standardized HTTP interfaces; ensures secure model loading |
 
 ---
 
@@ -104,9 +105,6 @@ Total Loss = w_mse × MSE + w_rank × RankLoss + w_plcc × (1 − PLCC)
 - **MSE Loss**: Absolute prediction accuracy
 - **Rank Loss**: Pairwise ranking consistency (sampled, capped at `max_pairs` pairs)
 - **PLCC Loss**: `1 − Pearson correlation`, weighted in for VQA to directly optimize linear alignment with human MOS
-
-> [!WARNING]
-> Known issue: `mode` isn't currently passed from the training engine into `IQAVQALoss.forward()`, so VQA runs fall back to the IQA weight set until this is wired up.
 
 ---
 
@@ -241,7 +239,10 @@ Cross-media inference is supported in both directions: `resnet_iqa` averages pre
 The response includes both `mos` (unified 0–5 scale, `raw_score × 5`) and `dataset_mos` (denormalized back to the source dataset's original MOS range, for debugging).
 
 > [!NOTE]
-> MOS denormalization uses `dataset_info.mos_min`/`mos_max` from the checkpoint's saved config if present, otherwise falls back to hardcoded constants (`DATASET_MOS_PARAMS`) for TID2013/KoNViD-1k only. Given the training pipeline doesn't currently guarantee `mos_min`/`mos_max` land in `dataset_info` (see the Configuration Guide note on `dataset_info` above), the hardcoded fallback is likely what's actually used in practice — verify the printed range in the startup log (`✅ ... 模型加载完成 (... MOS 范围: X~Y)`) matches your dataset before trusting `dataset_mos` output.
+> MOS range (`mos_min`/`mos_max`) is stored in the checkpoint's config and restored on load for checkpoints saved with v0.5.0+. Denormalization is automatic.
+
+> [!TIP]
+> The `dataset_mos` field returns scores in the original dataset's MOS scale (e.g., TID2013: 0-9, KoNViD-1k: 1-5), while `mos` is always normalized to 0-5 for cross-dataset comparison.
 
 ---
 
@@ -254,8 +255,7 @@ deep-vqa-framework/
 ├── DISCLAIMER.md           # Legal liability & resource usage policy
 ├── pyproject.toml          # Dependency & environment management (uv)
 │
-├── config/                 # YAML configuration modules
-│   ├── paths.yaml            # Path resolution DSL (roots & resolvers)
+├── config/                 # YAML configuration files (user-editable)
 │   ├── basic.yaml            # System & training global defaults
 │   ├── dataset_config.yaml   # Dataset-specific metadata
 │   └── models/                 # Model architecture parameters
@@ -268,12 +268,17 @@ deep-vqa-framework/
 ├── docs/                     # Interactive architecture & manuals
 │   ├── pipeline.html            # System execution & module flow
 │   └── Cloud_Platform_Rental_Guide.md
-│
-├── results/                  # Global outputs & logs
-│   ├── model_outputs/           # Training checkpoints
-│   ├── scripts_logs/
-│   └── plots/                     # Visualization (loss, residuals, etc.)
-│
+|
+├── reports/                  # Security reports from pip-audit, SBOM, and safety
+|
+├── results/
+|   ├── {dataset}/
+│   │   ├── train_logs/           # Training history, CSV logs
+│   │   ├── plots/                # Loss curves, residual plots
+│   │   ├── model_outputs/        # Checkpoints (.pt files)
+│   │   └── corrupted/            # Corrupted files from integrity check
+│   └── scripts_logs/             # Shell script logs (setup, data, etc.)
+|
 ├── scripts/                  # Infrastructure automation
 │   ├── manage_data.sh           # Download & data preparation
 │   ├── setup_env.sh              # Environment & system initialization
@@ -291,7 +296,8 @@ deep-vqa-framework/
     ├── core/                        # Training engine & evaluation pipeline
     ├── data/                        # Data loaders, EDA & integrity analysis
     ├── models/                      # Architecture definitions (IQAVQA-Net)
-    └── utils/                        # Configuration, logging & path management
+    ├── utils/                        # Configuration, logging & path management
+    └── config/                     # Pydantic config system (code)
 ```
 
 ---
@@ -307,13 +313,15 @@ This map illustrates:
 - Key components and their interactions
 - Execution order of the entire workflow
 
+> Charts are rendered using Mermaid and support interactive viewing in the browser.
+
 ---
 
 ## Configuration Guide <a id="configuration-guide"></a>
 
-### Configuration Layering
-
-Configuration is assembled by `config_loader.load_system_config()` in two distinct steps:
+Configuration is assembled by `load_config()` which returns a Pydantic `Config` object.
+All settings are validated at load time with type checking.
+Paths are resolved via `cfg.paths.xxx_dir(dataset_name)` methods.
 
 | Stage | File | How it's merged |
 | ------- | ------ | --------- |
@@ -321,37 +329,27 @@ Configuration is assembled by `config_loader.load_system_config()` in two distin
 | 2 (Model) | `models/{model}.yaml` | Deep-merged on top of stage 1 (matching keys override) |
 | 3 (Dataset) | `dataset_config.yaml` | **Not merged into top-level keys** — the matched dataset entry is attached wholesale as `config["dataset_info"]` |
 
-The merged result is validated against `config_loader.validate_config_schema()`'s required-field list before training starts. Path resolution (`config/paths.yaml`) is handled separately by `PathManager` and is not part of this merge.
-
-### Memory Optimization for Video Training
-
-```yaml
-# If encountering CUDA Out of Memory (OOM)
-preprocessing:
-  batch_size: 1              # Reduce batch size
-  num_workers: 0             # Disable multiprocessing
-
-model:
-  num_frames: 4              # Reduce temporal frames
-  backbone: "resnet50"       # Use smaller backbone
-  transformer_layers: 1      # Reduce transformer depth
-
-train:
-  gradient_accumulation_steps: 4  # Simulate larger batch
-  amp: true                  # Enable mixed precision
-```
+The merged result is validated against `config_loader.validate_config_schema()`'s required-field list before training starts. Path resolution is handled by Pydantic `PathsConfig` with typed methods.
 
 ---
 
 ## Troubleshooting <a id="troubleshooting"></a>
 
-### CUDA Out of Memory
+### CUDA Out of Memory (OOM)
 
-| Symptom | Solution |
-| :--- | :--- |
-| OOM at first batch | Reduce `batch_size` to 1 |
-| OOM after several epochs | Reduce `num_frames` or switch to the `resnet50` backbone |
-| OOM during validation | Reduce `num_frames` to 4 |
+When OOM occurs, adjust the following parameters in your model's YAML config (e.g., `config/models/timeswin_vqa.yaml`):
+
+**Reduce memory consumption:**
+
+- Lower `preprocessing.batch_size` — reduces per-batch memory
+- Reduce `model.num_frames` — fewer video frames to process
+- Switch to a lighter `model.backbone` (e.g., `resnet50` instead of `swin_t`)
+- Lower `model.transformer_layers` — shallower temporal fusion
+
+**Compensate for smaller batch size:**
+
+- Increase `train.gradient_accumulation_steps` — maintains effective batch size = `batch_size × gradient_accumulation_steps`
+- Ensure `amp: true` — mixed precision significantly reduces memory
 
 > [!NOTE]
 > Gradient checkpointing is not currently implemented in `IQAVQANet` — don't set `gradient_checkpointing: true` in configs yet; it has no effect.
@@ -379,11 +377,21 @@ Decord is pre-configured as the default backend. If Decord is not available, the
 
 ### Disk Filling Up
 
-`quarantine/` (created by `DataEDA.check_integrity()` when corrupted files are moved aside) is **not** currently handled by `cache_clean.sh` — clear it manually, or add a cleanup step to the script.
+`results/{dataset}/corrupted/` stores files moved aside by `DataEDA.check_integrity()`.
+- Clear manually if no longer needed
+- Or add a cleanup step to `scripts/cache_clean.sh`
+
+> [!TIP]
+> These files are corrupted media files isolated during integrity checks — safe to delete if you don't need them for debugging.
 
 ### Training Hangs With No Error (Background Runs)
 
-If a `nohup`/background training run appears frozen with no new log lines and no crash, check whether it's stuck at a `pdb.set_trace()` breakpoint. `PathManager.resolve(..., mkdir=True)` currently drops into `pdb` on `PermissionError`/`OSError` while creating a directory, which will silently block a non-interactive process waiting on stdin instead of raising. Kill the process and check disk permissions/space if this happens.
+If a `nohup`/background training run appears frozen with no new log lines, check for `pdb.set_trace()` breakpoints in `main.py` or `engine.py`. These are triggered on exceptions and will wait for stdin input, blocking non-interactive processes.
+
+**Solutions:**
+- Run training interactively (without `nohup`) when debugging
+- Check `results/{dataset}/train_logs/*.log` for error details
+- Kill the process and fix the underlying issue before retrying
 
 ---
 
@@ -407,7 +415,7 @@ The framework includes security tools to audit dependencies:
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.4.6-beta (pre-release)
+- **Version**: 0.5.1-beta (pre-release)
 
 ---
 

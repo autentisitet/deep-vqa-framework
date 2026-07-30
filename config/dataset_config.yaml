@@ -6,9 +6,8 @@
 # kendall.exe 计算 Kendall 等级相关系数 (KROCC)
 TID2013:
   name: "TID2013"
-  url: "http://www.ponomarenko.info/tid2013/tid2013.rar"
+  task_type: "iqa"
   data_type: "image"
-  file_extensions: ["bmp", "BMP"]
 
   paths:
     root: "datasets/TID2013"   # 数据集根目录路径
@@ -27,11 +26,6 @@ TID2013:
     mos_col: 0
     std_col: 2
 
-  split:
-    train_ratio: 0.7
-    val_ratio: 0.15
-    test_ratio: 0.15
-
   preprocessing:
     resize: [224, 224]
     normalize: true
@@ -44,11 +38,8 @@ TID2013:
 # -------------------------------------------------------------------
 KoNViD-1k:
   name: "KoNViD-1k"
-  url:
-    data: "https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_videos.zip"
-    metadata: "https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_metadata.zip"
+  task_type: "vqa"
   data_type: "video"
-  file_extensions: ["mp4"]
 
   paths:
     root: "datasets/KoNViD-1k"
@@ -64,11 +55,6 @@ KoNViD-1k:
     id_col: "flickr_id"  # CSV 依然支持名称
     mos_col: "mos"
     std_col: "std"
-
-  split:
-    train_ratio: 0.8
-    val_ratio: 0.1
-    test_ratio: 0.1
 
   preprocessing:
     num_frames: 8           # 采样帧数
@@ -86,11 +72,8 @@ KoNViD-1k:
 # -------------------------------------------------------------------
 T2VQA-DB:
   name: "T2VQA-DB"
-  url:
-    data: "https://drive.google.com/file/d/1aak5hgYsXock19d1rVufss3_X6eEA4Wx/view"
-    metadata: "https://drive.google.com/file/d/1aak5hgYsXock19d1rVufss3_X6eEA4Wx/view"
+  task_type: "vqa"
   data_type: "video"
-  file_extensions: ["mp4"]
   has_text: true
 
   paths:
@@ -106,12 +89,6 @@ T2VQA-DB:
   columns:
     id_col: 0
     mos_col: 2
-
-
-  split:
-    train_ratio: 0.8
-    val_ratio: 0.1
-    test_ratio: 0.1
 
   preprocessing:
     num_frames: 8

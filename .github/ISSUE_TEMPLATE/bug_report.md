@@ -7,10 +7,12 @@ assignees: ''
 ---
 
 ## Reproduction command
-<!-- What command did you run -->
+
+<!-- What command did you run? -->
 
 ## Error message
-<!-- Paste error stack -->
+
+<!-- Paste error stack trace here -->
 
 ## Environment
 
@@ -18,8 +20,14 @@ assignees: ''
 - [ ] Ubuntu
 - [ ] macOS
 
-- OS Version:
-- GPU:
-- Python:
-- PyTorch:
-- CUDA:
+| Item | Version |
+| :--- | :--- |
+| OS | |
+| GPU | |
+| Python | |
+| PyTorch | |
+| CUDA | |
+
+## Additional context
+
+<!-- Add any other context about the problem here -->
