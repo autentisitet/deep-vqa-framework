@@ -7,10 +7,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Safely source smart_extract without executing manage_data.sh main logic
 MANAGE_DATA_SOURCE_ONLY=true source "${SCRIPT_DIR}/manage_data.sh"
 
-if ! command -v zip >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
-  echo "FAIL: zip and unzip are required"
-  exit 1
+if ! command -v zip &> /dev/null; then
+    echo "FAIL: zip is required but not installed"
+    exit 1
 fi
+if ! command -v unzip &> /dev/null; then
+    echo "FAIL: unzip is required but not installed"
+    exit 1
+fi
+
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
