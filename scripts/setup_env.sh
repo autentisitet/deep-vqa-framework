@@ -1,21 +1,12 @@
 #!/usr/bin/env bash
 # --- setup_env.sh ---
-#
-# Purpose: Set up and configure the project development environment
-#
-# Key tasks:
-# 1. Install system dependencies (apt)
-# 2. Install the uv package manager
-# 3. Create a Python virtual environment (.venv)
-# 4. Install core Python dependencies
-# 5. Install optional tools (dev/security)
-# 6. Configure PyTorch (GPU/CPU)
-# 7. Verify installation
-#
-# Usage: ./setup_env.sh [--mirror] [--dev] [--security] [--all]
+# Project-level initialization: uv, .venv, Python dependencies
+# Does NOT touch system packages (apt, sudo, mirrors)
+# Works on both host machine and container
 
 
 set -e -o pipefail
+
 
 # ============================================================
 # Color definitions
@@ -27,129 +18,84 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# ============================================================
-# Logging functions
-# ============================================================
+
 log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
 log_ok() { echo -e "${GREEN}[OK]${NC} $*"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $*" >&2; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
-# ============================================================
-# Help
-# ============================================================
-show_help() {
-    cat << EOF
-Usage: ./setup_env.sh [OPTIONS]
 
-Options:
-  --mirror         Use TUNA mirror for faster downloads in China.
-  --dev            Install development tools (ruff, mypy, black, isort).
-  --security       Install security tools (pip-audit, cyclonedx-bom, safety).
-  --all            Install everything (mirror + dev + security).
-  --help, -h       Show this help message.
-
-Examples:
-  ./setup_env.sh --mirror             # Use mirror only
-  ./setup_env.sh --dev                # Install dev tools
-  ./setup_env.sh --security           # Install security tools
-  ./setup_env.sh --all                # Install everything
-EOF
-    exit 0
-}
 
 # ============================================================
 # Parse arguments
 # ============================================================
-USE_MIRROR=false
 INSTALL_DEV=false
 INSTALL_SECURITY=false
+USE_MIRROR=false
+
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --mirror)   USE_MIRROR=true; shift ;;
         --dev)      INSTALL_DEV=true; shift ;;
         --security) INSTALL_SECURITY=true; shift ;;
-        --all)      USE_MIRROR=true; INSTALL_DEV=true; INSTALL_SECURITY=true; shift ;;
-        --help|-h)  show_help ;;
-        *)
-            log_error "Unknown option: $1"
-            show_help
+        --all)      INSTALL_DEV=true; INSTALL_SECURITY=true; shift ;;
+        --mirror)   USE_MIRROR=true; shift ;;
+        --help|-h)
+            cat << EOF
+Usage: ./setup_env.sh [OPTIONS]
+
+Options:
+  --dev         Install development tools (ruff, mypy, black, isort)
+  --security    Install security tools (pip-audit, cyclonedx-bom, safety)
+  --all         Install all optional tools
+  --mirror      Use TUNA mirror for pip (China users)
+  --help        Show this help message
+EOF
+            exit 0
             ;;
+        *) log_warn "Unknown option: $1"; shift ;;
     esac
 done
 
-# ============================================================
-# Sudo detection (kept original logic)
-# ============================================================
-HAS_SUDO=false
-command -v sudo &> /dev/null && HAS_SUDO=true
 
-if [ "$(id -u)" -eq 0 ]; then
-    export APP_SUDO=""
-    export ADMIN_SUDO=""
-elif [ "$OSTYPE" = darwin* ]; then
-    export APP_SUDO=""
-    if [ "$HAS_SUDO" = true ]; then
-        export ADMIN_SUDO="sudo"
-    else
-        export ADMIN_SUDO=""
-    fi
-else
-    if [ "$HAS_SUDO" = true ]; then
-        export APP_SUDO="sudo"
-        export ADMIN_SUDO="sudo"
-    else
-        log_warn "Not root and 'sudo' not found. Trying without it..."
-        export APP_SUDO=""
-        export ADMIN_SUDO=""
-    fi
-fi
 
 # ============================================================
-# Project directories
+# Environment setup
 # ============================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-PROJECT_PARENT_DIR="$(dirname "$PROJECT_DIR")"
-DETECTED_PATH="${PROJECT_DIR}/datasets"
+cd "$PROJECT_DIR"
 
-export UV_CACHE_DIR="$PROJECT_PARENT_DIR/.uv_cache"
+DETECTED_PATH="${PROJECT_DIR}/datasets"
+mkdir -p "$DETECTED_PATH"
+
+if [ -z "$UV_CACHE_DIR" ]; then
+    export UV_CACHE_DIR="$HOME/.cache/uv"
+fi
+
 PYTHON_VERSION="3.12"
 
-mkdir -p "$PROJECT_DIR" "$DETECTED_PATH"
-cd "$PROJECT_DIR"
+
+if [ "$USE_MIRROR" = true ]; then
+    if [ -z "$UV_INDEX_URL" ]; then
+        export UV_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+    fi
+    if [ -z "$PIP_INDEX_URL" ]; then
+        export PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+    fi
+    log_info "Using TUNA mirror for pip"
+fi
+
+
+
 
 # ============================================================
 # Package lists
 # ============================================================
-APT_PACKAGES=(
-    curl wget build-essential tar aria2 unrar unzip tree bc ffmpeg
-)
-UV_CORE_PACKAGES=(
-    opencv-python decord pyyaml
-    numpy pandas matplotlib pillow seaborn
-    loguru tqdm
-    scikit-learn scipy
-    gdown
-)
 UV_DEV_PACKAGES=(ruff mypy black isort)
 UV_SECURITY_PACKAGES=(pip-audit cyclonedx-bom safety)
 
-# ============================================================
-# Proxy check
-# ============================================================
-check_proxy() {
-    if [ -n "$http_proxy" ] || [ -n "$HTTP_PROXY" ]; then
-        log_info "Using proxy from environment: ${http_proxy:-$HTTP_PROXY}"
-        return 0
-    else
-        log_info "No proxy set. If needed:"
-        echo "   - On AutoDL: source /etc/network_turbo"
-        echo "   - Other: set http_proxy/https_proxy environment variables"
-        return 1
-    fi
-}
+
 
 # ============================================================
 # Ensure optional-dependencies section in pyproject.toml
@@ -169,9 +115,16 @@ ensure_optional_deps() {
 download_with_fallback() {
     local url="$1"
     local output="$2"
+    local output_dir="$(dirname "$output")"
+    local output_file="$(basename "$output")"
+
+    mkdir -p "$output_dir"
 
     if command -v aria2c &> /dev/null; then
-        aria2c -x 4 -s 4 -o "$output" --timeout=30 --max-tries=3 --console-log-level=error "$url" 2>/dev/null && return 0
+        aria2c -x 4 -s 4 \
+            -d "$output_dir" \
+            -o "$output_file" \
+            --timeout=30 --max-tries=3 --console-log-level=error "$url" 2>/dev/null && return 0
     fi
     if command -v wget &> /dev/null; then
         wget -q -O "$output" --timeout=30 --tries=3 "$url" 2>/dev/null && return 0
@@ -182,38 +135,30 @@ download_with_fallback() {
     return 1
 }
 
-# ============================================================
-# Main execution
-# ============================================================
-log_info "Installing basic tools..."
-check_proxy
 
-# Configure mirror if requested
-if [ "$USE_MIRROR" = true ]; then
-    log_info "Using TUNA mirror for apt and pip..."
-    TEMP_SOURCES="/tmp/tuna_sources.list"
-    CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
-    cat > "$TEMP_SOURCES" <<EOF
-deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ $CODENAME main restricted universe multiverse
-deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ $CODENAME-updates main restricted universe multiverse
-deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ $CODENAME-security main restricted universe multiverse
-EOF
-    APT_OPT=(
-        "-o" "Dir::Etc::SourceList=$TEMP_SOURCES"
-        "-o" "Dir::Etc::SourceParts=/dev/null"
-    )
-    export UV_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
-    export PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
-fi
-
-# Install system dependencies
-${APP_SUDO} apt-get update ${APT_OPT[@]} -qq
-${APP_SUDO} apt-get install -y ${APT_OPT[@]} "${APT_PACKAGES[@]}"
-log_ok "System dependencies installed."
 
 # ============================================================
 # Install uv
 # ============================================================
+export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.cargo/bin:$PATH"
+
+
+_proxy_http="${http_proxy:-$HTTP_PROXY}"
+_proxy_https="${https_proxy:-$HTTPS_PROXY}"
+
+if [ -n "$_proxy_http" ] || [ -n "$_proxy_https" ]; then
+    export http_proxy="$_proxy_http"
+    export https_proxy="$_proxy_https"
+    export HTTP_PROXY="$_proxy_http"
+    export HTTPS_PROXY="$_proxy_https"
+    log_info "Using proxy: ${_proxy_http:-${_proxy_https}}"
+else
+    log_info "No proxy set. Proceeding with direct connection."
+    echo "   (Tip: Run 'source /etc/network_turbo' first if downloading on AutoDL)"
+fi
+
+
 if ! command -v uv &> /dev/null; then
     log_info "Installing uv..."
     if download_with_fallback "https://astral.sh/uv/install.sh" "/tmp/uv_install.sh"; then
@@ -228,8 +173,6 @@ else
     log_ok "uv already installed: $(uv --version)"
 fi
 
-export PATH="$HOME/.local/bin:$PATH"
-export PATH="$HOME/.cargo/bin:$PATH"
 
 # ============================================================
 # Initialize pyproject.toml
@@ -242,6 +185,8 @@ else
 fi
 
 sed -i 's/name = ".*"/name = "deep-vqa-framework"/' pyproject.toml
+
+
 
 # ============================================================
 # Detect GPU and configure PyTorch
@@ -262,6 +207,8 @@ else
     USE_TORCH_INDEX=false
 fi
 
+
+
 # ============================================================
 # Setup Python virtual environment
 # ============================================================
@@ -276,61 +223,54 @@ fi
 
 uv python pin "$PYTHON_VERSION" 2>/dev/null || true
 
+
+
 # ============================================================
 # Install Python dependencies
 # ============================================================
-log_info "Checking dependencies..."
+log_info "Installing Python dependencies via uv sync..."
 
-MISSING_PACKAGES=()
-for pkg in "${UV_CORE_PACKAGES[@]}"; do
-    if ! uv pip show "$pkg" &> /dev/null 2>&1; then
-        MISSING_PACKAGES+=("$pkg")
-    fi
-done
+SYNC_ARGS=""
 
-if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
-    log_info "Adding missing packages: ${MISSING_PACKAGES[*]}"
-    uv add "${MISSING_PACKAGES[@]}" --no-sync 2>/dev/null || log_warn "Failed to add packages individually, trying full sync..."
-
-    SYNC_ARGS=""
-    [ -n "$UV_INDEX_URL" ] && SYNC_ARGS="$SYNC_ARGS --index-url $UV_INDEX_URL"
-    [ "$USE_TORCH_INDEX" = true ] && [ -n "$TORCH_INDEX" ] && SYNC_ARGS="$SYNC_ARGS --extra-index-url $TORCH_INDEX"
-    SYNC_ARGS="$SYNC_ARGS --no-dev"
-    uv sync $SYNC_ARGS
-else
-    log_ok "All core packages already present. Skipping sync."
+if [ "$USE_TORCH_INDEX" = true ] && [ -n "$TORCH_INDEX" ]; then
+    SYNC_ARGS="$SYNC_ARGS --extra-index-url $TORCH_INDEX"
 fi
+
+if [ -n "$UV_INDEX_URL" ]; then
+    SYNC_ARGS="$SYNC_ARGS --index-url $UV_INDEX_URL"
+fi
+
+uv sync --no-dev $SYNC_ARGS
+log_ok "Core dependencies installed."
+
+
 
 # ============================================================
 # Install optional tools
 # ============================================================
+if [ "$INSTALL_DEV" = true ] || [ "$INSTALL_SECURITY" = true ]; then
+    ensure_optional_deps
+fi
+
 if [ "$INSTALL_DEV" = true ]; then
     log_info "Installing development tools..."
-    ensure_optional_deps
     uv add --optional dev "${UV_DEV_PACKAGES[@]}" 2>/dev/null || true
     log_ok "Development tools installed:"
     echo "  • ruff (code linting & formatting)"
     echo "  • mypy (type checking)"
     echo "  • black (code formatter)"
     echo "  • isort (import sorting)"
-else
-    log_info "Skipping development tools (use --dev to install)."
 fi
 
 if [ "$INSTALL_SECURITY" = true ]; then
     log_info "Installing security tools..."
-    ensure_optional_deps
     uv add --optional security "${UV_SECURITY_PACKAGES[@]}" 2>/dev/null || true
     log_ok "Security tools installed:"
     echo "  • pip-audit (vulnerability scanning)"
     echo "  • cyclonedx-bom (SBOM generation)"
     echo "  • safety (dependency security check)"
-else
-    log_info "Skipping security tools (use --security to install)."
 fi
 
-# Clean up temporary mirror config
-[ -n "$TEMP_SOURCES" ] && [ -f "$TEMP_SOURCES" ] && rm -f "$TEMP_SOURCES"
 
 # ============================================================
 # Verify installation
