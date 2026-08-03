@@ -54,7 +54,7 @@ DOWNLOAD_CACHE="${PROJECT_DIR}/.download_cache"
 TID_TARGET_PATH="${DATASETS_DIR}/TID2013"
 KON_DATA_TARGET_PATH="${DATASETS_DIR}/KoNViD-1k/KoNViD-1k_videos"
 KON_METADATA_TARGET_PATH="${DATASETS_DIR}/KoNViD-1k/KoNViD-1k_metadata"
-T2V_TARGET_PATH="${DATASETS_DIR}/T2VQA-DB"
+# T2V_TARGET_PATH="${DATASETS_DIR}/T2VQA-DB"
 
 # ============================================================
 # Dataset URLs
@@ -62,7 +62,7 @@ T2V_TARGET_PATH="${DATASETS_DIR}/T2VQA-DB"
 TID_SOURCE_URL="https://www.ponomarenko.info/tid2013/tid2013.rar"
 KON_VIDEOS_SOURCE_URL="https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_videos.zip"
 KON_METADATA_SOURCE_URL="https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_metadata.zip"
-T2V_SOURCE_URL="https://drive.google.com/file/d/1aak5hgYsXock19d1rVufss3_X6eEA4Wx/view"
+# T2V_SOURCE_URL="https://drive.google.com/file/d/1aak5hgYsXock19d1rVufss3_X6eEA4Wx/view"
 
 # ============================================================
 # Search directories (public disk)
@@ -240,7 +240,7 @@ fi
 TID_DOWNLOAD_FLAG=false
 KON_DATA_DOWNLOAD_FLAG=false
 KON_METADATA_DOWNLOAD_FLAG=false
-T2V_DOWNLOAD_FLAG=false
+# T2V_DOWNLOAD_FLAG=false
 
 # ============================================================
 # Check each dataset
@@ -248,19 +248,27 @@ T2V_DOWNLOAD_FLAG=false
 handle_dataset_initialization "tid2013" "$TID_TARGET_PATH" "TID2013" || TID_DOWNLOAD_FLAG=true
 handle_dataset_initialization "konvid-1k-videos" "$KON_DATA_TARGET_PATH" "KoNViD-1k" || KON_DATA_DOWNLOAD_FLAG=true
 handle_dataset_initialization "konvid-1k-metadata" "$KON_METADATA_TARGET_PATH" "KoNViD-1k" || KON_METADATA_DOWNLOAD_FLAG=true
-handle_dataset_initialization "t2vqa-db" "$T2V_TARGET_PATH" "T2VQA-DB" || T2V_DOWNLOAD_FLAG=true
+# handle_dataset_initialization "t2vqa-db" "$T2V_TARGET_PATH" "T2VQA-DB" || T2V_DOWNLOAD_FLAG=true
 
 DOWNLOAD_FLAG=false
 [ "$TID_DOWNLOAD_FLAG" = true ] && DOWNLOAD_FLAG=true
 [ "$KON_DATA_DOWNLOAD_FLAG" = true ] && DOWNLOAD_FLAG=true
 [ "$KON_METADATA_DOWNLOAD_FLAG" = true ] && DOWNLOAD_FLAG=true
-[ "$T2V_DOWNLOAD_FLAG" = true ] && DOWNLOAD_FLAG=true
+# [ "$T2V_DOWNLOAD_FLAG" = true ] && DOWNLOAD_FLAG=true
 
 # ============================================================
 # Proxy check
 # ============================================================
-if [ -n "$http_proxy" ] || [ -n "$HTTP_PROXY" ]; then
-    log_info "Using proxy from environment: ${http_proxy:-$HTTP_PROXY}"
+
+_proxy_http="${http_proxy:-$HTTP_PROXY}"
+_proxy_https="${https_proxy:-$HTTPS_PROXY}"
+
+if [ -n "$_proxy_http" ] || [ -n "$_proxy_https" ]; then
+    export http_proxy="$_proxy_http"
+    export https_proxy="$_proxy_https"
+    export HTTP_PROXY="$_proxy_http"
+    export HTTPS_PROXY="$_proxy_https"
+    log_info "Using proxy: ${_proxy_http:-${_proxy_https}}"
 else
     log_info "No proxy set. Proceeding with direct connection."
     echo "   (Tip: Run 'source /etc/network_turbo' first if downloading on AutoDL)"
@@ -357,16 +365,17 @@ if [ "$DOWNLOAD_FLAG" = true ]; then
     fi
 
     # Download T2VQA
-    if [ "$T2V_DOWNLOAD_FLAG" = true ]; then
-        log_info "Downloading T2VQA dataset..."
-        if ! command -v gdown &> /dev/null; then
-            uv lock --upgrade-package gdown 2>/dev/null || true
-            uv run gdown --version 2>/dev/null || true
-        fi
-        uv run gdown -O "${DOWNLOAD_CACHE}/t2vqa.zip" \
-            --continue \
-            "${T2V_SOURCE_URL}" 2>/dev/null || log_warn "Failed to download T2VQA"
-    fi
+    # if [ "$T2V_DOWNLOAD_FLAG" = true ]; then
+    #    log_info "Downloading T2VQA dataset..."
+    #    if ! command -v gdown &> /dev/null; then
+    #        uv lock --upgrade-package gdown 2>/dev/null || true
+    #        uv run gdown --version 2>/dev/null || true
+    #    fi
+    #    uv run gdown -user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+    #        --continue \
+    #        "${T2V_SOURCE_URL}" \
+    #        -O "${DOWNLOAD_CACHE}/t2vqa.zip" 2>/dev/null || log_warn "Failed to download T2VQA"
+    # fi
 
     log_ok "All dataset downloads completed."
 
@@ -374,14 +383,14 @@ if [ "$DOWNLOAD_FLAG" = true ]; then
     log_info "Extracting downloaded datasets..."
     [ -f "${DOWNLOAD_CACHE}/KoNViD_1k_videos.zip" ] && smart_extract "${DOWNLOAD_CACHE}/KoNViD_1k_videos.zip" "$KON_DATA_TARGET_PATH"
     [ -f "${DOWNLOAD_CACHE}/tid2013.rar" ] && smart_extract "${DOWNLOAD_CACHE}/tid2013.rar" "$TID_TARGET_PATH"
-    [ -f "${DOWNLOAD_CACHE}/t2vqa.zip" ] && smart_extract "${DOWNLOAD_CACHE}/t2vqa.zip" "$T2V_TARGET_PATH"
+    # [ -f "${DOWNLOAD_CACHE}/t2vqa.zip" ] && smart_extract "${DOWNLOAD_CACHE}/t2vqa.zip" "$T2V_TARGET_PATH"
     [ -f "${DOWNLOAD_CACHE}/KoNViD_1k_metadata.zip" ] && smart_extract "${DOWNLOAD_CACHE}/KoNViD_1k_metadata.zip" "$KON_METADATA_TARGET_PATH"
 fi
 
 # ============================================================
 # Validation
 # ============================================================
-for dir in "$TID_TARGET_PATH" "$KON_DATA_TARGET_PATH" "$KON_METADATA_TARGET_PATH" "$T2V_TARGET_PATH"; do
+for dir in "$TID_TARGET_PATH" "$KON_DATA_TARGET_PATH" "$KON_METADATA_TARGET_PATH"; do # "$T2V_TARGET_PATH"
     if is_dataset_valid "$dir"; then
         file_count=$(find "$dir" -type f 2>/dev/null | wc -l)
         log_ok "$dir: $file_count files found"
@@ -405,7 +414,7 @@ mkdir -p "$DATASETS_DIR"
 cd "$DATASETS_DIR"
 [ -d "TID2013" ] && ln -snf TID2013 tid2013
 [ -d "KoNViD-1k" ] && ln -snf KoNViD-1k konvid-1k
-[ -d "T2VQA-DB" ] && ln -snf T2VQA-DB t2vqa-db
+# [ -d "T2VQA-DB" ] && ln -snf T2VQA-DB t2vqa-db
 
 log_info "Current symbolic links:"
 ls -la | grep "^l" || echo "  (none)"
