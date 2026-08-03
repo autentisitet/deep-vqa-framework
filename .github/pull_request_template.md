@@ -24,6 +24,7 @@
 ---
 
 ## Commit message
+
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```text

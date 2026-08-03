@@ -1,0 +1,39 @@
+# docker/docker-compose.yaml
+version: '3.8'
+
+services:
+  vqa-train:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: train
+    image: vqa-train:latest
+    container_name: vqa-train
+    shm_size: 16gb
+    volumes:
+      - ../datasets:/app/datasets
+      - ../results:/app/results
+      - ../reports:/app/reports
+      - ../logs:/app/logs
+      - ../.download_cache:/app/.download_cache
+    stdin_open: true
+    tty: true
+    command: ["/bin/bash"]
+
+  vqa-infer:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: prod
+    image: vqa-prod:latest
+    container_name: vqa-api
+    shm_size: 8gb
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "deploy.api"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
