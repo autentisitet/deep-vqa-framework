@@ -1,6 +1,3 @@
-# ============================================================
-# Color definitions
-# ============================================================
 GREEN  := \033[0;32m
 BLUE   := \033[0;34m
 RED    := \033[0;31m
@@ -9,15 +6,14 @@ CYAN   := \033[0;36m
 BOLD   := \033[1m
 RESET  := \033[0m
 
-# ============================================================
-# Project Metadata
-# ============================================================
+
 PROJECT_NAME := Deep-VQA-Framework
 ROOT_DIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 LOG_DIR := $(ROOT_DIR)/results/scripts_logs
 SECURITY_DIR := $(ROOT_DIR)/reports/security
 
 $(shell mkdir -p $(LOG_DIR) $(SECURITY_DIR))
+
 
 # ============================================================
 # Python Detection (cross-platform)
@@ -30,66 +26,96 @@ endif
 PYTHON := $(PYTHON_CMD)
 UV_RUN := uv run
 
+
+
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: help setup data clean archive \
-        check-code fmt black isort format-all typecheck \
-        vuln-audit sbom safety security-all \
-        info
+.PHONY: help bootstrap setup install data info clean archive
+.PHONY: check-code fmt black isort format-all typecheck
+.PHONY: vuln-audit sbom safety security-all
+.PHONY: docker-dev docker-train docker-infer docker-stop docker-manage
+
 
 .DEFAULT_GOAL := help
+
+
 
 # ------------------------------------------------------------
 # help - Show available commands
 # ------------------------------------------------------------
 help:
-	@echo "$(BOLD)$(CYAN)Deep-VQA-Framework Makefile$(RESET)"
-	@echo ""
-	@echo "$(GREEN)Environment:$(RESET)"
-	@echo "  make setup          Install dependencies and configure environment"
-	@echo "  make data           Download and prepare datasets"
-	@echo ""
-	@echo "$(YELLOW)Code Quality:$(RESET)"
-	@echo "  make check-code     Run ruff linter and formatter checks"
-	@echo "  make format-all     Format code with black, isort, ruff"
-	@echo "  make typecheck      Run mypy type checker"
-	@echo ""
-	@echo "$(RED)Security:$(RESET)"
-	@echo "  make vuln-audit     Scan dependencies for CVEs (pip-audit)"
-	@echo "  make sbom           Generate CycloneDX SBOM"
-	@echo "  make security-all   Run all security checks"
-	@echo ""
-	@echo "$(BLUE)Maintenance:$(RESET)"
-	@echo "  make clean          Remove cache and temporary files"
-	@echo "  make archive        Package results for delivery"
-	@echo ""
-	@echo "$(CYAN)Info:$(RESET)"
-	@echo "  make info           Show environment and system details"
-	@echo ""
-	@echo "$(BOLD)Examples:$(RESET)"
-	@echo "  make setup SETUP_ARGS=\"--mirror --dev\""
-	@echo "  uv run python -m src.main --dataset tid2013 --model resnet_iqa"
+	@echo '$(BOLD)$(CYAN)Deep-VQA-Framework Makefile$(RESET)'
+	@echo ''
+	@echo '$(GREEN)Environment:$(RESET)'
+	@echo '  make bootstrap      Install system dependencies (apt)'
+	@echo '  make setup          Install Python dependencies (uv)'
+	@echo '  make install        Bootstrap + Setup (full installation)'
+	@echo '  make data           Download and prepare datasets'
+	@echo ''
+	@echo '$(YELLOW)Code Quality:$(RESET)'
+	@echo '  make check-code     Run ruff linter'
+	@echo '  make format-all     Format code (black + isort + ruff)'
+	@echo '  make typecheck      Run mypy type checker'
+	@echo ''
+	@echo '$(RED)Security:$(RESET)'
+	@echo '  make vuln-audit     Scan dependencies for CVEs'
+	@echo '  make sbom           Generate CycloneDX SBOM'
+	@echo '  make security-all   Run all security checks'
+	@echo ''
+	@echo '$(CYAN)Docker:$(RESET)'
+	@echo '  make docker-dev     Enter development container'
+	@echo '  make docker-train   Run training in background'
+	@echo '  make docker-infer   Start inference API service'
+	@echo '  make docker-stop    Stop all containers'
+	@echo '  make docker-manage  Check container environment'
+	@echo ''
+	@echo '$(BLUE)Maintenance:$(RESET)'
+	@echo '  make clean          Remove cache and temporary files'
+	@echo '  make archive        Package results'
+	@echo ''
+	@echo '$(CYAN)Info:$(RESET)'
+	@echo '  make info           Show environment details'
+	@echo ''
+	@echo '$(BOLD)Examples:$(RESET)'
+	@echo '  make install                 Full installation (bootstrap + setup)'
+	@echo '  make bootstrap BOOTSTRAP_ARGS="--mirror"'
+	@echo '  make setup SETUP_ARGS="--mirror --dev"'
+	@echo '  uv run python -m src.main --dataset tid2013 --model resnet_iqa'
+	@echo '  uv run python -m src.main --dataset konvid-1k --model timeswin_vqa'
 
-# ------------------------------------------------------------
-# Environment Setup
-# ------------------------------------------------------------
+
+
+bootstrap:
+	@chmod +x $(ROOT_DIR)/scripts/*.sh
+	@cd $(ROOT_DIR)/scripts && bash bootstrap.sh $(BOOTSTRAP_ARGS) 2>&1 | tee $(LOG_DIR)/bootstrap.log
+	@echo "$(GREEN)[OK]$(RESET) Bootstrap complete."
+
+
+
 setup:
 	@chmod +x $(ROOT_DIR)/scripts/*.sh
 	@cd $(ROOT_DIR)/scripts && bash setup_env.sh $(SETUP_ARGS) 2>&1 | tee $(LOG_DIR)/setup_env.log
 	@echo "$(GREEN)[OK]$(RESET) Setup complete. Run 'make info' to verify."
 
-# ------------------------------------------------------------
-# Data Preparation
-# ------------------------------------------------------------
+
+
+install: bootstrap setup
+	@echo "$(GREEN)[OK]$(RESET) Full installation complete!"
+	@echo "  System: bootstrap.sh"
+	@echo "  Python: setup_env.sh"
+	@echo "  Run 'make info' to verify environment."
+
+
+
 data:
 	@echo "$(BLUE)[INFO]$(RESET) Preparing datasets..."
 	@cd $(ROOT_DIR)/scripts && bash manage_data.sh 2>&1 | tee $(LOG_DIR)/manage_data.log
 	@echo "$(GREEN)[OK]$(RESET) Data ready."
 
-# ------------------------------------------------------------
-# Clean
-# ------------------------------------------------------------
+
+
+
 clean:
 	@echo "$(YELLOW)[WARN]$(RESET) Cleaning caches..."
 	@read -p "Remove all caches? [y/N] " confirm; \
@@ -100,9 +126,9 @@ clean:
 		echo "$(BLUE)[INFO]$(RESET) Clean aborted."; \
 	fi
 
-# ------------------------------------------------------------
-# Archive
-# ------------------------------------------------------------
+
+
+
 archive:
 	@echo "$(BLUE)[INFO]$(RESET) Archiving results..."
 	@if [ -f "$(LOG_DIR)/archive.log" ]; then \
@@ -110,6 +136,9 @@ archive:
 	fi
 	@cd $(ROOT_DIR)/scripts && bash archive_results.sh --all 2>&1 | tee $(LOG_DIR)/archive.log
 	@echo "$(GREEN)[OK]$(RESET) Archive completed."
+
+
+
 
 # ------------------------------------------------------------
 # Code Quality
@@ -153,6 +182,9 @@ typecheck:
 	@uv run pip show mypy >/dev/null 2>&1 || (echo "$(RED)[ERROR]$(RESET) mypy not installed. Run 'make setup SETUP_ARGS=\"--mirror --dev\"'." && exit 1)
 	@cd $(ROOT_DIR) && uv run mypy src/ --ignore-missing-imports 2>&1 | sed 's/^/  /'
 	@echo "$(GREEN)[OK]$(RESET) Type checks complete."
+
+
+
 
 # ------------------------------------------------------------
 # Security
@@ -198,6 +230,9 @@ safety:
 security-all: vuln-audit sbom safety
 	@echo "$(GREEN)[OK]$(RESET) All security checks completed."
 	@echo "Reports: $(CYAN)$(SECURITY_DIR)/$(RESET)"
+
+
+
 
 # ------------------------------------------------------------
 # info - Show environment and system details
@@ -317,4 +352,112 @@ info:
 	@echo "  make format-all         Format all code"
 	@echo "  make security-all       Run all security checks"
 	@echo "  uv run python -m src.main --dataset tid2013 --model resnet_iqa"
+	@echo "  uv run python -m src.main --dataset konvid-1k --model timeswin_vqa"
 	@echo "========================================================================"
+
+
+
+
+# ============================================================
+# Docker Commands
+# ============================================================
+COMPOSE := $(shell \
+	if command -v podman-compose >/dev/null 2>&1; then \
+		echo "podman-compose"; \
+	elif command -v docker-compose >/dev/null 2>&1; then \
+		echo "docker-compose"; \
+	elif docker compose version >/dev/null 2>&1; then \
+		echo "docker compose"; \
+	else \
+		echo ""; \
+	fi)
+
+
+RUNTIME := $(shell \
+	if command -v podman >/dev/null 2>&1; then echo "podman"; \
+	elif command -v docker >/dev/null 2>&1; then echo "docker"; \
+	else echo ""; fi)
+
+
+COMPOSE_FILES := -f docker/docker-compose.yaml
+ifeq ($(RUNTIME),podman)
+    COMPOSE_FILES += -f docker/docker-compose.podman.yaml
+endif
+ifeq ($(RUNTIME),docker)
+    COMPOSE_FILES += -f docker/docker-compose.docker.yaml
+endif
+
+
+define check_runtime
+	@if [ -z "$(RUNTIME)" ]; then \
+		echo "ERROR: No container runtime found (podman or docker)"; \
+		echo "Install: Fedora: sudo dnf install podman podman-compose"; \
+		echo "        Ubuntu: sudo apt install docker.io docker-compose"; \
+		exit 1; \
+	fi
+	@if [ -z "$(COMPOSE)" ]; then \
+		echo "ERROR: No compose tool found"; \
+		echo "Install: Fedora: sudo dnf install podman-compose"; \
+		echo "        Ubuntu: sudo apt install docker-compose"; \
+		exit 1; \
+	fi
+endef
+
+
+BUILD_ARGS ?=
+
+
+docker-dev:
+	$(call check_runtime)
+	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-train
+	$(COMPOSE) $(COMPOSE_FILES) run --rm --name vqa-train vqa-train
+
+docker-train:
+	$(call check_runtime)
+	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-train
+	$(COMPOSE) $(COMPOSE_FILES) run --rm --name vqa-train vqa-train bash -c "\
+		make data && \
+		uv run python -m src.main --dataset tid2013 --model resnet_iqa > /app/results/tid2013.log 2>&1 && \
+		uv run python -m src.main --dataset konvid-1k --model timeswin_vqa > /app/results/konvid-1k.log 2>&1 \
+	"
+
+docker-infer:
+	$(call check_runtime)
+	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-infer
+	$(COMPOSE) $(COMPOSE_FILES) up -d vqa-infer
+
+docker-stop:
+	$(call check_runtime)
+	$(COMPOSE) $(COMPOSE_FILES) down
+
+docker-manage:
+	$(call check_runtime)
+	@$(RUNTIME) images --filter "dangling=true" -q | xargs -r $(RUNTIME) rmi -f
+	@echo "Runtime: $(RUNTIME)"
+	@echo "Compose: $(COMPOSE)"
+	@echo "Files:   $(COMPOSE_FILES)"
+	@echo ""
+	@$(RUNTIME) --version 2>/dev/null || echo "ERROR: runtime not found"
+	@echo ""
+	@if [ "$(RUNTIME)" = "docker" ]; then \
+		echo "--- Docker Service ---"; \
+		sudo systemctl status docker 2>/dev/null | head -5 || echo "  (service status unavailable)"; \
+		echo ""; \
+	fi
+	@echo "--- Container Stats ---"
+	@$(RUNTIME) stats --no-stream 2>/dev/null || echo "  (no running containers)"
+	@echo ""
+	@echo "--- Images ---"
+	@$(RUNTIME) images 2>/dev/null | head -10
+	@echo ""
+	@echo "--- Containers ---"
+	@$(RUNTIME) ps -a 2>/dev/null | head -10
+	@echo ""
+	@echo "--- Volumes ---"
+	@$(RUNTIME) volume ls 2>/dev/null || echo "  (none)"
+	@echo ""
+	@echo "--- Networks ---"
+	@$(RUNTIME) network ls 2>/dev/null || echo "  (none)"
+	@echo ""
+	@echo "--- Compose Services ---"
+	@$(COMPOSE) $(COMPOSE_FILES) ps 2>/dev/null || echo "  (none)"
