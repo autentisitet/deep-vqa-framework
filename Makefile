@@ -86,7 +86,7 @@ help:
 	@echo '  uv run python -m src.main --dataset konvid-1k --model timeswin_vqa'
 
 
-ARGS ?=
+INSTALL_ARGS ?=
 BOOTSTRAP_ARGS ?= $(filter --mirror, $(ARGS))
 SETUP_ARGS ?= $(ARGS)
 

@@ -10,7 +10,7 @@ We use `uv` for dependency management. Run `make install` to install dependencie
 
 ```bash
 # Install core + dev + security tools (recommended for contributors)
-make install ARGS="--dev --security"
+make install INSTALL_ARGS="--dev --security"
 
 # Verify environment
 make info
@@ -20,7 +20,7 @@ make info
 > If you're in China, add `--mirror` to use TUNA mirror for faster downloads:
 
 ```bash
-make install ARGS="--mirror --dev --security" 
+make install INSTALL_ARGS="--mirror --dev --security" 
 make info
 ```
 
