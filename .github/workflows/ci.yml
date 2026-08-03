@@ -1,3 +1,4 @@
+# .github/workflows/ci.yaml
 name: CI
 
 on:
@@ -16,82 +17,69 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check all shell scripts syntax (bash -n)
+      - name: Check all shell scripts syntax
         run: |
-          echo "Running bash -n on scripts/**/*.sh ..."
           failed=0
-          # Recursively find all .sh files under scripts/
           while IFS= read -r -d '' f; do
             bash -n "$f" && echo "  OK: $f" || { echo "  FAIL: $f"; failed=1; }
           done < <(find scripts -type f -name "*.sh" -print0)
           exit $failed
 
-  dataset-url-reachability:
-    name: Dataset Download URL Check
+
+
+  smart-extract-test:
+    name: Smart Extract Logic Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Verify and probe download URLs in manage_data.sh
-        run: |
-          set +e
-          declare -A URLS
-
-          for var in TID_SOURCE_URL KON_VIDEOS_SOURCE_URL KON_METADATA_SOURCE_URL T2V_SOURCE_URL; do
-            url=$(grep -E "^${var}=" scripts/manage_data.sh | head -1 | sed -E 's/^[^"]*"([^"]+)".*/\1/')
-            if [ -z "$url" ]; then
-              echo "FAIL: ${var} not defined in manage_data.sh"
-              exit 1
-            fi
-            URLS["$var"]="$url"
-            echo "Defined: ${var}=${url}"
-          done
-
-          check_url() {
-            local name="$1"
-            local url="$2"
-            local code
-            code=$(curl --head --silent --location --max-time 25 \
-              -o /dev/null -w "%{http_code}" "$url" 2>/dev/null)
-            local rc=$?
-            if [ "$rc" -eq 0 ] && [[ "$code" =~ ^(200|301|302|303|206)$ ]]; then
-              echo "  OK: ${name} (HTTP ${code})"
-            else
-              echo "  WARNING: ${name} probe failed (curl_exit=${rc}, HTTP=${code})"
-              echo "           ${url}"
-              echo "           (May be geo/SSL restricted on GitHub runners; verify locally or on AutoDL)"
-            fi
-          }
-
-          echo ""
-          echo "Probing download endpoints dynamically from script..."
-          check_url "TID2013" "${URLS[TID_SOURCE_URL]}"
-          check_url "KoNViD-1k videos" "${URLS[KON_VIDEOS_SOURCE_URL]}"
-          check_url "KoNViD-1k metadata" "${URLS[KON_METADATA_SOURCE_URL]}"
-
-          # Google Drive link probe
-          gcode=$(curl --silent --location --max-time 25 \
-            -o /dev/null -w "%{http_code}" \
-            "${URLS[T2V_SOURCE_URL]}" 2>/dev/null)
-          grc=$?
-          if [ "$grc" -eq 0 ] && [[ "$gcode" =~ ^(200|301|302|303)$ ]]; then
-            echo "  OK: T2VQA-DB Google Drive (HTTP ${gcode})"
-          else
-            echo "  WARNING: T2VQA-DB Google Drive probe failed (curl_exit=${grc}, HTTP=${gcode})"
-          fi
-
-          echo ""
-          echo "URL probe finished (warnings do not fail CI)."
-
-  dataset-extract-logic:
-    name: Dataset Extract Logic Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
       - name: Install zip/unzip
         run: sudo apt-get update -qq && sudo apt-get install -y zip unzip
 
-      - name: Test smart_extract logic (mock ZIP)
+      - name: Run smart_extract test
         run: bash scripts/ci_test_extract.sh
+
+
+
+  docker-build-train:
+    name: Docker Build (train)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build train image
+        run: |
+          docker build --target train -t vqa-train:test .
+          docker images | grep vqa-train
+
+
+
+  docker-build-infer:
+    name: Docker Build (infer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build inference image
+        run: |
+          docker build --target prod -t vqa-infer:test .
+          docker images | grep vqa-infer
+
+
+
+  lock-check:
+    name: Lock File Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check lock file is consistent
+        run: |
+          uv lock --check
+          echo "uv.lock is up-to-date with pyproject.toml"

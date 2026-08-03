@@ -80,11 +80,15 @@ help:
 	@echo '$(BOLD)Examples:$(RESET)'
 	@echo '  make install                 Full installation (bootstrap + setup)'
 	@echo '  make bootstrap BOOTSTRAP_ARGS="--mirror"'
-	@echo '  make setup SETUP_ARGS="--mirror --dev"'
+	@echo '  make setup SETUP_ARGS="--mirror --all"'
+	@echo '  make install ARGS="--mirror --all"'
 	@echo '  uv run python -m src.main --dataset tid2013 --model resnet_iqa'
 	@echo '  uv run python -m src.main --dataset konvid-1k --model timeswin_vqa'
 
 
+ARGS ?=
+BOOTSTRAP_ARGS ?= $(filter --mirror, $(ARGS))
+SETUP_ARGS ?= $(ARGS)
 
 bootstrap:
 	@chmod +x $(ROOT_DIR)/scripts/*.sh

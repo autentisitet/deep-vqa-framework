@@ -6,19 +6,48 @@ Thank you for your interest! Please follow these guidelines.
 
 ## 1. Environment Setup
 
-We use `uv` for dependency management. Run `make setup` to install dependencies (uv will be installed automatically).
+We use `uv` for dependency management. Run `make install` to install dependencies (uv will be installed automatically).
 
 ```bash
 # Install core + dev + security tools (recommended for contributors)
-make setup SETUP_ARGS="--dev --security"
+make install ARGS="--dev --security"
+
+# Verify environment
+make info
 ```
 
 > [!NOTE]
 > If you're in China, add `--mirror` to use TUNA mirror for faster downloads:
 
 ```bash
-make setup SETUP_ARGS="--mirror --dev --security"
+make install ARGS="--mirror --dev --security" 
+make info
 ```
+
+### Containerized Development (No apt/sudo required)
+
+If you're not using a Debian/Ubuntu system or prefer isolated environments, use Docker or Podman:
+
+```bash
+# Enter development container (interactive shell)
+make docker-dev
+
+# Run training in container
+make docker-train
+
+# Start inference API service
+make docker-infer
+
+# Stop all containers
+make docker-stop
+
+# Check container environment status
+make docker-manage
+```
+
+> [!NOTE]
+> The Makefile auto-detects your container runtime (Docker or Podman).
+> No manual configuration needed.
 
 ---
 
