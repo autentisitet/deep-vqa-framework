@@ -33,6 +33,8 @@ RUN apt-get update && \
 # ============================================
 FROM base AS train
 
+ENV PATH="/usr/local/bin:/root/.local/bin:$PATH"
+
 COPY src/ ./src/
 COPY config/ ./config/
 

@@ -33,6 +33,7 @@ Thumbs.db
 .idea/
 *.swp
 
+.git/
 .markdownlint.json
 .markdownlintignore
 Makefile.local
