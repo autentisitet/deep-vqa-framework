@@ -77,7 +77,7 @@ fi
 # Package list
 # ============================================================
 APT_PACKAGES=(
-    curl wget build-essential tar aria2 unrar unzip tree bc ffmpeg
+    curl wget build-essential tar aria2 unrar unzip tree bc ffmpeg jq
 )
 
 
