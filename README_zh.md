@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.5.1--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.6.2-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -143,6 +143,9 @@ uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
 > [!NOTE]
 > 目前仅提供两种模型配置：`resnet_iqa`（图像/ResNet50）和 `timeswin_vqa`（视频/Swin-T）。模型配置会自动从 `config/models/*.yaml` 加载——只需在该目录下放入新的 YAML 文件（例如 `resnet_vqa.yaml`）即可注册新的配置组合，随后即可在命令中引用。
 
+> [!NOTE]
+> `scripts/setup_env.sh` 现在会安装并验证 `hatchling`，因此 `deploy/` 可以直接通过 `pyproject.toml` 完成构建，无需额外手动配置。
+
 ### 进阶选项
 
 您可以使用以下训练和调试模式来扩展框架功能：
@@ -190,14 +193,15 @@ uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
 
 ## 部署与推理 API <a id="deployment-api"></a>
 
-一个独立的 FastAPI 服务（`deploy/api.py`）提供已训练模型检查点（checkpoint）的推理接口，与训练流程解耦。该服务在启动时加载一个 IQA 模型和一个 VQA 模型，并统一输出 0-5 范围内的 MOS（平均意见分），无论请求由哪个模型处理。
+部署侧现在拆分为 `deploy/api.py`（FastAPI 服务）、`deploy/cli.py`（批量推理 CLI）和 `deploy/core/`（基于 Pydantic 的运行时配置、预处理、权重加载与推理辅助函数）。两个入口共享同一套运行时默认配置。
 
 ### 目录结构
 
 ```text
 deploy/
 ├── api.py               # FastAPI 服务（本文件）
-├── infer.py              # 预处理 + 检查点加载 + 预测辅助函数
+├── cli.py               # 图像/视频批量推理 CLI
+├── core/                # 运行时配置、预处理、加载与推理辅助函数
 ├── iqa-models/
 │   └── tid2013_best.pt   # 默认 IQA 检查点 (resnet_iqa，基于 TID2013 训练)
 └── vqa-models/
@@ -210,11 +214,10 @@ deploy/
 ### 启动服务
 
 ```bash
-cd deploy
 uv run python -m deploy.api
 ```
 
-该服务监听 `0.0.0.0:8000` 端口，并在启动时预先加载两个检查点；如果未找到任何模型文件，启动将失败并抛出 `RuntimeError: 没有成功加载任何模型，服务启动失败`。
+该服务监听 `0.0.0.0:8000` 端口，并在启动时预先加载两个检查点；如果未找到任何模型文件，启动将失败并抛出 `RuntimeError: No models loaded`。
 
 ### 接口 (Endpoints)
 
@@ -240,16 +243,28 @@ uv run python -m deploy.api
 > 对于使用 v0.5.0 及以上版本保存的检查点（checkpoint），MOS 范围（`mos_min`/`mos_max`）存储在配置中，并在加载时恢复。反归一化过程是自动进行的。
 
 > [!TIP]
-> `dataset_mos` 字段返回的是基于源数据集原始 MOS 范围的分数（例如 TID2013 为 0-9，KoNViD-1k 为 1-5），而 `mos` 字段则统一归一化为 0-5 分制，以便进行跨数据集比较。 ---
+> `dataset_mos` 字段返回的是基于源数据集原始 MOS 范围的分数（例如 TID2013 为 0-9，KoNViD-1k 为 1-5），而 `mos` 字段则统一归一化为 0-5 分制，以便进行跨数据集比较。
+
+### 批量 CLI
+
+```bash
+uv run python -m deploy.cli -i examples/images/
+uv run python -m deploy.cli -i examples/videos/
+uv run python -m deploy.cli -i examples/
+```
+
+CLI 会自动识别图像和视频文件，并将结果写入 `reports/iqa-test/` 或 `reports/vqa-test/`；`make test-images`、`make test-videos` 和 `make test-all` 目标就是调用它。
+
+---
 
 ## 项目主要结构 <a id="project-main-structure"></a>
 
 ```text
 deep-vqa-framework/
 ├── Makefile                # 自动化与工作流命令
-├── RREADME.md               # 项目概览
+├── README.md               # 项目概览
 ├── DISCLAIMER.md           # 法律责任与资源使用政策
-├── pyproject.toml          # 依赖与环境管理 (uv)
+├── pyproject.toml          # 依赖、环境与构建管理 (uv + hatchling)
 │
 ├── config/                 # YAML 配置文件（用户可编辑）
 │   ├── basic.yaml            # 系统与训练的全局默认设置
@@ -276,16 +291,18 @@ deep-vqa-framework/
 │   └── scripts_logs/             # Shell 脚本日志 (setup, data, etc.)
 |
 ├── scripts/                  # 基础设施自动化脚本
+│   ├── bootstrap.sh             # 系统级初始化（apt、镜像源、系统工具）
+│   ├── setup_env.sh             # 项目级初始化（uv、.venv、Python 依赖、hatchling 安装/验证）
 │   ├── manage_data.sh           # 数据下载与预处理
-│   ├── setup_env.sh              # 环境与系统初始化
 │   ├── archive_results.sh         # 结果打包归档
 │   └── *.sh                        # 辅助维护与清理脚本
 │
-├── deploy/                  # 独立推理服务（与训练解耦）
-│   ├── api.py                    # FastAPI 服务 —— 模块命名见下方说明
-│   ├── infer.py                   # 预处理 + 模型权重加载 + 推理预测
-│   ├── iqa-models/                # 由 api.py 提供的 IQA .pt 模型权重
-│   └── vqa-models/                # 由 api.py 提供的 VQA .pt 模型权重
+├── deploy/                  # 独立推理服务与批量 CLI（与训练解耦）
+│   ├── api.py                    # FastAPI 服务
+│   ├── cli.py                    # 图像/视频批量推理 CLI
+│   ├── core/                     # 运行时配置、预处理、加载与推理辅助函数
+│   ├── iqa-models/               # 由 api.py 提供的 IQA .pt 模型权重
+│   └── vqa-models/               # 由 api.py 提供的 VQA .pt 模型权重
 │
 └── src/                       # 核心框架逻辑
 ├── main.py                   # 全局执行入口
@@ -295,6 +312,52 @@ deep-vqa-framework/
 ├── utils/                        # 配置、日志记录与路径管理
 └── config/                     # Pydantic 配置系统（代码实现）
 ```
+
+---
+
+## Docker / Podman 支持 <a id="docker-support"></a>
+
+该框架支持使用 Docker 和 Podman 进行容器化开发与部署。
+
+### Docker 开发部署方法
+
+```bash
+# 构建并进入开发容器
+make docker-dev
+
+# 在容器内运行训练
+make docker-train
+
+# 启动推理 API 服务
+make docker-infer
+
+# 停止所有容器
+make docker-stop
+
+# 对示例图像做批量推理
+make test-images
+
+# 对示例视频做批量推理
+make test-videos
+
+# 对全部示例做批量推理
+make test-all
+
+# 清理容器、镜像、卷和网络
+make docker-purge-all
+
+# 检查容器环境
+make docker-manage
+```
+
+### 容器配置
+
+| 组件 | 描述 |
+| :--- | :--- |
+| `Dockerfile` | 多阶段构建：`base`（共享依赖）、`train`（训练）、`prod`（推理） |
+| `docker-compose.yaml` | 主 Compose 配置文件，并启用 `json-file` 日志轮转（`max-size` / `max-file`） |
+| `docker-compose.docker.yaml` | Docker 专用 GPU 支持（`runtime: nvidia` + `environment`） |
+| `docker-compose.podman.yaml` | Podman 专用 GPU 支持（`security_opt` + `devices`） |
 
 ---
 
@@ -323,9 +386,9 @@ deep-vqa-framework/
 | ------- | ------ | --------- |
 | 1 (基础) | `basic.yaml` | 首先加载作为初始配置 |
 | 2 (模型) | `models/{model}.yaml` | 在阶段 1 基础上进行深度合并（匹配的键会被覆盖） |
-| 3 (数据集) | `dataset_config.yaml` | **未合并至顶层键** — 匹配的数据集条目将作为 `config["dataset_info"]` 整体附加 |
+| 3 (数据集) | `dataset_config.yaml` | **未合并至顶层键** — 匹配的数据集条目将作为 `config["dataset"]` 整体附加 |
 
-在训练开始前，合并后的配置会根据 `config_loader.validate_config_schema()` 定义的必填字段列表进行校验。路径解析由 Pydantic 的 `PathsConfig` 及其类型化方法处理。
+合并后的结果会在构造 `Config(**merged)` 时由 Pydantic 校验。路径解析由 Pydantic 的 `PathsConfig` 及其类型化方法处理。
 
 ---
 
@@ -382,7 +445,7 @@ Decord 已预配置为默认后端。如果 Decord 不可用，框架会自动�
 
 ### 训练无报错挂起（后台运行）
 
-如果使用 `nohup` 或在后台运行的训练任务看似卡住且没有新的日志输出，请检查 `main.py` 或 `engine.py` 中是否存在 `pdb.set_trace()` 断点。这些断点会在异常发生时触发并等待标准输入（stdin），从而阻塞非交互式进程。
+如果使用 `nohup` 或在后台运行的训练任务看似卡住且没有新的日志输出，请检查 `src/main.py` 中是否存在 `pdb.set_trace()` 断点。这些断点会在异常发生时触发并等待标准输入（stdin），从而阻塞非交互式进程。
 
 **解决方案：**
 - 调试时以交互方式（不使用 `nohup`）运行训练
@@ -403,13 +466,13 @@ Decord 已预配置为默认后端。如果 Decord 不可用，框架会自动�
 | `make security-all` | 运行所有安全检查 |
 
 > [!NOTE]
-> `pip-audit` 是主要的漏洞扫描工具。`safety` 工具需要注册或登录。 ---
+> `pip-audit` 是主要的漏洞扫描工具。`safety` 工具需要注册或登录。
 
 ## 📄 许可证 <a id="license"></a>
 
 - **框架**: [MIT](LICENSE)
 - **作者**: [@autentisitet](https://github.com/autentisitet)
-- **版本**: 0.5.1-beta (预发布版)
+- **版本**: 0.6.2
 
 ---
 
