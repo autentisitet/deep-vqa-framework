@@ -109,36 +109,11 @@ ensure_optional_deps() {
     fi
 }
 
-# ============================================================
-# Download helper with fallback
-# ============================================================
-download_with_fallback() {
-    local url="$1"
-    local output="$2"
-    local output_dir="$(dirname "$output")"
-    local output_file="$(basename "$output")"
-
-    mkdir -p "$output_dir"
-
-    if command -v aria2c &> /dev/null; then
-        aria2c -x 4 -s 4 \
-            -d "$output_dir" \
-            -o "$output_file" \
-            --timeout=30 --max-tries=3 --console-log-level=error "$url" 2>/dev/null && return 0
-    fi
-    if command -v wget &> /dev/null; then
-        wget -q -O "$output" --timeout=30 --tries=3 "$url" 2>/dev/null && return 0
-    fi
-    if command -v curl &> /dev/null; then
-        curl -L -o "$output" --connect-timeout 30 --retry 3 "$url" 2>/dev/null && return 0
-    fi
-    return 1
-}
 
 
 
 # ============================================================
-# Install uv
+# Setup proxy (for pip install)
 # ============================================================
 export PATH="$HOME/.local/bin:$PATH"
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -146,6 +121,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 _proxy_http="${http_proxy:-$HTTP_PROXY}"
 _proxy_https="${https_proxy:-$HTTPS_PROXY}"
+
 
 if [ -n "$_proxy_http" ] || [ -n "$_proxy_https" ]; then
     export http_proxy="$_proxy_http"
@@ -159,14 +135,45 @@ else
 fi
 
 
+
+
+# ============================================================
+# Install uv via pip (works on both host and container)
+# ============================================================
 if ! command -v uv &> /dev/null; then
-    log_info "Installing uv..."
-    if download_with_fallback "https://astral.sh/uv/install.sh" "/tmp/uv_install.sh"; then
-        bash /tmp/uv_install.sh && rm -f /tmp/uv_install.sh
-        [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
-        log_ok "uv installed successfully."
+    log_info "Installing uv via pip..."
+
+    if ! command -v pip &> /dev/null; then
+        log_error "pip not found. Please ensure Python and pip are installed."
+        exit 1
+    fi
+
+    if [ -n "$PIP_INDEX_URL" ]; then
+        PIP_INSTALL_ARGS="pip install uv -i $PIP_INDEX_URL"
+    elif [ -n "$UV_INDEX_URL" ]; then
+        PIP_INSTALL_ARGS="pip install uv -i $UV_INDEX_URL"
     else
-        log_error "All download methods failed. Please check network."
+        PIP_INSTALL_ARGS="pip install uv"
+    fi
+
+
+    if [ "$(id -u)" -eq 0 ]; then
+        $PIP_INSTALL_ARGS 2>/dev/null || {
+            log_error "pip install uv failed"
+            exit 1
+        }
+    else
+        $PIP_INSTALL_ARGS --user 2>/dev/null || {
+            log_error "pip install uv --user failed"
+            exit 1
+        }
+    fi
+
+    export PATH="$HOME/.local/bin:$PATH"
+    if command -v uv &> /dev/null; then
+        log_ok "uv installed successfully: $(uv --version)"
+    else
+        log_error "uv installation failed: command not found after install"
         exit 1
     fi
 else
@@ -242,6 +249,7 @@ fi
 
 uv sync --no-dev $SYNC_ARGS
 log_ok "Core dependencies installed."
+
 
 
 # ============================================================

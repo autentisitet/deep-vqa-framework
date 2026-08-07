@@ -18,6 +18,7 @@ COPY README.md LICENSE ./
 COPY pyproject.toml uv.lock requirements.txt Makefile ./
 COPY scripts/ ./scripts/
 
+
 # Install system and Python dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends make && \
@@ -32,6 +33,8 @@ RUN apt-get update && \
 # Phase 2: Training Environment
 # ==============================================
 FROM base AS train
+
+ENV PATH="/usr/local/bin:/root/.local/bin:$PATH"
 
 COPY src/ ./src/
 COPY config/ ./config/

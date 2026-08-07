@@ -32,6 +32,7 @@ UV_RUN := uv run
 # Targets
 # ============================================================
 .PHONY: help bootstrap setup install data info clean archive
+
 .PHONY: test-images test-videos test-all
 
 .PHONY: check-code fmt black isort format-all typecheck
@@ -39,6 +40,7 @@ UV_RUN := uv run
 
 .PHONY: docker-dev docker-train docker-infer docker-stop docker-manage
 .PHONY: docker-purge-all
+
 
 
 .DEFAULT_GOAL := help
@@ -52,10 +54,12 @@ help:
 	@echo '$(BOLD)$(CYAN)Deep-VQA-Framework Makefile$(RESET)'
 	@echo ''
 	@echo '$(GREEN)Environment:$(RESET)'
+
 	@echo '  make bootstrap [BOOTSTRAP_ARGS="..."]      Install system dependencies (apt)'
 	@echo '  make setup [SETUP_ARGS="..."]              Install Python dependencies (uv)'
 	@echo '  make install [INSTALL_ARGS="..."]          Bootstrap + Setup (full installation)'
 	@echo '  make data                                  Download and prepare datasets'
+
 	@echo ''
 	@echo '$(YELLOW)Code Quality:$(RESET)'
 	@echo '  make check-code     Run ruff linter'
@@ -68,6 +72,7 @@ help:
 	@echo '  make security-all   Run all security checks'
 	@echo ''
 	@echo '$(CYAN)Docker:$(RESET)'
+
 	@echo '  make docker-dev [BUILD_ARGS="..."]         Enter development container'
 	@echo '  make docker-train [BUILD_ARGS="..."]       Run training in background'
 	@echo '  make docker-infer [BUILD_ARGS="..."]       Start inference API service'
@@ -79,6 +84,7 @@ help:
 	@echo '  make test-images     Batch inference on examples/images/'
 	@echo '  make test-videos     Batch inference on examples/videos/'
 	@echo '  make test-all        Batch inference on all examples/'
+
 	@echo ''
 	@echo '$(BLUE)Maintenance:$(RESET)'
 	@echo '  make clean          Remove cache and temporary files'
@@ -87,6 +93,7 @@ help:
 	@echo '$(CYAN)Info:$(RESET)'
 	@echo '  make info           Show environment details'
 	@echo ''
+
 	@echo '$(BOLD)Parameters:$(RESET)'
 	@echo '  BOOTSTRAP_ARGS="--mirror"    Pass args to bootstrap.sh'
 	@echo '  SETUP_ARGS="--mirror --all"  Pass args to setup_env.sh'
@@ -101,6 +108,11 @@ help:
 	@echo '  uv run python -m src.main --dataset tid2013 --model resnet_iqa'
 	@echo '  uv run python -m src.main --dataset konvid-1k --model timeswin_vqa'
 
+
+
+INSTALL_ARGS ?=
+BOOTSTRAP_ARGS ?= $(filter --mirror, $(ARGS))
+SETUP_ARGS ?= $(ARGS)
 
 
 bootstrap:
@@ -158,6 +170,7 @@ archive:
 
 
 
+
 # ============================================================
 # Testing
 # ============================================================
@@ -175,6 +188,7 @@ test-videos:
 test-all: test-images test-videos
 	@echo "[OK] All tests completed"
 	@jq -s '.[] | .[] | {file: .file, mos: .mos_score}' reports/iqa-test/*.json reports/vqa-test/*.json 2>/dev/null || echo "[WARN] jq not installed, check JSON files manually"
+
 
 
 
@@ -468,12 +482,14 @@ docker-infer:
 	$(COMPOSE) $(COMPOSE_FILES) up -d vqa-infer
 
 
+
 docker-stop:
 	$(call check_runtime)
 	@echo "[INFO] Stopping containers..."
 	@$(RUNTIME) stop vqa-prod 2>/dev/null || true
 	@$(RUNTIME) stop vqa-train 2>/dev/null || true
 	@echo "$(GREEN)[OK]$(RESET) Containers stopped."
+
 
 
 docker-manage:

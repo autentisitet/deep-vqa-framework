@@ -15,11 +15,24 @@
 This framework provides an end-to-end solution for training, evaluating, and deploying quality assessment models. It features a unified architecture that seamlessly handles both image and video inputs, multi-dataset support, cross-validation pipelines, and production-ready inference APIs.
 
 > [!NOTE]
-> This framework is primarily tested on AutoDL cloud GPU instances.
-> You can run the command below to open proxy on AutoDL cloud instances:
-
+> This framework supports both Docker and Podman container runtimes.
+> For dataset downloads, the scripts automatically detect `http_proxy`/`HTTP_PROXY` environment variables.
+>
+> On AutoDL cloud GPU instances, you can enable proxy with:
+>
 ```bash
 source /etc/network_turbo
+```
+
+> [!TIP]
+> **For Podman users**: No alias is required for `make docker-*` commands.
+> The Makefile auto-detects your runtime and uses `podman-compose` or `docker-compose` accordingly.
+>
+> However, if you want to run `docker` commands manually, you can set an alias:
+>
+```bash
+alias docker=podman
+alias docker-compose=podman-compose
 ```
 
 ---
@@ -32,6 +45,7 @@ source /etc/network_turbo
 - [Evaluation & Metrics](#evaluation-metrics)
 - [Deployment & Inference API](#deployment-api)
 - [Project Main Structure](#project-main-structure)
+- [Docker / Podman Support](#docker-support)
 - [System Overview](#system-overview)
 - [Configuration Guide](#configuration-guide)
 - [Troubleshooting](#troubleshooting)
@@ -116,7 +130,7 @@ Total Loss = w_mse × MSE + w_rank × RankLoss + w_plcc × (1 − PLCC)
 
 ```bash
 # Initialize environment and install dependencies
-make setup
+make install
 
 # Check environment status
 make info
@@ -292,12 +306,21 @@ deep-vqa-framework/
 │   │   └── corrupted/            # Corrupted files from integrity check
 │   └── scripts_logs/             # Shell script logs (setup, data, etc.)
 |
+├── docker/                   # Container configuration
+│   ├── docker-compose.yaml      # Main compose config
+│   ├── docker-compose.docker.yaml # Docker GPU support
+│   └── docker-compose.podman.yaml # Podman GPU support
+│
+├── .github/workflows/        # CI/CD pipelines
+│   └── ci.yaml                 # Continuous Integration
+|
 ├── scripts/                  # Infrastructure automation
 │   ├── bootstrap.sh             # System-level initialization (apt, mirrors, system tools)
 │   ├── setup_env.sh             # Project-level initialization (uv, .venv, Python deps, hatchling install/verification)
 │   ├── manage_data.sh           # Download & data preparation
-│   ├── archive_results.sh         # Package results
-│   └── *.sh                        # Auxiliary maintenance & cleanup scripts
+│   ├── archive_results.sh       # Package results
+│   ├── cache_clean.sh           # Cache cleanup
+│   └── ci_test_extract.sh       # CI helper for smart_extract test
 │
 ├── deploy/                  # Standalone inference service and batch CLI (decoupled from training)
 │   ├── api.py                    # FastAPI service
@@ -478,16 +501,17 @@ The framework includes security tools to audit dependencies:
 - **Author**: [@autentisitet](https://github.com/autentisitet)
 - **Version**: 0.6.2
 
+
 ---
 
 ## 👥 Contributors <a id="contributors"></a>
 
 | Name | Role | Contributions |
 | :--- | :--- | :--- |
-| **[@autentisitet](https://github.com/autentisitet)** | Project Lead / Core Developer | Framework architecture, training pipeline, inference engine, deployment API |
+| **[@autentisitet](https://github.com/autentisitet)** | Project Lead / Core Developer | Framework architecture, training pipeline, inference engine,  Docker/Podman containerization, multi-stage builds, inference API design |
 | **[@yss0120](https://github.com/yss0120)** | Frontend Developer | Interactive UI/UX (`index.html`), subjective blind rating system, quality passport visualization |
 | **[@Zed-23](https://github.com/Zed-23)** | DevOps & Quality Assurance | CI/CD pipeline, automated & smoke testing, Shell script fixes, CUDA OOM debugging |
-| **[@bazhina-5566](https://github.com/bazhina-5566)** | Backend API Developer | FastAPI service (`deploy/api.py`), model checkpoint loading, inference API design |
+| **[@bazhina-5566](https://github.com/bazhina-5566)** | Backend API Developer | FastAPI service (`deploy/api.py`), model checkpoint loading, deploy API design |
 
 > [!NOTE]
 > We welcome contributions! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md) for guidelines.

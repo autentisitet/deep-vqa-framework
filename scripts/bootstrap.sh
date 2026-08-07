@@ -80,6 +80,15 @@ APT_PACKAGES=(
     curl wget build-essential tar aria2 unrar unzip tree bc ffmpeg jq
 )
 
+if ! command -v pip &> /dev/null && ! command -v pip3 &> /dev/null; then
+    log_info "pip not found, adding python3-pip to install list..."
+    APT_PACKAGES+=(python3-pip)
+fi
+
+if [ ! -f /usr/include/python3*/Python.h ] 2>/dev/null; then
+    log_info "Python dev headers not found, adding python3-dev..."
+    APT_PACKAGES+=(python3-dev)
+fi
 
 
 # ============================================================

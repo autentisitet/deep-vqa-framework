@@ -6,6 +6,7 @@
 **/*.pt
 
 datasets/
+examples/
 results/
 reports/
 logs/
@@ -33,10 +34,27 @@ Thumbs.db
 .idea/
 *.swp
 
+
+.git/
 .markdownlint.json
 .markdownlintignore
 Makefile.local
 config.mk
+
+
+.cursor/
+.claude/
+.cline/
+.continue/
+.windsurf/
+.codeium/
+.roo/
+.devin/
+.gemini/
+.aider*
+.codex/
+
+
 
 .editorconfig
 .gitattributes

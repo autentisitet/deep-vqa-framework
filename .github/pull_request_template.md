@@ -42,6 +42,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 | `perf` | Performance optimization |
 | `test` | Add or modify tests |
 | `chore` | Maintenance tasks |
+| `style` | Code style, formatting, or output format changes (no logic change) |
 
 **Example:**
 

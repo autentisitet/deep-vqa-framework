@@ -15,10 +15,24 @@
 该框架为质量评估模型的训练、评估和部署提供了一站式解决方案。它采用统一架构，能够无缝处理图像和视频输入，并支持多数据集、交叉验证流程以及生产级推理 API。
 
 > [!NOTE]
-> 本框架主要在 AutoDL 云 GPU 实例上进行了测试。 > 您可以运行以下命令在 AutoDL 云实例上开启代理：
-
+> 该框架同时支持 Docker 和 Podman 容器运行时。
+> 在下载数据集时，脚本会自动检测 `http_proxy` 或 `HTTP_PROXY` 环境变量。
+>
+> 在 AutoDL 云 GPU 实例上，您可以通过以下方式启用代理：
+>
 ```bash
 source /etc/network_turbo
+```
+
+> [!TIP]
+> **对于 Podman 用户**：运行 `make docker-*` 命令时无需设置别名。
+> Makefile 会自动检测您的运行时环境，并相应地使用 `podman-compose` 或 `docker-compose`。
+>
+> 不过，如果您希望手动运行 `docker` 命令，可以设置别名：
+>
+```bash
+alias docker=podman
+alias docker-compose=podman-compose
 ```
 
 ---
@@ -31,6 +45,7 @@ source /etc/network_turbo
 - [评估与指标](#evaluation-metrics)
 - [部署与推理 API](#deployment-api)
 - [项目主要结构](#project-main-structure)
+- [Docker / Podman 支持](#docker-support)
 - [系统概览](#system-overview)
 - [配置指南](#configuration-guide)
 - [故障排查](#troubleshooting)
@@ -114,7 +129,7 @@ source /etc/network_turbo
 
 ```bash
 # 初始化环境并安装依赖
-make setup
+make install
 
 # 检查环境状态
 make info
@@ -290,12 +305,21 @@ deep-vqa-framework/
 │   │   └── corrupted/            # 发现损坏后，挪用在此存储的原始数据文件
 │   └── scripts_logs/             # Shell 脚本日志 (setup, data, etc.)
 |
+├── docker/                   # 容器配置
+│   ├── docker-compose.yaml      # 主 compose 配置
+│   ├── docker-compose.docker.yaml # Docker GPU 支持
+│   └── docker-compose.podman.yaml # Podman GPU 支持
+│
+├── .github/workflows/        # CI/CD 流水线
+│   └── ci.yaml                 # 持续集成
+|
 ├── scripts/                  # 基础设施自动化脚本
 │   ├── bootstrap.sh             # 系统级初始化（apt、镜像源、系统工具）
 │   ├── setup_env.sh             # 项目级初始化（uv、.venv、Python 依赖、hatchling 安装/验证）
 │   ├── manage_data.sh           # 数据下载与预处理
-│   ├── archive_results.sh         # 结果打包归档
-│   └── *.sh                        # 辅助维护与清理脚本
+│   ├── archive_results.sh       # 结果打包归档
+│   ├── cache_clean.sh           # 缓存清理
+│   └── ci_test_extract.sh       # smart_extract 测试的 CI 辅助脚本
 │
 ├── deploy/                  # 独立推理服务与批量 CLI（与训练解耦）
 │   ├── api.py                    # FastAPI 服务
@@ -305,13 +329,47 @@ deep-vqa-framework/
 │   └── vqa-models/               # 由 api.py 提供的 VQA .pt 模型权重
 │
 └── src/                       # 核心框架逻辑
-├── main.py                   # 全局执行入口
-├── core/                        # 训练引擎与评估流程
-├── data/                        # 数据加载器、EDA（探索性数据分析）与完整性分析
-├── models/                      # 模型架构定义 (IQAVQA-Net)
-├── utils/                        # 配置、日志记录与路径管理
-└── config/                     # Pydantic 配置系统（代码实现）
+    ├── main.py                   # 全局执行入口
+    ├── core/                        # 训练引擎与评估流程
+    ├── data/                        # 数据加载器、EDA（探索性数据分析）与完整性分析
+    ├── models/                      # 模型架构定义 (IQAVQA-Net)
+    ├── utils/                        # 配置、日志记录与路径管理
+    └── config/                     # Pydantic 配置系统（代码实现）
 ```
+
+---
+
+## Docker / Podman 支持 <a id="docker-support"></a>
+
+该框架支持使用 Docker 和 Podman 进行容器化开发与部署。
+
+### Docker 开发部署方法
+
+```bash
+# 构建并进入开发容器
+make docker-dev
+
+# 在容器内运行训练
+make docker-train
+
+# 启动推理 API 服务
+make docker-infer
+
+# 停止所有容器
+make docker-stop
+
+# 检查容器环境
+make docker-manage
+```
+
+### 容器配置
+
+| 组件 | 描述 |
+| :--- | :--- |
+| `Dockerfile` | 多阶段构建：`base`（共享依赖）、`train`（训练）、`prod`（推理） |
+| `docker-compose.yaml` | 主 Compose 配置文件 |
+| `docker-compose.docker.yaml` | Docker 专用 GPU 支持（`runtime: nvidia` + `environment`） |
+| `docker-compose.podman.yaml` | Podman 专用 GPU 支持（`security_opt` + `devices`） |
 
 ---
 
@@ -480,10 +538,10 @@ Decord 已预配置为默认后端。如果 Decord 不可用，框架会自动�
 
 | 姓名 | 角色 | 贡献内容 |
 | :--- | :--- | :--- |
-| **[@autentisitet](https://github.com/autentisitet)** | 项目负责人 / 核心开发者 | 框架架构、训练流水线、推理引擎、部署 API |
+| **[@autentisitet](https://github.com/autentisitet)** | 项目负责人 / 核心开发者 | 框架架构、训练流水线、推理引擎、Docker/Podman 容器化、多阶段构建、推理 API 设计 |
 | **[@yss0120](https://github.com/yss0120)** | 前端开发者 | 交互式 UI/UX (`index.html`)、主观盲测评分系统、质量概览（Quality Passport）可视化 |
 | **[@Zed-23](https://github.com/Zed-23)** | DevOps 与质量保证 | CI/CD 流水线、自动化测试与冒烟测试、Shell 脚本修复、CUDA 显存溢出 (OOM) 调试 |
-| **[@bazhina-5566](https://github.com/bazhina-5566)** | 后端 API 开发者 | FastAPI 服务 (`deploy/api.py`)、模型检查点加载、推理 API 设计 |
+| **[@bazhina-5566](https://github.com/bazhina-5566)** | 后端 API 开发者 | FastAPI 服务 (`deploy/api.py`)、模型检查点加载、部署 API 设计 |
 
 > [!NOTE]
 > 欢迎贡献代码！请参阅 [CONTRIBUTING.md](.github/CONTRIBUTING.md) 了解贡献指南。
