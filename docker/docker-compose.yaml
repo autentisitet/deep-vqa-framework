@@ -19,6 +19,12 @@ services:
     stdin_open: true
     tty: true
     command: ["/bin/bash"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
 
   vqa-infer:
     build:
@@ -26,12 +32,19 @@ services:
       dockerfile: Dockerfile
       target: prod
     image: vqa-prod:latest
-    container_name: vqa-api
+    container_name: vqa-prod
     shm_size: 8gb
     ports:
       - "8000:8000"
+    volumes:
+      - ../deploy/iqa-models:/app/deploy/iqa-models
+      - ../deploy/vqa-models:/app/deploy/vqa-models
     restart: unless-stopped
-    command: ["uv", "run", "python", "-m", "deploy.api"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

@@ -20,9 +20,10 @@ class IQAVQANet(nn.Module):
     Transformer fusion is only applied to video inputs.
     """
 
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, load_pretrained_backbone: Optional[bool] = None):
         super().__init__()
         model_cfg = cfg.model
+        use_pretrained = model_cfg.pretrained if load_pretrained_backbone is None else load_pretrained_backbone
 
         self.backbone_name = model_cfg.backbone
         self.dropout_rate = model_cfg.dropout
@@ -32,11 +33,13 @@ class IQAVQANet(nn.Module):
 
         # Backbone
         if self.backbone_name == "swin_t":
-            swin = models.swin_t(weights=models.Swin_T_Weights.IMAGENET1K_V1)
+            swin_weights = models.Swin_T_Weights.IMAGENET1K_V1 if use_pretrained else None
+            swin = models.swin_t(weights=swin_weights)
             self.backbone = swin.features
             self.num_features = swin.head.in_features
         elif self.backbone_name == "resnet50":
-            res = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+            res_weights = models.ResNet50_Weights.IMAGENET1K_V1 if use_pretrained else None
+            res = models.resnet50(weights=res_weights)
             self.backbone = nn.Sequential(
                 res.conv1,
                 res.bn1,

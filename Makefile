@@ -32,9 +32,15 @@ UV_RUN := uv run
 # Targets
 # ============================================================
 .PHONY: help bootstrap setup install data info clean archive
+
+.PHONY: test-images test-videos test-all
+
 .PHONY: check-code fmt black isort format-all typecheck
 .PHONY: vuln-audit sbom safety security-all
+
 .PHONY: docker-dev docker-train docker-infer docker-stop docker-manage
+.PHONY: docker-purge-all
+
 
 
 .DEFAULT_GOAL := help
@@ -48,10 +54,12 @@ help:
 	@echo '$(BOLD)$(CYAN)Deep-VQA-Framework Makefile$(RESET)'
 	@echo ''
 	@echo '$(GREEN)Environment:$(RESET)'
-	@echo '  make bootstrap      Install system dependencies (apt)'
-	@echo '  make setup          Install Python dependencies (uv)'
-	@echo '  make install        Bootstrap + Setup (full installation)'
-	@echo '  make data           Download and prepare datasets'
+
+	@echo '  make bootstrap [BOOTSTRAP_ARGS="..."]      Install system dependencies (apt)'
+	@echo '  make setup [SETUP_ARGS="..."]              Install Python dependencies (uv)'
+	@echo '  make install [INSTALL_ARGS="..."]          Bootstrap + Setup (full installation)'
+	@echo '  make data                                  Download and prepare datasets'
+
 	@echo ''
 	@echo '$(YELLOW)Code Quality:$(RESET)'
 	@echo '  make check-code     Run ruff linter'
@@ -64,11 +72,19 @@ help:
 	@echo '  make security-all   Run all security checks'
 	@echo ''
 	@echo '$(CYAN)Docker:$(RESET)'
-	@echo '  make docker-dev     Enter development container'
-	@echo '  make docker-train   Run training in background'
-	@echo '  make docker-infer   Start inference API service'
-	@echo '  make docker-stop    Stop all containers'
-	@echo '  make docker-manage  Check container environment'
+
+	@echo '  make docker-dev [BUILD_ARGS="..."]         Enter development container'
+	@echo '  make docker-train [BUILD_ARGS="..."]       Run training in background'
+	@echo '  make docker-infer [BUILD_ARGS="..."]       Start inference API service'
+	@echo '  make docker-stop                           Stop all containers'
+	@echo '  make docker-manage                         Check container environment'
+	@echo '  make docker-purge                          Remove all project containers/images'
+	@echo ''
+	@echo '$(BLUE)Inference:$(RESET)'
+	@echo '  make test-images     Batch inference on examples/images/'
+	@echo '  make test-videos     Batch inference on examples/videos/'
+	@echo '  make test-all        Batch inference on all examples/'
+
 	@echo ''
 	@echo '$(BLUE)Maintenance:$(RESET)'
 	@echo '  make clean          Remove cache and temporary files'
@@ -77,18 +93,27 @@ help:
 	@echo '$(CYAN)Info:$(RESET)'
 	@echo '  make info           Show environment details'
 	@echo ''
+
+	@echo '$(BOLD)Parameters:$(RESET)'
+	@echo '  BOOTSTRAP_ARGS="--mirror"    Pass args to bootstrap.sh'
+	@echo '  SETUP_ARGS="--mirror --all"  Pass args to setup_env.sh'
+	@echo '  INSTALL_ARGS="..."           Pass args to install (bootstrap + setup)'
+	@echo '  BUILD_ARGS="--no-cache"      Pass args to docker build'
+	@echo ''
 	@echo '$(BOLD)Examples:$(RESET)'
-	@echo '  make install                 Full installation (bootstrap + setup)'
 	@echo '  make bootstrap BOOTSTRAP_ARGS="--mirror"'
 	@echo '  make setup SETUP_ARGS="--mirror --all"'
-	@echo '  make install ARGS="--mirror --all"'
+	@echo '  make install INSTALL_ARGS="--mirror --all"'
+	@echo '  make test-all'
 	@echo '  uv run python -m src.main --dataset tid2013 --model resnet_iqa'
 	@echo '  uv run python -m src.main --dataset konvid-1k --model timeswin_vqa'
+
 
 
 INSTALL_ARGS ?=
 BOOTSTRAP_ARGS ?= $(filter --mirror, $(ARGS))
 SETUP_ARGS ?= $(ARGS)
+
 
 bootstrap:
 	@chmod +x $(ROOT_DIR)/scripts/*.sh
@@ -140,6 +165,30 @@ archive:
 	fi
 	@cd $(ROOT_DIR)/scripts && bash archive_results.sh --all 2>&1 | tee $(LOG_DIR)/archive.log
 	@echo "$(GREEN)[OK]$(RESET) Archive completed."
+
+
+
+
+
+
+# ============================================================
+# Testing
+# ============================================================
+
+test-images:
+	@echo "[INFO] Testing images..."
+	@uv run python -m deploy.cli -i examples/images/
+	@echo "[OK] Results saved under reports/iqa-test/"
+
+test-videos:
+	@echo "[INFO] Testing videos..."
+	@uv run python -m deploy.cli -i examples/videos/
+	@echo "[OK] Results saved under reports/vqa-test/"
+
+test-all: test-images test-videos
+	@echo "[OK] All tests completed"
+	@jq -s '.[] | .[] | {file: .file, mos: .mos_score}' reports/iqa-test/*.json reports/vqa-test/*.json 2>/dev/null || echo "[WARN] jq not installed, check JSON files manually"
+
 
 
 
@@ -416,6 +465,7 @@ docker-dev:
 	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-train
 	$(COMPOSE) $(COMPOSE_FILES) run --rm --name vqa-train vqa-train
 
+
 docker-train:
 	$(call check_runtime)
 	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-train
@@ -425,14 +475,22 @@ docker-train:
 		uv run python -m src.main --dataset konvid-1k --model timeswin_vqa > /app/results/konvid-1k.log 2>&1 \
 	"
 
+
 docker-infer:
 	$(call check_runtime)
 	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-infer
 	$(COMPOSE) $(COMPOSE_FILES) up -d vqa-infer
 
+
+
 docker-stop:
 	$(call check_runtime)
-	$(COMPOSE) $(COMPOSE_FILES) down
+	@echo "[INFO] Stopping containers..."
+	@$(RUNTIME) stop vqa-prod 2>/dev/null || true
+	@$(RUNTIME) stop vqa-train 2>/dev/null || true
+	@echo "$(GREEN)[OK]$(RESET) Containers stopped."
+
+
 
 docker-manage:
 	$(call check_runtime)
@@ -465,3 +523,23 @@ docker-manage:
 	@echo ""
 	@echo "--- Compose Services ---"
 	@$(COMPOSE) $(COMPOSE_FILES) ps 2>/dev/null || echo "  (none)"
+
+
+
+docker-purge-all:
+	$(call check_runtime)
+	@echo "[INFO] Stopping and removing containers..."
+	@$(COMPOSE) $(COMPOSE_FILES) down --remove-orphans 2>/dev/null || true
+	@$(RUNTIME) ps -a --filter "name=vqa-train" -q | xargs -r $(RUNTIME) rm -f
+	@$(RUNTIME) ps -a --filter "name=vqa-prod" -q | xargs -r $(RUNTIME) rm -f
+
+	@echo "[INFO] Removing dangling images..."
+	@$(RUNTIME) images --filter "dangling=true" -q | xargs -r $(RUNTIME) rmi -f
+
+	@echo "[INFO] Purging volumes..."
+	@$(RUNTIME) volume prune -f 2>/dev/null || true
+
+	@echo "[INFO] Purging networks..."
+	@$(RUNTIME) network prune -f 2>/dev/null || true
+
+	@echo "$(GREEN)[OK]$(RESET) Docker/Podman purge complete."

@@ -15,6 +15,8 @@ This guide covers renting and configuring a cloud GPU instance (AutoDL, Lambda L
 
 > [!TIP]
 > **AutoDL Users**: Select the "PyTorch 2.x + CUDA 12.x" base image. `setup_env.sh` pins Python to 3.12 via `uv`, regardless of the base image's Python version.
+>
+> `setup_env.sh` also installs and verifies `hatchling`, so build-time packaging for `deploy/` works without extra manual setup.
 
 ---
 

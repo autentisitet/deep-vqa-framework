@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.6.0--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.6.2-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -159,6 +159,9 @@ uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
 > [!NOTE]
 > Only two model configs ship today: `resnet_iqa` (image/ResNet50) and `timeswin_vqa` (video/Swin-T). Model configs are auto-discovered from `config/models/*.yaml` — drop a new YAML there (e.g. `resnet_vqa.yaml`) to register another combination before referencing it in commands.
 
+> [!NOTE]
+> `scripts/setup_env.sh` also installs and verifies `hatchling`, so `deploy/` can be built from `pyproject.toml` without extra manual setup.
+
 ### Advanced Options
 
 You can extend the framework capabilities using the following training and debugging modes:
@@ -206,14 +209,15 @@ Output location: `results/{dataset}/plots/`
 
 ## Deployment & Inference API <a id="deployment-api"></a>
 
-A standalone FastAPI service (`deploy/api.py`) exposes trained checkpoints for inference, decoupled from the training stack. It loads one IQA model and one VQA model at startup and serves a unified 0-5 MOS scale regardless of which model answers the request.
+Deployment is split into `deploy/api.py` for the FastAPI service, `deploy/cli.py` for batch inference, and `deploy/core/` for Pydantic-backed runtime config, preprocessing, checkpoint loading, and prediction helpers. Both entry points share the same runtime defaults.
 
 ### Directory Layout
 
 ```text
 deploy/
 ├── api.py               # FastAPI service (this file)
-├── infer.py              # Preprocessing + checkpoint loading + prediction helpers
+├── cli.py               # Batch inference CLI for images/videos
+├── core/                # Runtime config, preprocessing, loading, and inference helpers
 ├── iqa-models/
 │   └── tid2013_best.pt   # Default IQA checkpoint (resnet_iqa, trained on TID2013)
 └── vqa-models/
@@ -226,11 +230,10 @@ deploy/
 ### Starting the Service
 
 ```bash
-cd deploy
 uv run python -m deploy.api
 ```
 
-The service listens on `0.0.0.0:8000` and loads both checkpoints eagerly on startup; if neither model file is found, startup fails with `RuntimeError: 没有成功加载任何模型，服务启动失败`.
+The service listens on `0.0.0.0:8000` and loads both checkpoints eagerly on startup; if neither model file is found, startup fails with `RuntimeError: No models loaded`.
 
 ### Endpoints
 
@@ -258,6 +261,16 @@ The response includes both `mos` (unified 0–5 scale, `raw_score × 5`) and `da
 > [!TIP]
 > The `dataset_mos` field returns scores in the original dataset's MOS scale (e.g., TID2013: 0-9, KoNViD-1k: 1-5), while `mos` is always normalized to 0-5 for cross-dataset comparison.
 
+### Batch CLI
+
+```bash
+uv run python -m deploy.cli -i examples/images/
+uv run python -m deploy.cli -i examples/videos/
+uv run python -m deploy.cli -i examples/
+```
+
+The CLI auto-detects image and video files, writes JSON reports to `reports/iqa-test/` or `reports/vqa-test/`, and is what the `make test-images`, `make test-videos`, and `make test-all` targets use.
+
 ---
 
 ## Project Main Structure <a id="project-main-structure"></a>
@@ -267,7 +280,7 @@ deep-vqa-framework/
 ├── Makefile                # Automation & workflow commands
 ├── README.md               # Project overview
 ├── DISCLAIMER.md           # Legal liability & resource usage policy
-├── pyproject.toml          # Dependency & environment management (uv)
+├── pyproject.toml          # Dependency, environment & build management (uv + hatchling)
 │
 ├── config/                 # YAML configuration files (user-editable)
 │   ├── basic.yaml            # System & training global defaults
@@ -303,17 +316,18 @@ deep-vqa-framework/
 |
 ├── scripts/                  # Infrastructure automation
 │   ├── bootstrap.sh             # System-level initialization (apt, mirrors, system tools)
-│   ├── setup_env.sh             # Project-level initialization (uv, .venv, Python deps)
+│   ├── setup_env.sh             # Project-level initialization (uv, .venv, Python deps, hatchling install/verification)
 │   ├── manage_data.sh           # Download & data preparation
 │   ├── archive_results.sh       # Package results
 │   ├── cache_clean.sh           # Cache cleanup
 │   └── ci_test_extract.sh       # CI helper for smart_extract test
 │
-├── deploy/                  # Standalone inference service (decoupled from training)
-│   ├── api.py                    # FastAPI service — see note below on module naming
-│   ├── infer.py                   # Preprocessing + checkpoint loading + prediction
-│   ├── iqa-models/                # IQA .pt checkpoints served by api.py
-│   └── vqa-models/                # VQA .pt checkpoints served by api.py
+├── deploy/                  # Standalone inference service and batch CLI (decoupled from training)
+│   ├── api.py                    # FastAPI service
+│   ├── cli.py                    # Batch inference CLI
+│   ├── core/                     # Runtime config, preprocessing, loading, inference helpers
+│   ├── iqa-models/               # IQA .pt checkpoints served by api.py
+│   └── vqa-models/               # VQA .pt checkpoints served by api.py
 │
 └── src/                       # Core framework logic
     ├── main.py                   # Global execution entry point
@@ -345,6 +359,18 @@ make docker-infer
 # Stop all containers
 make docker-stop
 
+# Batch inference on example images
+make test-images
+
+# Batch inference on example videos
+make test-videos
+
+# Batch inference on all examples
+make test-all
+
+# Remove containers, images, volumes, and networks
+make docker-purge-all
+
 # Check container environment
 make docker-manage
 ```
@@ -354,7 +380,7 @@ make docker-manage
 | Component | Description |
 | :--- | :--- |
 | `Dockerfile` | Multi-stage builds: `base` (shared deps), `train` (training), `prod` (inference) |
-| `docker-compose.yaml` | Main compose configuration |
+| `docker-compose.yaml` | Main compose configuration with json-file log rotation (`max-size`, `max-file`) |
 | `docker-compose.docker.yaml` | Docker-specific GPU support (`runtime: nvidia` + `environment` ) |
 | `docker-compose.podman.yaml` | Podman-specific GPU support (`security_opt` + `devices`) |
 
@@ -385,9 +411,9 @@ Paths are resolved via `cfg.paths.xxx_dir(dataset_name)` methods.
 | ------- | ------ | --------- |
 | 1 (Base) | `basic.yaml` | Loaded first as the starting config |
 | 2 (Model) | `models/{model}.yaml` | Deep-merged on top of stage 1 (matching keys override) |
-| 3 (Dataset) | `dataset_config.yaml` | **Not merged into top-level keys** — the matched dataset entry is attached wholesale as `config["dataset_info"]` |
+| 3 (Dataset) | `dataset_config.yaml` | **Not merged into top-level keys** — the matched dataset entry is attached wholesale as `config["dataset"]` |
 
-The merged result is validated against `config_loader.validate_config_schema()`'s required-field list before training starts. Path resolution is handled by Pydantic `PathsConfig` with typed methods.
+The merged result is validated by Pydantic when `Config(**merged)` is constructed. Path resolution is handled by Pydantic `PathsConfig` with typed methods.
 
 ---
 
@@ -444,7 +470,7 @@ Decord is pre-configured as the default backend. If Decord is not available, the
 
 ### Training Hangs With No Error (Background Runs)
 
-If a `nohup`/background training run appears frozen with no new log lines, check for `pdb.set_trace()` breakpoints in `main.py` or `engine.py`. These are triggered on exceptions and will wait for stdin input, blocking non-interactive processes.
+If a `nohup`/background training run appears frozen with no new log lines, check for `pdb.set_trace()` breakpoints in `src/main.py`. These are triggered on exceptions and will wait for stdin input, blocking non-interactive processes.
 
 **Solutions:**
 - Run training interactively (without `nohup`) when debugging
@@ -473,7 +499,8 @@ The framework includes security tools to audit dependencies:
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.6.0-beta (pre-release)
+- **Version**: 0.6.2
+
 
 ---
 

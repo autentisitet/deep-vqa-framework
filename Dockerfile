@@ -1,8 +1,8 @@
-# Dockerfile - 多阶段构建
+# Dockerfile - Multi-stage build
 
-# ============================================
-# 阶段1: 基础环境（共享层）
-# ============================================
+# =============================================
+# Stage 1: Base Environment (Shared Layer)
+# ===============================================
 FROM python:3.12-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
@@ -18,7 +18,8 @@ COPY README.md LICENSE ./
 COPY pyproject.toml uv.lock requirements.txt Makefile ./
 COPY scripts/ ./scripts/
 
-# 安装系统依赖、Python 依赖
+
+# Install system and Python dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends make && \
     make bootstrap BOOTSTRAP_ARGS="--mirror" && \
@@ -28,9 +29,9 @@ RUN apt-get update && \
 
 
 
-# ============================================
-# 阶段2: 训练环境
-# ============================================
+# ==============================================
+# Phase 2: Training Environment
+# ==============================================
 FROM base AS train
 
 ENV PATH="/usr/local/bin:/root/.local/bin:$PATH"
@@ -43,23 +44,27 @@ CMD ["/bin/bash"]
 
 
 # ============================================
-# 阶段3: 生产环境（只含运行所需）
+# Phase 3: Production Environment (Runtime Only)
 # ============================================
 FROM base AS prod
 
 ENV PATH="/root/.local/bin:$PATH"
 
-COPY deploy/ ./deploy/
+COPY src/config/ ./src/config/
+COPY src/models/ ./src/models/
+
+COPY deploy/core/ ./deploy/core/
+COPY deploy/api.py ./deploy/api.py
+COPY deploy/cli.py ./deploy/cli.py
 COPY frontend/ ./frontend/
 
-# 清理不需要的文件（减小镜像体积）
+RUN mkdir -p ./deploy/iqa-models/ ./deploy/vqa-models/
+
 RUN find /app -name "*.pyc" -delete \
-    && find /app -name "__pycache__" -type d -exec rm -rf {} + \
-    && rm -rf /app/scripts /app/tests /app/docs 2>/dev/null || true
+    && find /app -name "__pycache__" -type d -exec rm -rf {} 2>/dev/null || true
 
-
-# 暴露 FastAPI 端口
+# Expose FastAPI ports
 EXPOSE 8000
 
-# 启动服务
-CMD ["uv", "run", "python", "-m", "deploy.api"]
+# Start service
+CMD [".venv/bin/python", "-m", "deploy.api"]

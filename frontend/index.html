@@ -1441,7 +1441,6 @@
       form.append("model", model.id);
       form.append("model_name", model.displayName);
       form.append("backbone", model.backbone);
-      form.append("model_task_type", model.task);
       const controller = new AbortController();
       state.currentController = controller;
       const response = await fetch(`${config.base}${config.path}`, { method: "POST", body: form, signal: controller.signal });

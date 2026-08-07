@@ -111,11 +111,17 @@ ensure_optional_deps() {
 
 
 
+
 # ============================================================
 # Setup proxy (for pip install)
 # ============================================================
+export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.cargo/bin:$PATH"
+
+
 _proxy_http="${http_proxy:-$HTTP_PROXY}"
 _proxy_https="${https_proxy:-$HTTPS_PROXY}"
+
 
 if [ -n "$_proxy_http" ] || [ -n "$_proxy_https" ]; then
     export http_proxy="$_proxy_http"
@@ -127,6 +133,7 @@ else
     log_info "No proxy set. Proceeding with direct connection."
     echo "   (Tip: Run 'source /etc/network_turbo' first if downloading on AutoDL)"
 fi
+
 
 
 
@@ -246,6 +253,15 @@ log_ok "Core dependencies installed."
 
 
 # ============================================================
+# Install build-system dependencies (for uv run)
+# ============================================================
+log_info "Installing build-system dependencies (hatchling)..."
+uv pip install hatchling 2>/dev/null || log_warn "hatchling installation failed"
+log_ok "Build-system dependencies installed."
+
+
+
+# ============================================================
 # Install optional tools
 # ============================================================
 if [ "$INSTALL_DEV" = true ] || [ "$INSTALL_SECURITY" = true ]; then
@@ -283,6 +299,7 @@ uv run python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'
 
 uv run python -c "import cv2, numpy, pandas, loguru, tqdm, sklearn, scipy, gdown; print('All core dependencies imported successfully')" 2>/dev/null || log_warn "Some dependencies failed to import"
 
+uv run python -c "import hatchling; print('hatchling ok')" 2>/dev/null || log_warn "hatchling verification failed"
 echo "----------------------------------------------------------------------"
 log_ok "Setup complete!"
 echo ""
