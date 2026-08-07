@@ -12,6 +12,10 @@ logs/
 .download_cache/
 nohup.out
 
+examples/**/*
+!examples/**/README.md
+
+
 .venv/
 venv/
 env/
@@ -35,5 +39,19 @@ Thumbs.db
 
 .markdownlint.json
 .markdownlintignore
+
+# Local AI / agent tooling
+.cursor/
+.claude/
+.cline/
+.continue/
+.windsurf/
+.codeium/
+.roo/
+.devin/
+.gemini/
+.aider*
+.codex/
+
 Makefile.local
 config.mk
