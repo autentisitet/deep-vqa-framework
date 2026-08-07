@@ -38,11 +38,11 @@
         classDef warn fill:#ffebee,stroke:#c62828,stroke-width:2px,stroke-dasharray:3;
 
         subgraph STAGE_1 [1. 基础设施 - 脚本层]
-            S1[setup_env.sh] --> S3[manage_data.sh]
-            S3 --> SL[setup_links.sh<br/>make link]
-            S2[system_check.sh] -.诊断.-> S1
-            S4[optimize_env.sh] -.网络/终端调优.-> S1
-            S5[cache_clean.sh] -.清理.-> S3
+            B[bootstrap.sh] --> S1[setup_env.sh]
+            S1 --> S3[manage_data.sh]
+            S1 --> A[archive_results.sh]
+            S1 --> C[cache_clean.sh]
+            S6[ci_test_extract.sh] -.CI.-> S3
         end
 
         subgraph STAGE_2 [2. 配置驱动 - Pydantic 层]
@@ -80,14 +80,15 @@
 
         subgraph STAGE_6 [6. 成果归档 - 存储层]
             TR --> F[(best_model.pt<br/>results/{dataset}/model_outputs/)]
-            TR --> AR[archive_result.sh]
+            TR --> AR[archive_results.sh]
             AR --> LOG[(Log + Config + Plots + Weights<br/>results/{dataset}/)]
         end
 
         subgraph STAGE_7 [7. 推理部署 - 交付层]
             F -.手动拷贝.-> BM[(deploy/iqa-models/<br/>deploy/vqa-models/)]
-            BM --> INF[deploy/infer.py<br/>Preprocessor + predict_*]
-            INF --> API[deploy/api.py<br/>FastAPI /evaluate /health]
+            BM --> CORE[deploy/core/*.py<br/>Pydantic runtime config + preprocessing + loading + inference]
+            CORE --> API[deploy/api.py<br/>FastAPI /evaluate /health]
+            CORE --> CLI[deploy/cli.py<br/>Batch inference CLI]
             API --> WEB[frontend/index.html<br/>前端可视化 Demo]
             API --> EXT[外部应用调用]
         end
