@@ -8,6 +8,8 @@ TID2013:
   name: "TID2013"
   task_type: "iqa"
   data_type: "image"
+  mos_min: 0.242
+  mos_max: 7.214
 
   paths:
     root: "datasets/TID2013"   # 数据集根目录路径
@@ -18,7 +20,7 @@ TID2013:
 
   metadata:
     mos_file: "mos_with_names.txt"
-    format: "txt"
+    file_format: "txt"
     delimiter: r'\s+'
 
   columns:
@@ -40,6 +42,8 @@ KoNViD-1k:
   name: "KoNViD-1k"
   task_type: "vqa"
   data_type: "video"
+  mos_min: 1.220
+  mos_max: 4.640
 
   paths:
     root: "datasets/KoNViD-1k"
@@ -48,7 +52,7 @@ KoNViD-1k:
 
   metadata:
     mos_file: "KoNViD_1k_mos.csv"
-    format: "csv"
+    file_format: "csv"
     delimiter: ","
 
   columns:
@@ -75,6 +79,8 @@ T2VQA-DB:
   task_type: "vqa"
   data_type: "video"
   has_text: true
+  mos_min: 0.0
+  mos_max: 5.0
 
   paths:
     root: "datasets/T2VQA-DB"
@@ -83,7 +89,7 @@ T2VQA-DB:
 
   metadata:
     mos_file: "info.txt"
-    format: "txt"
+    file_format: "txt"
     delimiter: "|"
 
   columns:
