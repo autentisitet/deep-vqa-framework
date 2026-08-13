@@ -1,38 +1,40 @@
 # deep-vqa-framework
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.12+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.6.2-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.6.4-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
 **🌐 [English](README.md) | [简体中文](README_zh.md)**
 
-**A Unified Deep Learning Framework for Image Quality Assessment (IQA) and Video Quality Assessment (VQA).**
+**A research-to-deployment framework for Image Quality Assessment (IQA) and Video Quality Assessment (VQA).**
 
-This framework provides an end-to-end solution for training, evaluating, and deploying quality assessment models. It features a unified architecture that seamlessly handles both image and video inputs, multi-dataset support, cross-validation pipelines, and production-ready inference APIs.
+Deep-VQA-Framework is a production-oriented IQA/VQA quality assessment framework covering data auditing, training and evaluation, result visualization, checkpoint publication, and inference serving.
+On the data side, corrupted samples are quarantined with label backups and reference-content groups prevent distortion variants from leaking across splits; on the model side, 4D and 5D tensors select ResNet50 or Swin-T ImageNet feature paths, and successful runs publish `{dataset}_best.pt` directly into the `deploy/` inference layout.
 
-> [!NOTE]
-> This framework supports both Docker and Podman container runtimes.
-> For dataset downloads, the scripts automatically detect `http_proxy`/`HTTP_PROXY` environment variables.
->
-> On AutoDL cloud GPU instances, you can enable proxy with:
->
-```bash
-source /etc/network_turbo
-```
+### What Stands Out
 
-> [!TIP]
-> **For Podman users**: No alias is required for `make docker-*` commands.
-> The Makefile auto-detects your runtime and uses `podman-compose` or `docker-compose` accordingly.
->
-> However, if you want to run `docker` commands manually, you can set an alias:
->
-```bash
-alias docker=podman
-alias docker-compose=podman-compose
+| Need | Built-in Answer |
+| :--- | :--- |
+| One code path for IQA and VQA | Tensor dimensionality selects the route: 4D images use ResNet50, 5D videos use Swin-T |
+| Comparable image/video inputs | Both branches use RGB, 224x224, `[0, 1]`, ImageNet mean/std preprocessing |
+| Leakage-safe evaluation | Train/val/test and K-fold splits are group-aware, so the same reference content stays in one split |
+| Bad-data isolation | Missing/corrupted samples are removed before splitting; their labels are backed up under `results/{dataset}/corrupted/labels/` |
+| Training evidence, not just logs | EDA plots, fold training curves, residual plots, comparison plots, and fold summaries are generated after training |
+| Deployment handoff | Successful runs copy the best checkpoint to `deploy/iqa-models/{dataset}_best.pt` or `deploy/vqa-models/{dataset}_best.pt` |
+| Repeatable container runs | Docker/Podman configs mount `.cache` so uv and torchvision pretrained weights can be reused |
+
+```text
+metadata + media
+  -> integrity quarantine
+  -> EDA + MOS normalization
+  -> group-aware train/val/test split
+  -> group-aware K-fold training with ImageNet preprocessing on decode
+  -> plots + best checkpoint
+  -> deploy/{iqa-models|vqa-models}/{dataset}_best.pt
 ```
 
 ---
@@ -58,22 +60,19 @@ alias docker-compose=podman-compose
 
 ## Architecture & Design Decisions <a id="architecture-decisions"></a>
 
-### Unified IQA/VQA Architecture
+### Design Contracts
 
-The framework implements a dimension-aware routing system that automatically switches between image (4D tensors) and video (5D tensors) processing modes.
+The framework treats IQA/VQA training as a set of explicit contracts instead of a loose script chain.
 
-**Key Design Decisions:**
-
-| Decision | Implementation | Rationale |
-| :--- | :--- | :--- |
-| **Unified Model** | A single `IQAVQANet` handling both 4D and 5D inputs | Eliminates code duplication; ensures consistency in quality metrics |
-| **Flexible Backbone** | Swin-T / ResNet50 with automatic feature adaptation | Balances accuracy against GPU memory consumption |
-| **Temporal Fusion** | Transformer encoder for video frame aggregation | Captures long-range dependencies between frames |
-| **Task-Aware Loss** | MSE + Rank + PLCC, reweighted based on `task_type` | Simultaneously optimizes absolute prediction and relative ranking |
-| **Multi-dataset Support** | YAML-based configuration and Factory pattern | Allows easy addition of new datasets without code modification |
-| **Config & Path Management** | Pydantic-based `Config.paths` and typed methods | Single source of truth; eliminates hard-coding; enables dataset-isolated storage |
-| **File Index Resolution** | `CaseInsensitiveAssetResolver` pre-builds a case-insensitive index | Reduces O(n) directory traversal to O(1) memory lookup; resolves parsing failures caused by filename case inconsistencies |
-| **Model Serving** | FastAPI + secure loading via `weights_only=True` | Decouples training from inference; provides standardized HTTP interfaces; ensures secure model loading |
+| Contract | Implementation |
+| :--- | :--- |
+| **Modality routing** | 4D tensors are image batches, 5D tensors are video batches; invalid channel layouts fail early |
+| **Backbone policy** | Images use ResNet50 ImageNet features with BN; videos use Swin-T ImageNet features with LN and temporal fusion |
+| **Preprocessing** | Images and sampled video frames share RGB, 224x224, `[0, 1]`, ImageNet mean/std normalization |
+| **Data rejection** | Missing/corrupted media is removed before EDA and splitting; labels are backed up instead of rewritten to zero |
+| **Split isolation** | Train/val/test and K-fold splits are group-aware to keep repeated reference content in one partition |
+| **Artifacts** | Outputs use lowercase dataset keys under `results/{dataset}/`; successful runs publish `{dataset}_best.pt` into `deploy/` |
+| **Runtime config** | Training and serving both use typed Pydantic configuration rather than scattered path constants |
 
 ---
 
@@ -81,27 +80,45 @@ The framework implements a dimension-aware routing system that automatically swi
 
 ### IQAVQANet: Unified Quality Assessment Network
 
-```python
-# Architecture overview
-Input (4D: [B,3,H,W] or 5D: [B,F,3,H,W])
-    ↓
-Backbone (Swin-T / ResNet50)
-    ↓
-Spatial Pooling (AdaptiveAvgPool2d)
-    ↓
-[Temporal Fusion] ← TransformerEncoder (only for video)
-    ↓
-Quality Head (3-layer MLP + Sigmoid)
-    ↓
-Output: Quality Score (0-1 range)
+```text
+# Data preprocessing + IQAVQANet / ImageNet pretrained-backbone adaptation
+
+Image media
+  -> RGB decode
+  -> resize to 224x224
+  -> scale pixels to [0, 1]
+  -> ImageNet mean/std normalization
+  -> model input [B, 3, 224, 224], routed to the IQA branch as 4D
+  -> ResNet50(IMAGENET1K_V1): conv1 + bn1 + layer1..4
+  -> AdaptiveAvgPool2d
+  -> image features [B, 2048]
+  -> quality head
+  -> quality score [B]
+
+Video media
+  -> sample/pad frames to num_frames
+  -> per-frame RGB decode
+  -> resize to 224x224
+  -> scale pixels to [0, 1]
+  -> ImageNet mean/std normalization
+  -> model input [B, F, 3, 224, 224], routed to the VQA branch as 5D
+  -> reshape to [B*F, 3, 224, 224] for frame-wise feature extraction
+  -> Swin-T(IMAGENET1K_V1): patch embedding + shifted-window stages + final LayerNorm
+  -> spatial pooling to frame features [B, F, 768]
+  -> positional embedding + TransformerEncoder temporal fusion
+  -> temporal average
+  -> quality head
+  -> quality score [B]
 ```
 
 ### Supported Configurations
 
-| Backbone | Parameters | IQA | VQA | Memory (per sample) |
-| :--- | :--- | :--- | :--- | :--- |
-| **ResNet50** | 25M | ✅ | ✅ | ~2GB (8 frames) |
-| **Swin-T** | 28M | ✅ | ✅ | ~4GB (8 frames) |
+| Input | Tensor Shape | Backbone | Normalization |
+| :--- | :--- | :--- | :--- |
+| Image | `[B, 3, H, W]` | ResNet50 ImageNet backbone (`BatchNorm2d`) | RGB, 224x224, `[0, 1]`, ImageNet mean/std |
+| Video | `[B, F, 3, H, W]` | Swin-T ImageNet backbone (`LayerNorm`) + Transformer temporal fusion | RGB frames, 224x224, `[0, 1]`, ImageNet mean/std |
+
+The model no longer keeps legacy Swin compatibility shims. Checkpoints should be produced by the current `IQAVQANet` implementation.
 
 ### Loss Function: Task-Aware Hybrid Loss
 
@@ -154,6 +171,12 @@ uv run python -m src.main --model timeswin_vqa --dataset konvid-1k
 uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
 ```
 
+The training entry point runs the pipeline in this order:
+
+```text
+integrity check -> EDA/statistics -> group-aware train/val/test split -> group-aware K-fold training with ImageNet preprocessing -> plots -> checkpoint deployment
+```
+
 *Note: By default, DEBUG=0 is applied in make commands. You can override it by appending DEBUG=1 if needed.*
 
 > [!NOTE]
@@ -161,6 +184,9 @@ uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
 
 > [!NOTE]
 > `scripts/setup_env.sh` also installs and verifies `hatchling`, so `deploy/` can be built from `pyproject.toml` without extra manual setup.
+
+> [!WARNING]
+> `--skip_integrity` skips media decoding checks and is intended only for fast debugging. Normal training should keep integrity checks enabled so corrupted/missing samples cannot enter cross-validation.
 
 ### Advanced Options
 
@@ -197,13 +223,19 @@ You can extend the framework capabilities using the following training and debug
 
 The framework automatically generates:
 
+- **EDA Distribution**: MOS histogram and boxplot
+
 - **Training History**: Loss curves, PLCC/SROCC progression
 
 - **Residual Analysis**: Scatter plots, error distribution
 
-- **Cross-Model Comparison**: Bar charts for multiple models
+- **Fold Summary**: Per-fold PLCC/SROCC/RMSE/R² summary and stability views
+
+- **Cross-Model/Fold Comparison**: Bar charts generated from available fold histories
 
 Output location: `results/{dataset}/plots/`
+
+EDA plots are saved under `results/{dataset}/eda/`. All `{dataset}` output folders use the lowercase dataset registry key, for example `results/tid2013/` and `results/konvid-1k/`.
 
 ---
 
@@ -221,11 +253,15 @@ deploy/
 ├── iqa-models/
 │   └── tid2013_best.pt   # Default IQA checkpoint (resnet_iqa, trained on TID2013)
 └── vqa-models/
-    └── konvid_best.pt    # Default VQA checkpoint (timeswin_vqa, trained on KoNViD-1k)
+    └── konvid-1k_best.pt # Default VQA checkpoint (timeswin_vqa, trained on KoNViD-1k)
 ```
 
-> [!WARNING]
-> Checkpoint paths are resolved relative to `api.py`'s own location (`Path(__file__).resolve().parent / "iqa-models" / ...`), so `.pt` files must sit in `deploy/iqa-models/` and `deploy/vqa-models/` — not in `results/model_outputs/`.
+After a successful training run, the best checkpoint for the current run is copied automatically:
+
+```text
+IQA -> deploy/iqa-models/{dataset}_best.pt
+VQA -> deploy/vqa-models/{dataset}_best.pt
+```
 
 ### Starting the Service
 
@@ -302,8 +338,9 @@ deep-vqa-framework/
 |   ├── {dataset}/
 │   │   ├── train_logs/           # Training history, CSV logs
 │   │   ├── plots/                # Loss curves, residual plots
+│   │   ├── eda/                  # Dataset analysis plots
 │   │   ├── model_outputs/        # Checkpoints (.pt files)
-│   │   └── corrupted/            # Corrupted files from integrity check
+│   │   └── corrupted/            # Quarantined corrupt media + rejected label backups
 │   └── scripts_logs/             # Shell script logs (setup, data, etc.)
 |
 ├── docker/                   # Container configuration
@@ -332,8 +369,8 @@ deep-vqa-framework/
 └── src/                       # Core framework logic
     ├── main.py                   # Global execution entry point
     ├── core/                        # Training engine & evaluation pipeline
-    ├── data/                        # Data loaders, EDA & integrity analysis
-    ├── models/                      # Architecture definitions (IQAVQA-Net)
+    ├── data/                        # Data loaders, preprocessing, EDA & integrity analysis
+    ├── models/                      # Backbones, heads, losses, metrics, and IQAVQANet
     ├── utils/                        # Configuration, logging & path management
     └── config/                     # Pydantic config system (code)
 ```
@@ -380,9 +417,25 @@ make docker-manage
 | Component | Description |
 | :--- | :--- |
 | `Dockerfile` | Multi-stage builds: `base` (shared deps), `train` (training), `prod` (inference) |
-| `docker-compose.yaml` | Main compose configuration with json-file log rotation (`max-size`, `max-file`) |
-| `docker-compose.docker.yaml` | Docker-specific GPU support (`runtime: nvidia` + `environment` ) |
-| `docker-compose.podman.yaml` | Podman-specific GPU support (`security_opt` + `devices`) |
+| `docker-compose.yaml` | Main compose configuration with json-file log rotation and `.cache` mounts |
+| `docker-compose.docker.yaml` | Docker-specific GPU support plus host-network builds |
+| `docker-compose.podman.yaml` | Podman-specific GPU support plus host-network builds |
+
+The Makefile auto-detects Docker vs Podman. For Podman users, `make docker-*` does not require `alias docker=podman`; aliases are only useful if you run container commands manually.
+
+Dataset scripts detect `http_proxy`/`HTTP_PROXY`. On AutoDL cloud GPU instances, enable the platform proxy before downloading datasets:
+
+```bash
+source /etc/network_turbo
+```
+
+Torch/uv caches are mounted at `/app/.cache` in containers. Runtime services set `XDG_CACHE_HOME=/app/.cache`, `TORCH_HOME=/app/.cache/torch`, and `UV_CACHE_DIR=/app/.cache/uv`, so previously downloaded torchvision backbones can be reused.
+
+If your host proxy is bound to `127.0.0.1`, remember that service `network_mode: host` applies to running containers, while image build steps need build networking. The compose overlays set `build.network: host`; to pass proxy variables into the Dockerfile build, run:
+
+```bash
+make docker-train BUILD_ARGS='--build-arg USE_BUILD_PROXY=true'
+```
 
 ---
 
@@ -466,7 +519,7 @@ Decord is pre-configured as the default backend. If Decord is not available, the
 - Or add a cleanup step to `scripts/cache_clean.sh`
 
 > [!TIP]
-> These files are corrupted media files isolated during integrity checks — safe to delete if you don't need them for debugging.
+> `results/{dataset}/corrupted/labels/` stores CSV/JSONL backups for missing or corrupted labels. Repeated `sample_id` values are reported as `repeated_sample_ids` and kept, because IQA/VQA datasets may legitimately contain multiple distorted samples or labels for the same content.
 
 ### Training Hangs With No Error (Background Runs)
 
@@ -499,7 +552,7 @@ The framework includes security tools to audit dependencies:
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.6.2
+- **Version**: 0.6.4
 
 
 ---

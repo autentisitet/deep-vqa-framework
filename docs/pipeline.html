@@ -7,7 +7,17 @@
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
         import svgPanZoom from 'https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/+esm';
 
-        mermaid.initialize({ startOnLoad: false, theme: 'default' });
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'base',
+            themeVariables: {
+                fontFamily: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                primaryColor: '#eef4ff',
+                primaryBorderColor: '#3367d6',
+                lineColor: '#334155',
+                textColor: '#111827'
+            }
+        });
 
         window.onload = async () => {
             await mermaid.run();
@@ -27,11 +37,53 @@
         };
     </script>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #f4f4f9; overflow: hidden; }
-        .mermaid { width: 100vw; height: 100vh; }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #f8fafc;
+            overflow: hidden;
+            font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        .topbar {
+            position: fixed;
+            z-index: 10;
+            top: 16px;
+            left: 16px;
+            right: 16px;
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 12px 16px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
+            color: #0f172a;
+            pointer-events: none;
+        }
+        .title {
+            font-weight: 700;
+            font-size: 15px;
+        }
+        .subtitle {
+            color: #475569;
+            font-size: 13px;
+        }
+        .mermaid {
+            width: 100vw;
+            height: 100vh;
+            padding-top: 64px;
+            box-sizing: border-box;
+        }
     </style>
 </head>
 <body>
+    <div class="topbar">
+        <div class="title">Deep-VQA-Framework Pipeline v0.6.4</div>
+        <div class="subtitle">Integrity first · ImageNet adaptation · group-aware CV · automatic checkpoint deployment</div>
+    </div>
     <div class="mermaid">
     graph TD
         classDef transitionLink stroke:#d32f2f,stroke-width:5px,stroke-dasharray:5;
@@ -53,7 +105,7 @@
         end
 
         subgraph STAGE_3 [3. 基础工具层]
-            M --> LG[logging_utils.py<br/>log_prepare]
+            M --> LG[logging_utils.py<br/>log_prepare + deploy decorator]
             M --> CF[src/config/schemas.py<br/>Config + PathsConfig]
             CF -->|"cfg.paths.xxx_dir()"| M
         end
@@ -61,9 +113,11 @@
         subgraph STAGE_4 [4. 数据处理层]
             M --> DE[data_eda.py<br/>DataEDA]
             DE --> MF[dataset_loaders.py] --> ML[metadata_loaders.py<br/>Tid2013/Konvid/T2Vqa Loader]
-            DE --> INT[eda/integrity.py<br/>黑白帧·跳帧·损坏检测]
-            DE --> SPL[eda/split.py<br/>分层K折切分]
-            DE --> STA[eda/statistics.py]
+            DE --> INT[eda/integrity.py<br/>缺失·损坏·黑白帧·跳帧检测]
+            INT --> BAD[(results/{dataset}/corrupted/<br/>隔离坏文件 + 标签备份)]
+            DE --> STA[eda/statistics.py<br/>EDA + MOS统计]
+            DE --> PP[preprocessing.py<br/>RGB·224·ImageNet mean/std]
+            DE --> SPL[eda/split.py<br/>Group train/val/test + Group K-fold]
             DE --> FL[file_loader.py<br/>CaseInsensitiveAssetResolver]
             DE --> TY[dataset_types.py]
             DE --> DF[(处理后的 DataFrame<br/>+ MOS归一化统计)]
@@ -71,21 +125,29 @@
 
         subgraph STAGE_5 [5. 核心执行 - 训练层]
             DF --> TR[trainer.py]
+            PP --> TR
             TR -->|"注入 evaluator 实例"| E[engine.py<br/>TrainerEngine]
-            E --> N{iqavqa_net.py<br/>IQAVQANet + IQAVQALoss}
+            E --> N{iqavqa_model.py<br/>IQAVQANet<br/>按输入维度路由}
+            N -->|"4D tensor Bx3x224x224"| IQA[Image branch<br/>ResNet50 IMAGENET1K_V1<br/>BatchNorm2d + AdaptiveAvgPool2d<br/>feature Bx2048]
+            N -->|"5D tensor BxFx3x224x224"| VQA[Video branch<br/>Swin-T IMAGENET1K_V1<br/>LayerNorm + spatial pooling<br/>frame feature BxFx768]
+            VQA --> TF[Temporal fusion<br/>positional embedding<br/>TransformerEncoder + temporal average]
+            IQA --> HD[heads.py<br/>Quality head<br/>3-layer MLP + Sigmoid]
+            TF --> HD
+            N --> BB[backbones.py<br/>torchvision cache + hash recovery]
+            E --> L{losses.py<br/>IQAVQALoss}
             TR --> EV[evaluator.py<br/>Evaluator]
             EV --> MP[metrics_plotter.py]
-            MP --> TR
         end
 
         subgraph STAGE_6 [6. 成果归档 - 存储层]
-            TR --> F[(best_model.pt<br/>results/{dataset}/model_outputs/)]
+            TR --> F[(best checkpoints<br/>results/{dataset}/model_outputs/)]
+            MP --> PLOTS[(EDA + training + residual + fold summary<br/>results/{dataset}/plots/)]
             TR --> AR[archive_results.sh]
             AR --> LOG[(Log + Config + Plots + Weights<br/>results/{dataset}/)]
         end
 
         subgraph STAGE_7 [7. 推理部署 - 交付层]
-            F -.手动拷贝.-> BM[(deploy/iqa-models/<br/>deploy/vqa-models/)]
+            F -->|"训练成功后自动复制<br/>{dataset}_best.pt"| BM[(deploy/iqa-models/<br/>deploy/vqa-models/)]
             BM --> CORE[deploy/core/*.py<br/>Pydantic runtime config + preprocessing + loading + inference]
             CORE --> API[deploy/api.py<br/>FastAPI /evaluate /health]
             CORE --> CLI[deploy/cli.py<br/>Batch inference CLI]

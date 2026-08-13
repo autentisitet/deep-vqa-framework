@@ -1,38 +1,40 @@
 # deep-vqa-framework
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.12+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.6.2-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.6.4-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
 **🌐 [English](README.md) | [简体中文](README_zh.md)**
 
-**一个用于图像质量评估 (IQA) 和视频质量评估 (VQA) 的统一深度学习框架。**
+**一个从研究训练走到推理部署的图像/视频质量评估框架。**
 
-该框架为质量评估模型的训练、评估和部署提供了一站式解决方案。它采用统一架构，能够无缝处理图像和视频输入，并支持多数据集、交叉验证流程以及生产级推理 API。
+Deep-VQA-Framework 是面向生产交付的 IQA/VQA 质量评估框架，覆盖数据审计、训练评估、结果可视化、checkpoint 发布和推理服务化。
+它在数据侧先隔离坏样本并备份标签，再按参考内容分组避免失真版本跨 split 泄漏；在模型侧根据 4D/5D 张量自动选择 ResNet50 或 Swin-T 的 ImageNet 特征路径，训练完成后产出可直接进入 `deploy/` 推理链路的 `{dataset}_best.pt`。
 
-> [!NOTE]
-> 该框架同时支持 Docker 和 Podman 容器运行时。
-> 在下载数据集时，脚本会自动检测 `http_proxy` 或 `HTTP_PROXY` 环境变量。
->
-> 在 AutoDL 云 GPU 实例上，您可以通过以下方式启用代理：
->
-```bash
-source /etc/network_turbo
-```
+### 核心亮点
 
-> [!TIP]
-> **对于 Podman 用户**：运行 `make docker-*` 命令时无需设置别名。
-> Makefile 会自动检测您的运行时环境，并相应地使用 `podman-compose` 或 `docker-compose`。
->
-> 不过，如果您希望手动运行 `docker` 命令，可以设置别名：
->
-```bash
-alias docker=podman
-alias docker-compose=podman-compose
+| 需求 | 内置处理 |
+| :--- | :--- |
+| IQA/VQA 共用入口 | 根据张量维度路由：4D 图像走 ResNet50，5D 视频走 Swin-T |
+| 图像/视频输入可比 | 两条分支统一 RGB、224x224、`[0, 1]`、ImageNet mean/std 预处理 |
+| 防止评估泄漏 | train/val/test 和 K 折都使用分组划分，同一参考内容只会出现在一个 split |
+| 坏数据隔离 | 缺失/损坏样本在划分前剔除，对应标签备份到 `results/{dataset}/corrupted/labels/` |
+| 不只保存日志 | 自动生成 EDA 图、fold 训练曲线、残差图、对比图和 fold summary |
+| 部署交付闭环 | 成功训练后复制最佳 checkpoint 到 `deploy/iqa-models/{dataset}_best.pt` 或 `deploy/vqa-models/{dataset}_best.pt` |
+| 容器重复运行友好 | Docker/Podman 挂载 `.cache`，复用 uv 缓存和 torchvision 预训练权重 |
+
+```text
+metadata + media
+  -> 完整性检查与坏数据隔离
+  -> EDA + MOS 归一化
+  -> 分组 train/val/test 划分
+  -> 解码时应用 ImageNet 预处理的分组 K 折训练
+  -> 训练图表 + 最佳 checkpoint
+  -> deploy/{iqa-models|vqa-models}/{dataset}_best.pt
 ```
 
 ---
@@ -58,22 +60,19 @@ alias docker-compose=podman-compose
 
 ## 架构与设计决策 <a id="architecture-decisions"></a>
 
-### 统一的 IQA/VQA 架构
+### 设计约束
 
-该框架实现了一个维度感知路由系统，可在图像（4D 张量）和视频（5D 张量）处理模式之间自动切换。
+这个项目把 IQA/VQA 训练流程拆成明确约束，而不是松散脚本串联。
 
-**关键设计决策：**
-
-| 决策 | 实现方式 | 理由 |
-| :--- | :--- | :--- |
-| **统一模型** | 单个 `IQAVQANet` 同时处理 4D 和 5D 输入 | 消除重复代码，确保质量指标的一致性 |
-| **灵活的主干网络** | Swin-T / ResNet50 配合自动特征适配 | 平衡准确率与显存消耗 |
-| **时序融合** | Transformer 编码器进行视频帧聚合 | 捕捉帧间的长距离依赖关系 |
-| **任务感知损失** | MSE + Rank + PLCC，根据 `task_type` 重新加权 | 同时优化绝对预测和相对排序 |
-| **多数据集支持** | 基于 YAML 的配置与工厂模式 | 无需修改代码即可轻松添加新数据集 |
-| **配置与路径管理** | 基于 Pydantic 的 `Config.paths` 及类型化方法 | 单一数据源，消除硬编码，按数据集隔离存储 |
-| **文件索引解析** | `CaseInsensitiveAssetResolver` 预构建文件索引，支持大小写不敏感 | 将 O(n) 目录遍历降为 O(1) 内存查询，解决文件名大小写不一致导致的解析失败问题 |
-| **模型服务化** | FastAPI + `weights_only=True` 安全加载 | 解耦训练与推理，提供标准化 HTTP 接口，保障加载安全 |
+| 约束 | 实现方式 |
+| :--- | :--- |
+| **模态路由** | 4D 张量视为图像 batch，5D 张量视为视频 batch；通道布局不合法会提前失败 |
+| **Backbone 策略** | 图像使用 ResNet50 ImageNet 特征和 BN；视频使用 Swin-T ImageNet 特征、LN 与时序融合 |
+| **预处理** | 图像和采样视频帧共享 RGB、224x224、`[0, 1]`、ImageNet mean/std 归一化 |
+| **数据剔除** | 缺失/损坏媒体在 EDA 和划分前剔除；标签备份，不会改写成 0 分 |
+| **划分隔离** | train/val/test 和 K 折都做分组划分，同一参考内容只进入一个分区 |
+| **产物路径** | 输出使用小写数据集 key 放在 `results/{dataset}/`；成功训练后发布 `{dataset}_best.pt` 到 `deploy/` |
+| **运行配置** | 训练和推理共用 Pydantic 类型化配置，不再散落硬编码路径 |
 
 ---
 
@@ -81,27 +80,45 @@ alias docker-compose=podman-compose
 
 ### IQAVQANet：统一质量评估网络
 
-```python
-# 架构概览
-输入 (4D: [B,3,H,W] 或 5D: [B,F,3,H,W])
-↓
-骨干网络 (Swin-T / ResNet50)
-↓
-空间池化 (AdaptiveAvgPool2d)
-↓
-[时序融合] ← TransformerEncoder (仅限视频)
-↓
-质量预测头 (3层 MLP + Sigmoid)
-↓
-输出：质量分数 (范围 0-1)
+```text
+# 数据预处理 + IQAVQANet / ImageNet 预训练 backbone 适配
+
+图像媒体
+  -> RGB 解码
+  -> resize 到 224x224
+  -> 像素缩放到 [0, 1]
+  -> ImageNet mean/std 归一化
+  -> 模型输入 [B, 3, 224, 224]，按 4D 路由到 IQA 分支
+  -> ResNet50(IMAGENET1K_V1): conv1 + bn1 + layer1..4
+  -> AdaptiveAvgPool2d
+  -> 图像特征 [B, 2048]
+  -> 质量预测头
+  -> 质量分数 [B]
+
+视频媒体
+  -> 帧采样/补齐到 num_frames
+  -> 逐帧 RGB 解码
+  -> resize 到 224x224
+  -> 像素缩放到 [0, 1]
+  -> ImageNet mean/std 归一化
+  -> 模型输入 [B, F, 3, 224, 224]，按 5D 路由到 VQA 分支
+  -> reshape 为 [B*F, 3, 224, 224] 后逐帧抽特征
+  -> Swin-T(IMAGENET1K_V1): patch embedding + shifted-window stages + final LayerNorm
+  -> 空间池化得到帧特征 [B, F, 768]
+  -> 位置编码 + TransformerEncoder 时序融合
+  -> 时序平均
+  -> 质量预测头
+  -> 质量分数 [B]
 ```
 
 ### 支持的配置
 
-| 骨干网络 | 参数量 | IQA | VQA | 显存占用 (单样本) |
-| :--- | :--- | :--- | :--- | :--- |
-| **ResNet50** | 25M | ✅ | ✅ | ~2GB (8 帧) |
-| **Swin-T** | 28M | ✅ | ✅ | ~4GB (8 帧) |
+| 输入 | 张量形状 | 主干网络 | 归一化 |
+| :--- | :--- | :--- | :--- |
+| 图像 | `[B, 3, H, W]` | ResNet50 ImageNet backbone (`BatchNorm2d`) | RGB、224x224、`[0, 1]`、ImageNet mean/std |
+| 视频 | `[B, F, 3, H, W]` | Swin-T ImageNet backbone (`LayerNorm`) + Transformer 时序融合 | RGB 帧、224x224、`[0, 1]`、ImageNet mean/std |
+
+当前模型不再保留旧 Swin 兼容 shim。检查点应由当前 `IQAVQANet` 实现生成。
 
 ### 损失函数：任务感知混合损失
 
@@ -114,8 +131,9 @@ alias docker-compose=podman-compose
 | 任务 | MSE | Rank | PLCC |
 | :--- | :-- | :--- | :--- |
 | IQA (`resnet_iqa`) | 0.7 | 0.3 | 0.0 |
-| VQA (`timeswin_vqa`) | 0.4 | 0.3 | 0.3 | - **MSE 损失 (MSE Loss)**：绝对预测准确度
+| VQA (`timeswin_vqa`) | 0.4 | 0.3 | 0.3 |
 
+- **MSE 损失 (MSE Loss)**：绝对预测准确度
 - **排序损失 (Rank Loss)**：成对排序一致性（采用采样策略，限制最大配对数为 `max_pairs`）
 - **PLCC 损失 (PLCC Loss)**：`1 − Pearson 相关系数`；在 VQA 任务中引入该项，旨在直接优化与人类 MOS（平均主观评分）的线性对齐程度
 
@@ -153,6 +171,12 @@ uv run python -m src.main --model timeswin_vqa --dataset konvid-1k
 uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
 ```
 
+训练入口按以下顺序执行：
+
+```text
+完整性检查 -> EDA/统计分析 -> 分组 train/val/test 划分 -> 解码时应用 ImageNet 预处理的分组 K 折训练 -> 训练图表 -> 检查点部署
+```
+
 *注意：默认情况下，`make` 命令使用 `DEBUG=0`。如有需要，可通过追加 `DEBUG=1` 来覆盖此设置。*
 
 > [!NOTE]
@@ -160,6 +184,9 @@ uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
 
 > [!NOTE]
 > `scripts/setup_env.sh` 现在会安装并验证 `hatchling`，因此 `deploy/` 可以直接通过 `pyproject.toml` 完成构建，无需额外手动配置。
+
+> [!WARNING]
+> `--skip_integrity` 只建议用于快速调试。正常训练应保留完整性检查，避免缺失或损坏样本进入交叉验证。
 
 ### 进阶选项
 
@@ -196,13 +223,19 @@ uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
 
 该框架会自动生成：
 
+- **EDA 分布图**：MOS 直方图与箱线图
+
 - **训练历史**：损失曲线、PLCC/SROCC 变化趋势
 
 - **残差分析**：散点图、误差分布
 
-- **跨模型比较**：多模型对比柱状图
+- **Fold 汇总**：每折 PLCC/SROCC/RMSE/R² 汇总与稳定性视图
+
+- **跨模型/跨折比较**：基于已有 fold history 生成对比柱状图
 
 输出路径：`results/{dataset}/plots/`
+
+EDA 图表保存在 `results/{dataset}/eda/`。所有 `{dataset}` 输出目录统一使用数据集注册表中的小写 key，例如 `results/tid2013/` 和 `results/konvid-1k/`。
 
 ---
 
@@ -220,11 +253,15 @@ deploy/
 ├── iqa-models/
 │   └── tid2013_best.pt   # 默认 IQA 检查点 (resnet_iqa，基于 TID2013 训练)
 └── vqa-models/
-    └── konvid_best.pt    # 默认 VQA 检查点 (timeswin_vqa，基于 KoNViD-1k 训练)
+    └── konvid-1k_best.pt # 默认 VQA 检查点 (timeswin_vqa，基于 KoNViD-1k 训练)
 ```
 
-> [!WARNING]
-> 检查点路径是相对于 `api.py` 所在位置解析的（即 `Path(__file__).resolve().parent / "iqa-models" / ...`），因此 `.pt` 文件必须放置在 `deploy/iqa-models/` 和 `deploy/vqa-models/` 目录下，而不能放在 `results/model_outputs/` 中。
+训练成功后，当前 run 中表现最好的检查点会自动复制到部署目录：
+
+```text
+IQA -> deploy/iqa-models/{dataset}_best.pt
+VQA -> deploy/vqa-models/{dataset}_best.pt
+```
 
 ### 启动服务
 
@@ -301,8 +338,9 @@ deep-vqa-framework/
 |   ├── {dataset}/
 │   │   ├── train_logs/           # 训练历史记录、CSV 日志
 │   │   ├── plots/                # 损失曲线、残差图
+│   │   ├── eda/                  # 数据集分析图表
 │   │   ├── model_outputs/        # .pt 文件
-│   │   └── corrupted/            # 发现损坏后，挪用在此存储的原始数据文件
+│   │   └── corrupted/            # 隔离的损坏媒体文件与被拒绝标签备份
 │   └── scripts_logs/             # Shell 脚本日志 (setup, data, etc.)
 |
 ├── docker/                   # 容器配置
@@ -331,45 +369,11 @@ deep-vqa-framework/
 └── src/                       # 核心框架逻辑
     ├── main.py                   # 全局执行入口
     ├── core/                        # 训练引擎与评估流程
-    ├── data/                        # 数据加载器、EDA（探索性数据分析）与完整性分析
-    ├── models/                      # 模型架构定义 (IQAVQA-Net)
+    ├── data/                        # 数据加载器、预处理、EDA（探索性数据分析）与完整性分析
+    ├── models/                      # Backbones、heads、losses、metrics 与 IQAVQANet
     ├── utils/                        # 配置、日志记录与路径管理
     └── config/                     # Pydantic 配置系统（代码实现）
 ```
-
----
-
-## Docker / Podman 支持 <a id="docker-support"></a>
-
-该框架支持使用 Docker 和 Podman 进行容器化开发与部署。
-
-### Docker 开发部署方法
-
-```bash
-# 构建并进入开发容器
-make docker-dev
-
-# 在容器内运行训练
-make docker-train
-
-# 启动推理 API 服务
-make docker-infer
-
-# 停止所有容器
-make docker-stop
-
-# 检查容器环境
-make docker-manage
-```
-
-### 容器配置
-
-| 组件 | 描述 |
-| :--- | :--- |
-| `Dockerfile` | 多阶段构建：`base`（共享依赖）、`train`（训练）、`prod`（推理） |
-| `docker-compose.yaml` | 主 Compose 配置文件 |
-| `docker-compose.docker.yaml` | Docker 专用 GPU 支持（`runtime: nvidia` + `environment`） |
-| `docker-compose.podman.yaml` | Podman 专用 GPU 支持（`security_opt` + `devices`） |
 
 ---
 
@@ -413,9 +417,25 @@ make docker-manage
 | 组件 | 描述 |
 | :--- | :--- |
 | `Dockerfile` | 多阶段构建：`base`（共享依赖）、`train`（训练）、`prod`（推理） |
-| `docker-compose.yaml` | 主 Compose 配置文件，并启用 `json-file` 日志轮转（`max-size` / `max-file`） |
-| `docker-compose.docker.yaml` | Docker 专用 GPU 支持（`runtime: nvidia` + `environment`） |
-| `docker-compose.podman.yaml` | Podman 专用 GPU 支持（`security_opt` + `devices`） |
+| `docker-compose.yaml` | 主 Compose 配置文件，启用 `json-file` 日志轮转并挂载 `.cache` |
+| `docker-compose.docker.yaml` | Docker 专用 GPU 支持，并为构建阶段启用 host 网络 |
+| `docker-compose.podman.yaml` | Podman 专用 GPU 支持，并为构建阶段启用 host 网络 |
+
+Makefile 会自动识别 Docker 或 Podman。Podman 用户直接运行 `make docker-*` 即可，不需要设置 `alias docker=podman`；只有手动运行容器命令时才可能需要 alias。
+
+数据集脚本会检测 `http_proxy`/`HTTP_PROXY`。在 AutoDL 云 GPU 实例上，下载数据集前可以先启用平台代理：
+
+```bash
+source /etc/network_turbo
+```
+
+容器内的 torch/uv 缓存挂载到 `/app/.cache`。运行服务会设置 `XDG_CACHE_HOME=/app/.cache`、`TORCH_HOME=/app/.cache/torch` 和 `UV_CACHE_DIR=/app/.cache/uv`，因此已下载的 torchvision backbone 可以复用。
+
+如果宿主机代理绑定在 `127.0.0.1`，需要区分运行阶段和构建阶段：服务的 `network_mode: host` 只作用于运行容器，Dockerfile 的 `RUN` 步骤需要 build network。compose overlay 已设置 `build.network: host`；若要将代理变量传入 Dockerfile 构建，运行：
+
+```bash
+make docker-train BUILD_ARGS='--build-arg USE_BUILD_PROXY=true'
+```
 
 ---
 
@@ -499,7 +519,7 @@ Decord 已预配置为默认后端。如果 Decord 不可用，框架会自动�
 - 或在 `scripts/cache_clean.sh` 中添加清理步骤
 
 > [!TIP]
-> 这些文件是在完整性检查期间隔离出的损坏媒体文件——如果不需要用于调试，可以安全删除。
+> `results/{dataset}/corrupted/labels/` 会保存缺失或损坏样本对应标签的 CSV/JSONL 备份。重复的 `sample_id` 会作为 `repeated_sample_ids` 报告并保留，因为 IQA/VQA 数据集中同一内容可能合法对应多个失真样本或多个标签。
 
 ### 训练无报错挂起（后台运行）
 
@@ -530,7 +550,7 @@ Decord 已预配置为默认后端。如果 Decord 不可用，框架会自动�
 
 - **框架**: [MIT](LICENSE)
 - **作者**: [@autentisitet](https://github.com/autentisitet)
-- **版本**: 0.6.2
+- **版本**: 0.6.4
 
 ---
 
