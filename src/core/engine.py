@@ -10,11 +10,30 @@ import numpy as np
 import torch
 import torch.nn as nn
 from loguru import logger
-from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.config.schemas import Config
+
+try:
+    from torch.amp import GradScaler as AmpGradScaler
+    from torch.amp import autocast as amp_autocast
+
+    def make_grad_scaler(device_type: str, enabled: bool) -> AmpGradScaler:
+        return AmpGradScaler(device_type, enabled=enabled)
+
+    def autocast_context(device_type: str, enabled: bool):
+        return amp_autocast(device_type=device_type, enabled=enabled)
+
+except ImportError:
+    from torch.cuda.amp import GradScaler as AmpGradScaler
+    from torch.cuda.amp import autocast as amp_autocast
+
+    def make_grad_scaler(device_type: str, enabled: bool) -> AmpGradScaler:
+        return AmpGradScaler(enabled=enabled)
+
+    def autocast_context(device_type: str, enabled: bool):
+        return amp_autocast(enabled=enabled)
 
 
 class TrainerEngine:
@@ -54,7 +73,7 @@ class TrainerEngine:
         self.gradient_accumulation_steps = train_cfg.gradient_accumulation_steps
 
         self.use_amp = cfg.system.amp
-        self.scaler = GradScaler(enabled=self.use_amp)
+        self.scaler = make_grad_scaler(self.device_type, enabled=self.use_amp and self.device_type == "cuda")
 
         # Early stopping
         early_stop_cfg = train_cfg.early_stop
@@ -143,10 +162,10 @@ class TrainerEngine:
             else:
                 inputs, labels = batch_data[0].to(self.device), batch_data[1].to(self.device)
 
-            with autocast(enabled=self.use_amp):
+            with autocast_context(self.device_type, enabled=self.use_amp and self.device_type == "cuda"):
                 outputs = self.model(inputs)
 
-            with autocast(enabled=False):
+            with autocast_context(self.device_type, enabled=False):
                 outputs_f32 = outputs.float()
                 if outputs_f32.ndim > 1 and outputs_f32.size(-1) == 1:
                     outputs_f32 = outputs_f32.squeeze(-1)
@@ -183,7 +202,13 @@ class TrainerEngine:
         return running_loss / len(train_loader)
 
     @torch.no_grad()
-    def evaluate(self, val_loader: DataLoader, epoch: int) -> dict[str, float]:
+    def evaluate(
+        self,
+        val_loader: DataLoader,
+        epoch: int,
+        train_loss: Optional[float] = None,
+        save_manifest: bool = True,
+    ) -> dict[str, float]:
         """Evaluate on validation set."""
         self.model.eval()
         running_loss = 0.0
@@ -202,10 +227,10 @@ class TrainerEngine:
             else:
                 inputs, labels = batch_data[0].to(self.device), batch_data[1].to(self.device)
 
-            with autocast(enabled=self.use_amp):
+            with autocast_context(self.device_type, enabled=self.use_amp and self.device_type == "cuda"):
                 outputs = self.model(inputs)
 
-            with autocast(enabled=False):
+            with autocast_context(self.device_type, enabled=False):
                 outputs_f32 = outputs.float()
                 if outputs_f32.ndim > 1 and outputs_f32.size(-1) == 1:
                     outputs_f32 = outputs_f32.squeeze(-1)
@@ -240,8 +265,10 @@ class TrainerEngine:
             y_true=np.array(all_trues),
             y_pred=np.array(all_preds),
             epoch=epoch,
+            train_loss=train_loss,
             val_loss=val_loss,
             traditional_metrics=traditional_metrics,
+            save_manifest=save_manifest,
         )
 
         return metrics
@@ -258,7 +285,12 @@ class TrainerEngine:
 
         for epoch in range(start_epoch, self.epochs + 1):
             train_loss = self.train_epoch(train_loader, epoch)
-            raw_metrics = self.evaluate(val_loader, epoch)
+            raw_metrics = self.evaluate(
+                val_loader,
+                epoch,
+                train_loss=train_loss,
+                save_manifest=True,
+            )
 
             metrics = {k.lower(): v for k, v in raw_metrics.items()}
             val_loss = raw_metrics.get("val_loss", metrics.get("val_loss", 0.0))
@@ -350,7 +382,8 @@ class TrainerEngine:
     ) -> None:
         """Save model checkpoint."""
 
-        save_dir = self.cfg.paths.model_outputs_dir(self.cfg.dataset.name)
+        dataset_key = self.cfg.dataset.registry_key or self.cfg.dataset.name
+        save_dir = self.cfg.paths.model_outputs_dir(dataset_key)
         save_dir.mkdir(parents=True, exist_ok=True)
 
         train_cfg = self.cfg.train

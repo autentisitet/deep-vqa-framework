@@ -44,9 +44,6 @@ class Evaluator:
 
         self._base_filename = f"{self.current_date}_{self.task_type}_{self.model_name}_{version}"
 
-        self._history_path = self.logs_dir / f"{self._base_filename}_history.csv"
-        self._manifest_path = self.logs_dir / f"{self._base_filename}_manifest.csv"
-
         logger.info(f"Evaluator initialized: {self._base_filename}")
 
     @property
@@ -57,26 +54,28 @@ class Evaluator:
     def base_filename(self, new_name: str):
         """Update base filename and cascade to history/manifest paths."""
         self._base_filename = new_name
-        self._history_path = self.logs_dir / f"{new_name}_history.csv"
-        self._manifest_path = self.logs_dir / f"{new_name}_manifest.csv"
 
     @property
     def history_path(self) -> Path:
-        return self._history_path
+        return self.logs_dir / f"{self._base_filename}_history.csv"
 
     @history_path.setter
     def history_path(self, path: Union[str, Path]):
-        self._history_path = Path(path)
-        self._history_path.parent.mkdir(parents=True, exist_ok=True)
+        path = Path(path)
+        self.logs_dir = path.parent
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self._base_filename = path.stem.removesuffix("_history")
 
     @property
     def manifest_path(self) -> Path:
-        return self._manifest_path
+        return self.logs_dir / f"{self._base_filename}_manifest.csv"
 
     @manifest_path.setter
     def manifest_path(self, path: Union[str, Path]):
-        self._manifest_path = Path(path)
-        self._manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        path = Path(path)
+        self.logs_dir = path.parent
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self._base_filename = path.stem.removesuffix("_manifest")
 
     def execute(
         self,
@@ -190,17 +189,18 @@ class Evaluator:
         other_cols = [c for c in df_new.columns if c not in front_cols]
         df_new = df_new[front_cols + other_cols]
 
-        if self._history_path.exists():
+        history_path = self.history_path
+        if history_path.exists():
             try:
-                df_existing = pd.read_csv(self._history_path)
+                df_existing = pd.read_csv(history_path)
                 df_combined = pd.concat([df_existing, df_new], ignore_index=True)
                 if "epoch" in df_combined.columns:
                     df_combined.drop_duplicates(subset=["epoch"], keep="last", inplace=True)
-                df_combined.to_csv(self._history_path, index=False)
+                df_combined.to_csv(history_path, index=False)
             except Exception as e:
                 logger.error(f"Failed to append history: {e}")
         else:
-            df_new.to_csv(self._history_path, index=False)
+            df_new.to_csv(history_path, index=False)
 
     def _save_manifest(self, y_true: np.ndarray, y_pred: np.ndarray, traditional_metrics: Optional[dict] = None) -> None:
         """Save predictions and optional traditional metrics."""
@@ -214,4 +214,4 @@ class Evaluator:
                 else:
                     logger.debug(f"Metric {metric_name} length mismatch, skipped")
 
-        pd.DataFrame(manifest_data).to_csv(self._manifest_path, index=False)
+        pd.DataFrame(manifest_data).to_csv(self.manifest_path, index=False)

@@ -1,17 +1,27 @@
 # src/core/trainer.py
-import copy
 import gc
-import os
+from functools import wraps
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable
 
 import cv2
 import numpy as np
 import pandas as pd
 import torch
 from loguru import logger
-from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader, Dataset
+
+from src.config.schemas import Config
+from src.core.engine import TrainerEngine
+from src.data.eda.split import (
+    infer_group_labels,
+    make_group_kfold_splits,
+    validate_group_split_isolation,
+)
+from src.data.preprocessing import (
+    rgb_array_to_imagenet_tensor,
+    rgb_video_array_to_imagenet_tensor,
+)
 
 try:
     from decord import VideoReader, cpu
@@ -20,9 +30,23 @@ except ImportError:
     DECORD_AVAILABLE = False
     logger.warning("Decord not available, using OpenCV for video loading.")
 
-from src.config.schemas import Config
-from src.core.engine import TrainerEngine
-from src.models.iqavqa_net import IQAVQALoss, IQAVQANet
+from src.models.iqavqa_model import IQAVQANet
+from src.models.losses import IQAVQALoss
+from src.utils.checkpointing import select_best_checkpoint
+
+
+def release_torch_cache(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Release CUDA/cache resources after a training or evaluation stage."""
+    @wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return func(*args, **kwargs)
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+
+    return wrapper
 
 
 def worker_init_fn(worker_id: int) -> None:
@@ -50,6 +74,8 @@ class ImageVideoDataset(Dataset):
         self.transform = transform
 
         self.num_frames = cfg.model.num_frames
+        self.input_size = cfg.model.input_size
+        self.data_type = cfg.dataset.data_type
 
         self.traditional_cols = [
             c for c in ["ssim", "vif", "dlm", "vmaf", "niqe"]
@@ -68,8 +94,7 @@ class ImageVideoDataset(Dataset):
             target_path = asset.path
             is_video = asset.is_video
         except Exception as e:
-            logger.error(f"Failed to resolve {sample_id}: {e}")
-            return self._empty_payload()
+            raise FileNotFoundError(f"Failed to resolve {sample_id}") from e
 
         try:
             if is_video:
@@ -77,8 +102,7 @@ class ImageVideoDataset(Dataset):
             else:
                 data_tensor = self._read_image(str(target_path))
         except Exception as e:
-            logger.error(f"Failed to read {target_path}: {e}")
-            return self._empty_payload()
+            raise RuntimeError(f"Failed to read {target_path}") from e
 
         label = torch.tensor(row.get("normalized_score", row["mos"]), dtype=torch.float32)
         payload = {"data": data_tensor, "label": label}
@@ -90,12 +114,6 @@ class ImageVideoDataset(Dataset):
             }
 
         return payload
-
-    def _empty_payload(self) -> dict[str, Any]:
-        return {
-            "data": torch.zeros((self.num_frames, 3, 224, 224), dtype=torch.float32),
-            "label": torch.tensor(0.0, dtype=torch.float32),
-        }
 
     def _read_video(self, path: str) -> torch.Tensor:
         """Read video using Decord with OpenCV fallback."""
@@ -113,9 +131,7 @@ class ImageVideoDataset(Dataset):
                 if frames.size == 0:
                     raise ValueError("Empty frames")
 
-                resized = [cv2.resize(f, (224, 224)) for f in frames]
-                video_np = np.stack(resized)
-                tensor = torch.from_numpy(video_np).permute(0, 3, 1, 2).float() / 255.0
+                tensor = rgb_video_array_to_imagenet_tensor(frames, input_size=self.input_size)
 
                 if tensor.size(0) < self.num_frames:
                     pad = tensor[-1].unsqueeze(0).repeat(self.num_frames - tensor.size(0), 1, 1, 1)
@@ -131,24 +147,30 @@ class ImageVideoDataset(Dataset):
         """OpenCV fallback for video reading."""
         cap = cv2.VideoCapture(path)
         if not cap.isOpened():
-            return torch.zeros((self.num_frames, 3, 224, 224), dtype=torch.float32)
+            raise ValueError(f"Failed to open video: {path}")
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames >= self.num_frames:
+            indices = np.linspace(0, total_frames - 1, self.num_frames, dtype=int)
+        else:
+            indices = range(self.num_frames)
 
         frames = []
-        while len(frames) < self.num_frames:
+        for idx in indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
             ret, frame = cap.read()
             if not ret:
                 break
-            frame = cv2.resize(frame, (224, 224))
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frames.append(frame)
 
         cap.release()
 
         if not frames:
-            return torch.zeros((self.num_frames, 3, 224, 224), dtype=torch.float32)
+            raise ValueError(f"No readable frames in video: {path}")
 
         video_np = np.stack(frames)
-        tensor = torch.from_numpy(video_np).permute(0, 3, 1, 2).float() / 255.0
+        tensor = rgb_video_array_to_imagenet_tensor(video_np, input_size=self.input_size)
 
         if tensor.size(0) < self.num_frames:
             pad = tensor[-1].unsqueeze(0).repeat(self.num_frames - tensor.size(0), 1, 1, 1)
@@ -167,8 +189,7 @@ class ImageVideoDataset(Dataset):
         if self.transform:
             return self.transform(img)
 
-        img = cv2.resize(img, (224, 224))
-        return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+        return rgb_array_to_imagenet_tensor(img, input_size=self.input_size)
 
 
 class TrainerExecutionPipeline:
@@ -198,9 +219,10 @@ class TrainerExecutionPipeline:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-    def execute_cross_validation(self, evaluator: Any) -> None:
+    def execute_cross_validation(self, evaluator: Any) -> int:
         """Execute K-fold cross-validation."""
         n_splits = self.cfg.preprocessing.k_fold
+        dataset_key = self.cfg.dataset.registry_key or self.cfg.dataset.name
         logger.info(f"Starting {n_splits}-fold cross-validation...")
 
         clean_df = self._prepare_data()
@@ -210,84 +232,68 @@ class TrainerExecutionPipeline:
             active_df = clean_df[clean_df["split"].isin(["train", "val"])].reset_index(drop=True)
             test_df = clean_df[clean_df["split"] == "test"]
             logger.info(f"Test set isolated: {len(test_df)} samples")
+            if not validate_group_split_isolation(
+                clean_df,
+                dataset_name=dataset_key,
+                context="train/val/test",
+            ):
+                raise RuntimeError("Group leakage detected between train/val/test splits")
         else:
             active_df = clean_df
             logger.warning("No 'split' column found, data leakage risk.")
 
         original_base_filename = getattr(evaluator, "base_filename", "model")
-        original_cfg = self.cfg
+        splits, split_strategy = make_group_kfold_splits(
+            df=active_df,
+            n_splits=n_splits,
+            random_state=42,
+            dataset_name=dataset_key,
+        )
+        if not splits:
+            raise RuntimeError("No cross-validation splits were generated")
 
-        kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+        logger.info(f"Using {split_strategy} for cross-validation")
+        completed_folds = 0
 
-        for fold, (train_idx, val_idx) in enumerate(kf.split(active_df)):
+        for fold, (train_idx, val_idx) in enumerate(splits):
             fold_num = fold + 1
-            logger.info(f"Fold {fold_num}/{n_splits}")
+            completed_folds = fold_num
+            logger.info(f"Fold {fold_num}/{len(splits)}")
 
-            evaluator.base_filename = original_base_filename
+            evaluator.base_filename = f"{original_base_filename}_fold{fold_num}"
 
-            train_sub = active_df.iloc[train_idx]
-            val_sub = active_df.iloc[val_idx]
-
-            train_dataset = ImageVideoDataset(
-                train_sub, self.data_dir, cfg=self.cfg, resolver=self.resolver
+            train_sub = active_df.iloc[train_idx].reset_index(drop=True)
+            val_sub = active_df.iloc[val_idx].reset_index(drop=True)
+            fold_df = pd.concat(
+                [
+                    train_sub.assign(_fold_split="train"),
+                    val_sub.assign(_fold_split="val"),
+                ],
+                ignore_index=True,
             )
-            val_dataset = ImageVideoDataset(
-                val_sub, self.data_dir, cfg=self.cfg, resolver=self.resolver
-            )
+            if not validate_group_split_isolation(
+                fold_df,
+                split_col="_fold_split",
+                dataset_name=dataset_key,
+                context=f"fold {fold_num}",
+            ):
+                raise RuntimeError(f"Group leakage detected in fold {fold_num}")
 
-            train_loader = DataLoader(
-                train_dataset,
-                batch_size=self.batch_size,
-                shuffle=True,
-                num_workers=self.num_workers,
-                pin_memory=self.cfg.system.pin_memory,
-                worker_init_fn=worker_init_fn,
-            )
-            val_loader = DataLoader(
-                val_dataset,
-                batch_size=self.batch_size,
-                shuffle=False,
-                num_workers=self.num_workers,
-                pin_memory=self.cfg.system.pin_memory,
-            )
-
-            model = IQAVQANet(cfg=self.cfg).to(self.device)
-
-            optimizer_cfg = self.cfg.train
-            optimizer = torch.optim.AdamW(
-                model.parameters(),
-                lr=optimizer_cfg.lr,
-                weight_decay=optimizer_cfg.weight_decay,
+            train_groups = infer_group_labels(train_sub, dataset_name=dataset_key).nunique()
+            val_groups = infer_group_labels(val_sub, dataset_name=dataset_key).nunique()
+            logger.info(
+                f"Fold {fold_num}: Train={len(train_sub)} samples/{train_groups} groups, "
+                f"Val={len(val_sub)} samples/{val_groups} groups"
             )
 
-            epochs = optimizer_cfg.epochs
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=epochs, eta_min=1e-6
-            )
-
-            criterion = IQAVQALoss(cfg=self.cfg)
-
-            engine = TrainerEngine(
-                model=model,
-                optimizer=optimizer,
-                criterion=criterion,
+            self._run_fold(
+                train_sub=train_sub,
+                val_sub=val_sub,
                 evaluator=evaluator,
-                cfg=self.cfg,
-                scheduler=scheduler,
-                device=self.device,
-            )
-
-            engine.fit(
-                train_loader,
-                val_loader,
                 current_fold=fold_num,
             )
 
             logger.info(f"Fold {fold_num} completed")
-
-            del model, optimizer, scheduler, criterion, engine
-            torch.cuda.empty_cache()
-            gc.collect()
 
             if self.fast_run:
                 logger.info("Fast run mode: stopping after first fold.")
@@ -295,8 +301,71 @@ class TrainerExecutionPipeline:
 
         if test_df is not None and not test_df.empty:
             logger.info("Evaluating on test set...")
-            self._evaluate_test_set(test_df, evaluator, original_base_filename, n_splits)
+            self._evaluate_test_set(test_df, evaluator, original_base_filename)
 
+        return completed_folds
+
+
+    @release_torch_cache
+    def _run_fold(
+        self,
+        train_sub: pd.DataFrame,
+        val_sub: pd.DataFrame,
+        evaluator: Any,
+        current_fold: int,
+    ) -> None:
+        train_dataset = ImageVideoDataset(
+            train_sub, self.data_dir, cfg=self.cfg, resolver=self.resolver
+        )
+        val_dataset = ImageVideoDataset(
+            val_sub, self.data_dir, cfg=self.cfg, resolver=self.resolver
+        )
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=self.cfg.system.pin_memory,
+            worker_init_fn=worker_init_fn,
+        )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=self.cfg.system.pin_memory,
+        )
+
+        model = IQAVQANet(cfg=self.cfg).to(self.device)
+        optimizer_cfg = self.cfg.train
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=optimizer_cfg.lr,
+            weight_decay=optimizer_cfg.weight_decay,
+        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=optimizer_cfg.epochs,
+            eta_min=1e-6,
+        )
+        criterion = IQAVQALoss(cfg=self.cfg)
+
+        engine = TrainerEngine(
+            model=model,
+            optimizer=optimizer,
+            criterion=criterion,
+            evaluator=evaluator,
+            cfg=self.cfg,
+            scheduler=scheduler,
+            device=self.device,
+        )
+
+        engine.fit(
+            train_loader,
+            val_loader,
+            current_fold=current_fold,
+        )
 
 
     def _prepare_data(self) -> pd.DataFrame:
@@ -311,24 +380,28 @@ class TrainerExecutionPipeline:
 
 
 
+    @release_torch_cache
     def _evaluate_test_set(
         self,
         test_df: pd.DataFrame,
         evaluator: Any,
         base_filename: str,
-        n_splits: int,
     ) -> None:
         """Evaluate on the held-out test set."""
-        model = IQAVQANet(cfg=self.cfg).to(self.device)
-        save_dir = self.cfg.paths.model_outputs_dir(self.cfg.dataset.name)
-        best_model_path = save_dir / f"{base_filename}_fold{n_splits}_best.pt"
+        model = IQAVQANet(cfg=self.cfg, load_pretrained_backbone=False).to(self.device)
+        dataset_key = self.cfg.dataset.registry_key or self.cfg.dataset.name
+        save_dir = self.cfg.paths.model_outputs_dir(dataset_key)
+        best_model_path = select_best_checkpoint(
+            model_outputs_dir=save_dir,
+            base_fn=base_filename,
+            monitor=self.cfg.train.checkpoint.monitor.lower(),
+            mode=self.cfg.train.checkpoint.mode.lower(),
+        )
+        test_base_filename = f"{base_filename}_test"
 
-        if best_model_path.exists():
-            logger.info(f"Loading best model: {best_model_path}")
-            checkpoint = torch.load(best_model_path, map_location=self.device)
-            model.load_state_dict(checkpoint["state_dict"])
-        else:
-            logger.warning("No best model found, using random weights.")
+        logger.info(f"Loading best model for test set: {best_model_path}")
+        checkpoint = torch.load(best_model_path, map_location=self.device, weights_only=True)
+        model.load_state_dict(checkpoint["state_dict"])
 
         model.eval()
 
@@ -368,8 +441,5 @@ class TrainerExecutionPipeline:
             y_true_real, y_pred_real = y_true, y_pred
             logger.warning("No MOS range found, RMSE is in [0,1] scale.")
 
+        evaluator.base_filename = test_base_filename
         evaluator.evaluate(y_true_real, y_pred_real, save_manifest=True)
-
-        del model
-        torch.cuda.empty_cache()
-        gc.collect()
