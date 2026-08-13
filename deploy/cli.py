@@ -47,8 +47,7 @@ from deploy.core.model_loader import load_checkpoint, select_checkpoint
 from deploy.core.inference import predict_batch
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-REPORTS_DIR = PROJECT_ROOT / "reports"
+REPORTS_DIR = cfg.resolve(cfg.reports_dir)
 SUPPORTED_EXTS = {ext.lower() for ext in (cfg.image_exts | cfg.video_exts)}
 
 
