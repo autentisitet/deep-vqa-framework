@@ -1,4 +1,5 @@
 # src/data/data_eda.py
+import json
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -9,7 +10,12 @@ from loguru import logger
 from tqdm import tqdm
 
 from src.data.eda.integrity import check_media_integrity
-from src.data.eda.split import check_fold_distribution, split_train_val_test
+from src.data.eda.split import (
+    check_fold_distribution,
+    infer_group_labels,
+    split_train_val_test,
+    validate_group_split_isolation,
+)
 from src.data.eda.statistics import analyze_image_properties, analyze_video_properties, compute_mos_statistics
 from src.data.dataset_loaders import MetadataLoaderFactory
 from src.data.dataset_types import DatasetType
@@ -30,7 +36,8 @@ class DataEDA:
         data_dir: Optional[Path] = None,
     ):
         self.cfg = cfg
-        self.dataset_name = dataset_name.lower()
+        self.dataset_name = cfg.dataset.registry_key or MetadataLoaderFactory.normalize_key(dataset_name)
+        self.dataset_slug = self.cfg.paths.dataset_slug(self.dataset_name)
         self.df = None
         self.stats = {}
 
@@ -40,11 +47,13 @@ class DataEDA:
         self.file_extensions = list(DatasetType.all_extensions())
 
         if data_dir is None:
-            data_dir = cfg.paths.datasets_dir / dataset_name
+            data_dir = cfg.paths.resolve(Path(cfg.dataset.paths.root) / cfg.dataset.paths.data)
         self.data_dir = Path(data_dir).resolve()
 
-        self.corrupted_dir = cfg.paths.corrupted_dir(dataset_name)
-        self.results_dir = cfg.paths.results_dir
+        self.corrupted_dir = cfg.paths.corrupted_dir(self.dataset_slug)
+        self.results_dir = cfg.paths.dataset_results_dir(self.dataset_slug)
+        self.eda_dir = cfg.paths.eda_dir(self.dataset_slug)
+        self.rejected_labels_dir = self.corrupted_dir / "labels"
 
         logger.info(f"Data directory: {self.data_dir}")
         plt.switch_backend("Agg")
@@ -55,9 +64,9 @@ class DataEDA:
     def load_metadata(self) -> pd.DataFrame:
         """Load metadata file using the appropriate loader."""
         meta_file = (
-            Path(self.dataset_info.paths.root)
+            self.cfg.paths.resolve(Path(self.dataset_info.paths.root))
             / self.dataset_info.paths.metadata
-            / self._get_mos_filename()
+            / (self.dataset_info.metadata.mos_file or MetadataLoaderFactory.get_metadata_file(self.dataset_name))
         )
 
         if not meta_file.exists():
@@ -75,20 +84,18 @@ class DataEDA:
             return pd.DataFrame()
 
 
-    def _get_mos_filename(self) -> str:
-        """Get MOS filename for the current dataset."""
-        default_mos_files = {
-            "tid2013": "mos_with_names.txt",
-            "konvid-1k": "KoNViD_1k_mos.csv",
-            "t2vqa-db": "info.txt",
-        }
-        return default_mos_files.get(self.dataset_name, "mos.txt")
-
-
     def ensure_split_column(self):
         """Ensure DataFrame has a 'split' column for train/val/test."""
         if "split" in self.df.columns and not self.df["split"].isnull().all():
             logger.info("Split column already exists, skipping")
+            if "group_id" not in self.df.columns:
+                self.df["group_id"] = infer_group_labels(self.df, dataset_name=self.dataset_name)
+            if not validate_group_split_isolation(
+                self.df,
+                dataset_name=self.dataset_name,
+                context="existing train/val/test split",
+            ):
+                raise RuntimeError("Group leakage detected in existing split column")
             return
 
         train_ratio = 0.8
@@ -97,12 +104,24 @@ class DataEDA:
         logger.info(f"Splitting: Train={train_ratio}, Val={val_ratio}")
 
         train_df, val_df, test_df = split_train_val_test(
-            self.df, train_ratio=train_ratio, val_ratio=val_ratio, random_state=42
+            self.df,
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            random_state=42,
+            dataset_name=self.dataset_name,
         )
 
+        self.df["group_id"] = infer_group_labels(self.df, dataset_name=self.dataset_name)
         self.df["split"] = "train"
         self.df.loc[val_df.index, "split"] = "val"
         self.df.loc[test_df.index, "split"] = "test"
+
+        if not validate_group_split_isolation(
+            self.df,
+            dataset_name=self.dataset_name,
+            context="EDA train/val/test split",
+        ):
+            raise RuntimeError("Group leakage detected after EDA split assignment")
 
         logger.info(f"Split complete: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
 
@@ -124,6 +143,30 @@ class DataEDA:
         self._analyze_media_properties()
         self.stats["total_samples"] = mos_stats["total_samples"]
         self.stats["range"] = mos_stats["range"]
+
+
+    def _backup_rejected_labels(self, rejected_df: pd.DataFrame, reason_col: str = "reject_reason") -> None:
+        """Persist labels for samples removed before analysis/training."""
+        if rejected_df.empty:
+            return
+
+        self.rejected_labels_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+        csv_path = self.rejected_labels_dir / f"{self.dataset_slug}_rejected_labels_{timestamp}.csv"
+        jsonl_path = self.rejected_labels_dir / f"{self.dataset_slug}_rejected_labels_{timestamp}.jsonl"
+
+        rejected_df.to_csv(csv_path, index=False)
+        with jsonl_path.open("w", encoding="utf-8") as fh:
+            for record in rejected_df.to_dict(orient="records"):
+                fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+        latest_csv_path = self.rejected_labels_dir / f"{self.dataset_slug}_rejected_labels_latest.csv"
+        rejected_df.to_csv(latest_csv_path, index=False)
+
+        reason_counts = rejected_df[reason_col].value_counts().to_dict() if reason_col in rejected_df else {}
+        logger.warning(
+            f"Backed up {len(rejected_df)} rejected labels: {csv_path} | reasons={reason_counts}"
+        )
 
 
     def _analyze_media_properties(self):
@@ -166,7 +209,7 @@ class DataEDA:
 
 
     def check_integrity(self, max_samples: Optional[int] = None, skip_video_check: bool = False) -> Dict:
-        """Check file integrity: missing, corrupted, duplicate."""
+        """Check file integrity: missing, corrupted, repeated sample ids."""
         logger.info("Integrity check started...")
 
         df_to_check = self.df if max_samples is None else self.df.head(max_samples)
@@ -174,6 +217,7 @@ class DataEDA:
         missing = []
         corrupted = []
         valid_indices = []
+        rejected_records = []
 
         self.corrupted_dir.mkdir(parents=True, exist_ok=True)
 
@@ -186,10 +230,24 @@ class DataEDA:
                 is_video = asset.is_video
             except Exception:
                 missing.append(sid)
+                rejected_records.append({
+                    **row.to_dict(),
+                    "reject_reason": "missing",
+                    "reject_error": "Unable to resolve media file",
+                    "original_path": "",
+                    "quarantine_path": "",
+                })
                 continue
 
             if not target_path.exists():
                 missing.append(sid)
+                rejected_records.append({
+                    **row.to_dict(),
+                    "reject_reason": "missing",
+                    "reject_error": "Resolved media file does not exist",
+                    "original_path": str(target_path),
+                    "quarantine_path": "",
+                })
                 continue
 
             if skip_video_check and is_video:
@@ -201,43 +259,75 @@ class DataEDA:
 
             if not is_ok:
                 corrupted.append(sid)
+                quarantine_path = ""
                 if target_path.exists():
                     dest = self.corrupted_dir / target_path.name
                     if dest.exists():
                         dest = self.corrupted_dir / f"{target_path.stem}_corrupted{target_path.suffix}"
                     shutil.move(str(target_path), str(dest))
-                    logger.warning(f"Corrupted file corrupted: {target_path.name} ({error})")
+                    quarantine_path = str(dest)
+                    logger.warning(f"Corrupted file quarantined: {target_path.name} ({error}) -> {dest}")
+                rejected_records.append({
+                    **row.to_dict(),
+                    "reject_reason": "corrupted",
+                    "reject_error": error or "Integrity check failed",
+                    "original_path": str(target_path),
+                    "quarantine_path": quarantine_path,
+                })
                 continue
 
             valid_indices.append(i)
 
         self.df = self.df.loc[valid_indices].reset_index(drop=True)
 
-        duplicates = self.df[self.df.duplicated(subset=["sample_id"])]["sample_id"].tolist()
+        sample_id_series = self.df["sample_id"].astype(str).str.strip().str.lower()
+        repeated_sample_ids = (
+            sample_id_series[sample_id_series.duplicated(keep=False)]
+            .drop_duplicates()
+            .tolist()
+        )
+        if repeated_sample_ids:
+            preview = ", ".join(repeated_sample_ids[:10])
+            suffix = "..." if len(repeated_sample_ids) > 10 else ""
+            logger.warning(
+                f"Detected {len(repeated_sample_ids)} repeated sample_id values; "
+                f"kept for IQA/VQA semantics: {preview}{suffix}"
+            )
 
-        self._write_integrity_report(missing, corrupted, duplicates)
+        self._write_integrity_report(missing, corrupted, repeated_sample_ids)
+        if rejected_records:
+            self._backup_rejected_labels(pd.DataFrame(rejected_records))
 
         logger.info(
             f"Integrity complete: Retained {len(self.df)} | "
-            f"Missing {len(missing)} | Corrupted {len(corrupted)} | Duplicates {len(duplicates)}"
+            f"Missing {len(missing)} | Corrupted {len(corrupted)} | Repeated sample_ids {len(repeated_sample_ids)}"
         )
-        return {"corrupted": corrupted, "missing": missing, "duplicates": duplicates}
+        return {
+            "corrupted": corrupted,
+            "missing": missing,
+            "repeated_sample_ids": repeated_sample_ids,
+        }
 
 
-    def _write_integrity_report(self, missing: List[str], corrupted: List[str]):
+    def _write_integrity_report(self, missing: List[str], corrupted: List[str], repeated_sample_ids: List[str]):
         """Write integrity report to file."""
-        report_dir = self.cfg.paths.train_logs_dir(self.dataset_name)
+        report_dir = self.cfg.paths.train_logs_dir(self.dataset_slug)
         report_dir.mkdir(parents=True, exist_ok=True)
         report_path = report_dir / f"{self.dataset_name}_integrity_report.txt"
 
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(f"--- Integrity Audit Report: {self.dataset_name} ---\n")
             f.write(f"Date: {pd.Timestamp.now()}\n")
-            f.write(f"Summary: {len(missing)} missing, {len(corrupted)} corrupted.\n\n")
+            f.write(
+                f"Summary: {len(missing)} missing, "
+                f"{len(corrupted)} corrupted, {len(repeated_sample_ids)} repeated sample ids.\n\n"
+            )
             if missing:
                 f.write("Missing Files:\n" + "\n".join(missing) + "\n\n")
             if corrupted:
-                f.write("Corrupted Files:\n" + "\n".join(corrupted) + "\n")
+                f.write("Corrupted Files:\n" + "\n".join(corrupted) + "\n\n")
+            if repeated_sample_ids:
+                f.write("Repeated Sample IDs (kept):\n" + "\n".join(repeated_sample_ids) + "\n")
 
 
     def check_filename_label_match(self) -> bool:
@@ -251,10 +341,11 @@ class DataEDA:
             physical_names.update({p.name.lower() for p in self.data_dir.rglob(f"*.{ext.lower()}")})
             physical_names.update({p.name.lower() for p in self.data_dir.rglob(f"*.{ext.upper()}")})
 
-        label_names = set(self.df["sample_id"].astype(str))
+        label_names = {str(name).strip().lower() for name in self.df["sample_id"].astype(str)}
 
         if len(label_names) > 0 and "." not in list(label_names)[0]:
             physical_names = {Path(name).stem for name in physical_names}
+            label_names = {Path(name).stem for name in label_names}
 
         match = physical_names == label_names
         logger.info(f"Filename-label match: {match}")
@@ -270,7 +361,7 @@ class DataEDA:
             return
 
         if save_dir is None:
-            save_dir = self.cfg.paths.plots_dir(self.dataset_name)
+            save_dir = self.eda_dir
 
         save_dir.mkdir(parents=True, exist_ok=True)
         fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
@@ -333,7 +424,17 @@ class DataEDA:
 
     def check_fold_score_distribution(self, n_splits: int = 5) -> List[Dict]:
         """Check K-fold cross-validation distribution."""
-        return check_fold_distribution(df=self.df, n_splits=n_splits, random_state=42, verbose=True)
+        fold_df = self.df
+        if "split" in self.df.columns:
+            fold_df = self.df[self.df["split"].isin(["train", "val"])].reset_index(drop=True)
+
+        return check_fold_distribution(
+            df=fold_df,
+            n_splits=n_splits,
+            random_state=42,
+            dataset_name=self.dataset_name,
+            verbose=True,
+        )
 
 
     def run_full_eda(
@@ -343,7 +444,7 @@ class DataEDA:
     ) -> Dict:
         """Execute the complete data exploration and analysis pipeline."""
         if save_dir is None:
-            save_dir = self.cfg.paths.plots_dir(self.dataset_name)
+            save_dir = self.eda_dir
 
         save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -352,14 +453,13 @@ class DataEDA:
             logger.error(f"EDA pipeline initialization failed for: {self.dataset_name}")
             return {}
 
-        self.basic_statistics()
-
         if skip_integrity:
-            integrity_res = {"corrupted": [], "missing": [], "duplicates": []}
+            integrity_res = {"corrupted": [], "missing": [], "repeated_sample_ids": []}
             logger.info("Skipping integrity check")
         else:
-            integrity_res = self.check_integrity(skip_video_check=True)
+            integrity_res = self.check_integrity(skip_video_check=False)
 
+        self.basic_statistics()
         self.ensure_split_column()
         self.check_filename_label_match()
         self.visualize_mos_distribution(save_dir)

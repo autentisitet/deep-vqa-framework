@@ -268,7 +268,7 @@ def check_image_integrity(path: Path) -> Tuple[bool, Optional[str], Dict]:
 
         img = cv2.imread(str(path))
         if img is None:
-            return False, "Unable to decode"
+            return False, "Unable to decode", {}
 
         h, w = img.shape[:2]
         if h <= 0 or w <= 0:
