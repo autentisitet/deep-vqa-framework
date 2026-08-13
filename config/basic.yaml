@@ -1,7 +1,6 @@
 # config/basic.yaml
 system:
   project_name: "deep-vqa-framework"
-  env: "autodl"
   device: "cuda"
   amp: true
   num_workers: 4

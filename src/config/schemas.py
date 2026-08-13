@@ -1,6 +1,6 @@
 # src/config/schemas.py
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from pathlib import Path
 
 
@@ -12,15 +12,26 @@ class _BaseModel(BaseModel):
 # 路径配置
 # ============================================================
 class PathsConfig(_BaseModel):
-    project_root: Path = Path(".")
+    project_root: Path = Field(default_factory=lambda: Path(__file__).resolve().parents[2])
     datasets_dir: Path = Path("datasets")
     results_dir: Path = Path("results")
     logs_dir: Path = Path("logs")
-    cache_dir: Path = Path(".download_cache")
+    deploy_dir: Path = Path("deploy")
+    reports_dir: Path = Path("reports")
+    examples_dir: Path = Path("examples")
+    cache_dir: Path = Path(".cache")
+
+    def resolve(self, path: str | Path) -> Path:
+        candidate = Path(path)
+        return candidate if candidate.is_absolute() else self.project_root / candidate
+
+    def dataset_slug(self, dataset_name: str) -> str:
+        """Normalize dataset output folder names under results/."""
+        return str(dataset_name).strip().lower()
 
     def dataset_results_dir(self, dataset_name: str) -> Path:
         """results/{dataset_name}/"""
-        return self.results_dir / dataset_name
+        return self.resolve(self.results_dir) / self.dataset_slug(dataset_name)
 
     def train_logs_dir(self, dataset_name: str) -> Path:
         """results/{dataset_name}/train_logs/"""
@@ -30,19 +41,34 @@ class PathsConfig(_BaseModel):
         """results/{dataset_name}/plots/"""
         return self.dataset_results_dir(dataset_name) / "plots"
 
+    def eda_dir(self, dataset_name: str) -> Path:
+        """results/{dataset_name}/eda/"""
+        return self.dataset_results_dir(dataset_name) / "eda"
+
     def model_outputs_dir(self, dataset_name: str) -> Path:
         """results/{dataset_name}/model_outputs/"""
         return self.dataset_results_dir(dataset_name) / "model_outputs"
 
     def corrupted_dir(self, dataset_name: str) -> Path:
-        return self.results_dir / dataset_name / "corrupted"
+        return self.dataset_results_dir(dataset_name) / "corrupted"
+
+    def deploy_iqa_dir(self) -> Path:
+        return self.resolve(self.deploy_dir) / "iqa-models"
+
+    def deploy_vqa_dir(self) -> Path:
+        return self.resolve(self.deploy_dir) / "vqa-models"
+
+    def reports_iqa_dir(self) -> Path:
+        return self.resolve(self.reports_dir) / "iqa-test"
+
+    def reports_vqa_dir(self) -> Path:
+        return self.resolve(self.reports_dir) / "vqa-test"
 
 # ============================================================
 # 系统配置
 # ============================================================
 class SystemConfig(_BaseModel):
     project_name: str = "deep-vqa-framework"
-    env: str = "autodl"
     device: str = "cuda"
     amp: bool = True
     num_workers: int = 4
@@ -103,6 +129,12 @@ class LossConfig(_BaseModel):
     mse_weight: float = 0.7
     rank_weight: float = 0.3
     plcc_weight: float = 0.0
+    iqa_mse_weight: Optional[float] = None
+    iqa_rank_weight: Optional[float] = None
+    iqa_plcc_weight: Optional[float] = None
+    vqa_mse_weight: Optional[float] = None
+    vqa_rank_weight: Optional[float] = None
+    vqa_plcc_weight: Optional[float] = None
     max_pairs: int = 5000
 
 
@@ -112,6 +144,8 @@ class LossConfig(_BaseModel):
 class ModelArchConfig(_BaseModel):
     name: str
     backbone: str
+    image_backbone: str = "resnet50"
+    video_backbone: str = "swin_t"
     freeze_backbone: bool = False
     pretrained: bool = True
     dropout: float = 0.3
@@ -149,6 +183,30 @@ class DatasetPathsConfig(_BaseModel):
     root: str
     data: str
     metadata: str
+    metrics: Optional[str] = None
+    reference: Optional[str] = None
+
+
+class DatasetMetadataConfig(_BaseModel):
+    mos_file: Optional[str] = None
+    file_format: Optional[str] = None
+    delimiter: Optional[str] = None
+
+
+class DatasetColumnsConfig(_BaseModel):
+    id_col: Optional[Union[str, int]] = None
+    mos_col: Optional[Union[str, int]] = None
+    std_col: Optional[Union[str, int]] = None
+
+
+class DatasetPreprocessingConfig(_BaseModel):
+    resize: Optional[List[int]] = None
+    normalize: Optional[bool] = None
+    augmentation: Optional[bool] = None
+    num_frames: Optional[int] = None
+    fragment_sampling: Optional[Dict[str, Any]] = None
+    frame_size: Optional[List[int]] = None
+    fps: Optional[float] = None
 
 
 class DatasetMetaConfig(_BaseModel):
@@ -156,6 +214,11 @@ class DatasetMetaConfig(_BaseModel):
     task_type: str  # "iqa" or "vqa"
     data_type: str  # "image" or "video"
     paths: DatasetPathsConfig
+    registry_key: str = ""
+    has_text: bool = False
+    metadata: DatasetMetadataConfig = Field(default_factory=DatasetMetadataConfig)
+    columns: DatasetColumnsConfig = Field(default_factory=DatasetColumnsConfig)
+    preprocessing: DatasetPreprocessingConfig = Field(default_factory=DatasetPreprocessingConfig)
     mos_min: float = 0.0
     mos_max: float = 5.0
 
@@ -170,7 +233,7 @@ class Config(_BaseModel):
     logging: LoggingConfig
     train: TrainConfig
     evaluation: EvaluationConfig
-    paths: PathsConfig
+    paths: PathsConfig = Field(default_factory=PathsConfig)
     dataset: DatasetMetaConfig
 
     # 模型相关
