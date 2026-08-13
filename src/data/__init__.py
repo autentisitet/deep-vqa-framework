@@ -1,13 +1,5 @@
 # src/data/__init__.py
-from .data_eda import DataEDA
-from .dataset_loaders import MetadataLoaderFactory
-from .dataset_types import DatasetType
-from .metadata_loaders import (
-    BaseMetadataLoader,
-    Tid2013Loader,
-    KonvidLoader,
-    T2VqaLoader,
-)
+from importlib import import_module
 
 __all__ = [
     "DataEDA",
@@ -18,3 +10,21 @@ __all__ = [
     "KonvidLoader",
     "T2VqaLoader",
 ]
+
+_LAZY_IMPORTS = {
+    "DataEDA": ".data_eda",
+    "MetadataLoaderFactory": ".dataset_loaders",
+    "DatasetType": ".dataset_types",
+    "BaseMetadataLoader": ".metadata_loaders",
+    "Tid2013Loader": ".metadata_loaders",
+    "KonvidLoader": ".metadata_loaders",
+    "T2VqaLoader": ".metadata_loaders",
+}
+
+
+def __getattr__(name):
+    module_name = _LAZY_IMPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(module_name, __name__)
+    return getattr(module, name)

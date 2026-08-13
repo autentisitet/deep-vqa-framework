@@ -42,6 +42,9 @@ class MetricsPlotter:
 
         self.base_prefix = f"{self.current_date}_{self.task_type}_{self.model_name}"
 
+    def _safe_dataset_name(self, dataset_name: str) -> str:
+        return self.cfg.paths.dataset_slug(dataset_name)
+
     def plot_training_history(self, csv_path: Path, version: str = "v1") -> None:
         """Plot training history: loss, PLCC/SROCC, RMSE/R2, KROCC."""
         if not csv_path.exists():
@@ -352,10 +355,81 @@ class MetricsPlotter:
                     fontweight="semibold",
                 )
 
-        plt.suptitle(f"Model Comparison on {dataset_name}", fontsize=14, fontweight="bold", y=1.02)
+        dataset_slug = self._safe_dataset_name(dataset_name)
+        plt.suptitle(f"Model Comparison on {dataset_slug}", fontsize=14, fontweight="bold", y=1.02)
         plt.tight_layout()
 
-        save_path = self.plots_dir / f"comparison_{dataset_name}_{self.current_date}.png"
+        save_path = self.plots_dir / f"comparison_{dataset_slug}_{self.current_date}.png"
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        plt.close()
+        logger.info(f"Saved: {save_path}")
+
+    def plot_fold_summary(self, metrics_csv_dict: dict, dataset_name: str) -> None:
+        """Plot final fold metrics and metric stability across folds."""
+        rows = []
+        for fold_name, info in metrics_csv_dict.items():
+            csv_path = info.get("csv_path")
+            if not csv_path or not csv_path.exists():
+                continue
+            try:
+                df = pd.read_csv(csv_path)
+                if df.empty:
+                    continue
+            except Exception as e:
+                logger.warning(f"Failed to read metrics for fold summary: {csv_path} | {e}")
+                continue
+
+            last_row = df.iloc[-1]
+            rows.append(
+                {
+                    "fold": fold_name,
+                    "plcc": float(last_row.get("plcc", 0.0)),
+                    "srocc": float(last_row.get("srocc", 0.0)),
+                    "krocc": float(last_row.get("krocc", 0.0)),
+                    "rmse": float(last_row.get("rmse", 0.0)),
+                    "mae": float(last_row.get("mae", 0.0)),
+                }
+            )
+
+        if not rows:
+            logger.warning("No valid fold metrics loaded for summary plot.")
+            return
+
+        df = pd.DataFrame(rows)
+        fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+
+        corr_df = df.melt(
+            id_vars="fold",
+            value_vars=[c for c in ["plcc", "srocc", "krocc"] if c in df.columns],
+            var_name="metric",
+            value_name="value",
+        )
+        sns.barplot(data=corr_df, x="fold", y="value", hue="metric", ax=axes[0])
+        axes[0].set_title("Correlation Metrics by Fold", fontsize=11, fontweight="bold")
+        axes[0].set_xlabel("Fold")
+        axes[0].set_ylabel("Correlation")
+        axes[0].set_ylim(0, 1.05)
+        axes[0].tick_params(axis="x", rotation=20)
+        axes[0].legend(title="")
+
+        err_df = df.melt(
+            id_vars="fold",
+            value_vars=[c for c in ["rmse", "mae"] if c in df.columns],
+            var_name="metric",
+            value_name="value",
+        )
+        sns.barplot(data=err_df, x="fold", y="value", hue="metric", ax=axes[1])
+        axes[1].set_title("Error Metrics by Fold", fontsize=11, fontweight="bold")
+        axes[1].set_xlabel("Fold")
+        axes[1].set_ylabel("Error")
+        axes[1].tick_params(axis="x", rotation=20)
+        axes[1].legend(title="")
+
+        dataset_slug = self._safe_dataset_name(dataset_name)
+        plt.suptitle(f"Cross-Fold Summary on {dataset_slug}", fontsize=14, fontweight="bold", y=1.02)
+        plt.tight_layout()
+
+        save_path = self.plots_dir / f"fold_summary_{dataset_slug}_{self.current_date}.png"
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
         plt.close()
         logger.info(f"Saved: {save_path}")

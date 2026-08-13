@@ -112,20 +112,35 @@ class BaseMetadataLoader(ABC):
 class Tid2013Loader(BaseMetadataLoader):
     """Loader for TID2013 dataset."""
 
+    def _add_reference_id(self, df: pd.DataFrame) -> pd.DataFrame:
+        df["reference_id"] = (
+            df["sample_id"]
+            .astype(str)
+            .str.extract(r"^([iI]\d{1,3})_", expand=False)
+            .str.lower()
+        )
+        df["reference_id"] = df["reference_id"].fillna(
+            df["sample_id"].astype(str).str.replace(r"\.[^.]+$", "", regex=True).str.lower()
+        )
+        return df
+
+
     def load(self, meta_file: Path) -> pd.DataFrame:
         # 使用 sep=r'\s+' 处理空格分隔，header=None 因为没有表头
         # names 明确指定列顺序：第一列是 MOS，第二列是 ID
         try:
             df = pd.read_csv(meta_file, sep=r"\s+", header=None, names=["mos", "sample_id"])
             df = self._ensure_extension(df, ".bmp")
-            return df[["sample_id", "mos"]]
+            df = self._add_reference_id(df)
+            return df[["sample_id", "mos", "reference_id"]]
 
         except Exception as e:
             # If pandas read fails, use a cleanup function as a fallback.
             logger.warning(f"TID2013 pandas read failed, attempting to parse line by line: {e}")
             df = self._parse_with_cleaner(meta_file, delimiter_hint=[r"\s+"])
             df = self._ensure_extension(df, ".bmp")
-            return df[["sample_id", "mos"]]
+            df = self._add_reference_id(df)
+            return df[["sample_id", "mos", "reference_id"]]
 
 
 
