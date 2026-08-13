@@ -38,15 +38,6 @@ DEFAULT_VQA_MODEL_PATH = cfg.vqa_model_path
 DEVICE = cfg.default_device
 
 
-
-# ---------- MOS Parameters ----------
-DATASET_MOS_PARAMS = {
-    "TID2013": {"mos_min": 0.242, "mos_max": 7.214},
-    "KoNViD-1k": {"mos_min": 1.220, "mos_max": 4.640},
-}
-
-
-
 # ---------- FastAPI ----------
 app = FastAPI(title="Deep-VQA Unified MOS API", version="4.0.0")
 
@@ -66,20 +57,16 @@ def get_mos_params(config: Config, model_id: str) -> tuple:
     dataset_cfg = getattr(config, "dataset", {}) or {}
     if hasattr(dataset_cfg, "model_dump"):
         dataset_cfg = dataset_cfg.model_dump()
-    mos_min = dataset_cfg.get("mos_min")
-    mos_max = dataset_cfg.get("mos_max")
-
-    if mos_min is None or mos_max is None:
-        if model_id == "resnet_iqa":
-            params = DATASET_MOS_PARAMS["TID2013"]
-        elif model_id == "timeswin_vqa":
-            params = DATASET_MOS_PARAMS["KoNViD-1k"]
-        else:
-            params = {"mos_min": 0.0, "mos_max": 5.0}
-        mos_min = params["mos_min"]
-        mos_max = params["mos_max"]
+    mos_min = dataset_cfg.get("mos_min", 0.0)
+    mos_max = dataset_cfg.get("mos_max", 5.0)
 
     return mos_min, mos_max
+
+
+def config_to_dict(config: Any) -> dict:
+    if hasattr(config, "model_dump"):
+        return config.model_dump()
+    return config if isinstance(config, dict) else {}
 
 
 def load_all_models():
@@ -97,7 +84,8 @@ def load_all_models():
             "config": config_obj,
             "mos_min": mos_min,
             "mos_max": mos_max,
-            "dataset": dataset_cfg.get("name", "TID2013"),
+            "dataset": dataset_cfg.get("name", dataset_cfg.get("registry_key", "unknown")),
+            "num_frames": config_obj.model.num_frames,
         }
         logger.info(f"[OK] IQA loaded (MOS: {mos_min:.3f}~{mos_max:.3f})")
     else:
@@ -115,7 +103,8 @@ def load_all_models():
             "config": config_obj,
             "mos_min": mos_min,
             "mos_max": mos_max,
-            "dataset": dataset_cfg.get("name", "KoNViD-1k"),
+            "dataset": dataset_cfg.get("name", dataset_cfg.get("registry_key", "unknown")),
+            "num_frames": config_obj.model.num_frames,
         }
         logger.info(f"[OK] VQA loaded (MOS: {mos_min:.3f}~{mos_max:.3f})")
     else:
@@ -177,6 +166,7 @@ async def evaluate(
     cached = model_cache[model]
     dl_model = cached["model"]
     dl_config = cached["config"]
+    dl_config_dict = config_to_dict(dl_config)
     mos_min = cached["mos_min"]
     mos_max = cached["mos_max"]
     dataset = cached.get("dataset", "unknown")
@@ -213,8 +203,8 @@ async def evaluate(
                     "file": str(tmp_path),
                     "raw_score": round(raw_score, 6),
                     "mos_score": dataset_mos,
-                    "task_type": dl_config.get("task_type", "vqa"),
-                    "model_name": dl_config.get("model", {}).get("name", "IQAVQANet"),
+                    "task_type": dl_config_dict.get("task_type", "vqa"),
+                    "model_name": dl_config_dict.get("model", {}).get("name", "IQAVQANet"),
                 }
             else:
                 result = predict_single(dl_model, tmp_path, dl_config, DEVICE, mos_min, mos_max)

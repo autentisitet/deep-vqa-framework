@@ -15,7 +15,11 @@ services:
       - ../results:/app/results
       - ../reports:/app/reports
       - ../logs:/app/logs
-      - ../.download_cache:/app/.download_cache
+      - ../.cache:/app/.cache
+    environment:
+      - XDG_CACHE_HOME=/app/.cache
+      - TORCH_HOME=/app/.cache/torch
+      - UV_CACHE_DIR=/app/.cache/uv
     stdin_open: true
     tty: true
     command: ["/bin/bash"]
@@ -39,6 +43,11 @@ services:
     volumes:
       - ../deploy/iqa-models:/app/deploy/iqa-models
       - ../deploy/vqa-models:/app/deploy/vqa-models
+      - ../.cache:/app/.cache
+    environment:
+      - XDG_CACHE_HOME=/app/.cache
+      - TORCH_HOME=/app/.cache/torch
+      - UV_CACHE_DIR=/app/.cache/uv
     restart: unless-stopped
     logging:
       driver: "json-file"

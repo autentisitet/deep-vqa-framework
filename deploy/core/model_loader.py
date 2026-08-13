@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Tuple
 from loguru import logger
 
-from src.models.iqavqa_net import IQAVQANet
+from src.models.iqavqa_model import IQAVQANet
 from src.config.schemas import Config
 
 

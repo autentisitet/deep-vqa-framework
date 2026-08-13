@@ -18,12 +18,16 @@ COPY README.md LICENSE ./
 COPY pyproject.toml uv.lock requirements.txt Makefile ./
 COPY scripts/ ./scripts/
 
+ARG BOOTSTRAP_ARGS="--mirror"
+ARG SETUP_ARGS="--mirror"
+ARG USE_BUILD_PROXY=false
 
 # Install system and Python dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends make && \
-    make bootstrap BOOTSTRAP_ARGS="--mirror" && \
-    make setup SETUP_ARGS="--mirror" && \
+RUN if [ "$USE_BUILD_PROXY" != "true" ]; then \
+        unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY; \
+    fi && \
+    bash scripts/bootstrap.sh ${BOOTSTRAP_ARGS} && \
+    bash scripts/setup_env.sh ${SETUP_ARGS} && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

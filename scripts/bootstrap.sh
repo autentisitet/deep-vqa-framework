@@ -77,7 +77,7 @@ fi
 # Package list
 # ============================================================
 APT_PACKAGES=(
-    curl wget build-essential tar aria2 unrar unzip tree bc ffmpeg jq
+    make curl wget build-essential tar aria2 unrar unzip tree bc ffmpeg jq
 )
 
 if ! command -v pip &> /dev/null && ! command -v pip3 &> /dev/null; then
