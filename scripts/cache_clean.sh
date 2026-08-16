@@ -85,17 +85,32 @@ done
 # 2. Dataset compression package removal
 # ============================================================
 if [ -d "$DOWNLOAD_CACHE" ]; then
-    if [ -d "$PROJECT_DIR/datasets/KoNViD-1k" ] || [ -d "$PROJECT_DIR/datasets/TID2013" ]; then
-        log_info "Dataset extraction verified, removing original archives..."
-        rm -rf "$DOWNLOAD_CACHE"
-        log_ok "Download cache removed."
-    else
-        log_warn "Dataset extraction not verified. Keeping original archives."
+    log_info "Checking dataset archives for extracted datasets..."
+    REMOVED_ARCHIVES=false
+
+    if [ -d "$PROJECT_DIR/datasets/TID2013" ]; then
+        find "$DOWNLOAD_CACHE" -maxdepth 1 -type f \( -iname "*tid2013*" -o -iname "*tid_2013*" \) -delete
+        REMOVED_ARCHIVES=true
+    fi
+
+    if [ -d "$PROJECT_DIR/datasets/KoNViD-1k" ]; then
+        find "$DOWNLOAD_CACHE" -maxdepth 1 -type f \( -iname "*konvid*" -o -iname "*KoNViD*" \) -delete
+        REMOVED_ARCHIVES=true
+    fi
+
+    if [ -d "$PROJECT_DIR/datasets/T2VQA-DB" ]; then
+        find "$DOWNLOAD_CACHE" -maxdepth 1 -type f \( -iname "*t2vqa*" -o -iname "*T2VQA*" \) -delete
+        REMOVED_ARCHIVES=true
+    fi
+
+    if [ "$REMOVED_ARCHIVES" = true ]; then
+        find "$DOWNLOAD_CACHE" -type d -empty -delete 2>/dev/null || true
+        log_ok "Extracted dataset archives removed; unknown archives kept."
     fi
 fi
 
 # Remove zero-byte zombie files
-find "$PROJECT_PARENT_DIR" -name "*.zip" -size 0 -delete 2>/dev/null || true
+find "$PROJECT_DIR" -name "*.zip" -size 0 -delete 2>/dev/null || true
 
 # ============================================================
 # 3. Package manager caches
@@ -126,7 +141,7 @@ fi
 # 5. APT cache
 # ============================================================
 log_info "Cleaning system-level APT cache..."
-${APP_SUDO} apt-get clean -y 2>/dev/null || true
+${APP_SUDO} apt-get clean 2>/dev/null || true
 ${APP_SUDO} apt-get autoclean -y 2>/dev/null || true
 log_ok "APT cache cleaned."
 
