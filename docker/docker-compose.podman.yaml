@@ -1,8 +1,6 @@
 # docker/docker-compose.podman.yaml
 services:
   vqa-train:
-    build:
-      network: host
     network_mode: host
     security_opt:
       - label=disable
@@ -10,8 +8,6 @@ services:
       - nvidia.com/gpu=all
 
   vqa-infer:
-    build:
-      network: host
     security_opt:
       - label=disable
     devices:

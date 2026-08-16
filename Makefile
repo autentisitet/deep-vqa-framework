@@ -105,16 +105,14 @@ help:
 	@echo '  make setup SETUP_ARGS="--mirror --all"'
 	@echo '  make install INSTALL_ARGS="--mirror --all"'
 	@echo '  make test-all'
-	@echo '  uv run python -m src.main --dataset tid2013 --model resnet_iqa'
-	@echo '  uv run python -m src.main --dataset konvid-1k --model timeswin_vqa'
+	@echo '  uv run python -m src.main --dataset tid2013 --model swin_iqa'
+	@echo '  uv run python -m src.main --dataset konvid-1k --model swin_vqa'
 
 
 
 INSTALL_ARGS ?=
 BOOTSTRAP_ARGS ?= $(filter --mirror, $(ARGS))
 SETUP_ARGS ?= $(ARGS)
-
-
 bootstrap:
 	@chmod +x $(ROOT_DIR)/scripts/*.sh
 	@cd $(ROOT_DIR)/scripts && bash bootstrap.sh $(BOOTSTRAP_ARGS) 2>&1 | tee $(LOG_DIR)/bootstrap.log
@@ -404,8 +402,8 @@ info:
 	@echo "  make typecheck          Run mypy type checker"
 	@echo "  make format-all         Format all code"
 	@echo "  make security-all       Run all security checks"
-	@echo "  uv run python -m src.main --dataset tid2013 --model resnet_iqa"
-	@echo "  uv run python -m src.main --dataset konvid-1k --model timeswin_vqa"
+	@echo "  uv run python -m src.main --dataset tid2013 --model swin_iqa"
+	@echo "  uv run python -m src.main --dataset konvid-1k --model swin_vqa"
 	@echo "========================================================================"
 
 
@@ -470,16 +468,17 @@ docker-train:
 	$(call check_runtime)
 	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-train
 	$(COMPOSE) $(COMPOSE_FILES) run --rm --name vqa-train vqa-train bash -c "\
+		set -o pipefail && \
 		make data && \
-		uv run python -m src.main --dataset tid2013 --model resnet_iqa > /app/results/tid2013.log 2>&1 && \
-		uv run python -m src.main --dataset konvid-1k --model timeswin_vqa > /app/results/konvid-1k.log 2>&1 \
+		uv run python -m src.main --dataset tid2013 --model swin_iqa 2>&1 | tee /app/results/tid2013.log && \
+		uv run python -m src.main --dataset konvid-1k --model swin_vqa 2>&1 | tee /app/results/konvid-1k.log \
 	"
 
 
 docker-infer:
 	$(call check_runtime)
 	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-infer
-	$(COMPOSE) $(COMPOSE_FILES) up -d vqa-infer
+	$(COMPOSE) $(COMPOSE_FILES) up -d vqa-infer nginx
 
 
 
@@ -487,6 +486,7 @@ docker-stop:
 	$(call check_runtime)
 	@echo "[INFO] Stopping containers..."
 	@$(RUNTIME) stop vqa-prod 2>/dev/null || true
+	@$(RUNTIME) stop vqa-nginx 2>/dev/null || true
 	@$(RUNTIME) stop vqa-train 2>/dev/null || true
 	@echo "$(GREEN)[OK]$(RESET) Containers stopped."
 
@@ -532,6 +532,7 @@ docker-purge-all:
 	@$(COMPOSE) $(COMPOSE_FILES) down --remove-orphans 2>/dev/null || true
 	@$(RUNTIME) ps -a --filter "name=vqa-train" -q | xargs -r $(RUNTIME) rm -f
 	@$(RUNTIME) ps -a --filter "name=vqa-prod" -q | xargs -r $(RUNTIME) rm -f
+	@$(RUNTIME) ps -a --filter "name=vqa-nginx" -q | xargs -r $(RUNTIME) rm -f
 
 	@echo "[INFO] Removing dangling images..."
 	@$(RUNTIME) images --filter "dangling=true" -q | xargs -r $(RUNTIME) rmi -f

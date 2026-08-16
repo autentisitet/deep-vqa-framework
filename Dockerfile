@@ -14,8 +14,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-COPY README.md LICENSE ./
 COPY pyproject.toml uv.lock requirements.txt Makefile ./
+# Keep README.md: pyproject.toml declares readme = "README.md", and Hatchling
+# needs it when uv builds/installs the local project during setup.
+# Keep LICENSE available in the image for package/license metadata and distribution compliance.
+COPY README.md LICENSE ./
+
 COPY scripts/ ./scripts/
 
 ARG BOOTSTRAP_ARGS="--mirror"
@@ -38,8 +42,6 @@ RUN if [ "$USE_BUILD_PROXY" != "true" ]; then \
 # ==============================================
 FROM base AS train
 
-ENV PATH="/usr/local/bin:/root/.local/bin:$PATH"
-
 COPY src/ ./src/
 COPY config/ ./config/
 
@@ -52,20 +54,13 @@ CMD ["/bin/bash"]
 # ============================================
 FROM base AS prod
 
-ENV PATH="/root/.local/bin:$PATH"
-
 COPY src/config/ ./src/config/
+COPY src/data/ ./src/data/
 COPY src/models/ ./src/models/
 
 COPY deploy/core/ ./deploy/core/
 COPY deploy/api.py ./deploy/api.py
 COPY deploy/cli.py ./deploy/cli.py
-COPY frontend/ ./frontend/
-
-RUN mkdir -p ./deploy/iqa-models/ ./deploy/vqa-models/
-
-RUN find /app -name "*.pyc" -delete \
-    && find /app -name "__pycache__" -type d -exec rm -rf {} 2>/dev/null || true
 
 # Expose FastAPI ports
 EXPOSE 8000

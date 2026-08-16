@@ -938,7 +938,7 @@
           <div class="tab-panel" id="tab-bench">
             <div class="bench-grid">
               <div class="bench-card">
-                <div class="bench-head"><div><div class="bench-title">ResNet50 图像质量评委</div><div class="panel-desc">TID2013 图像质量数据</div></div><div class="bench-score">0.9484</div></div>
+                <div class="bench-head"><div><div class="bench-title">Swin-T 图像质量评委</div><div class="panel-desc">TID2013 图像质量数据</div></div><div class="bench-score">待评估</div></div>
                 <div class="mini-table">
                   <div class="mini-row"><span>主要能力</span><strong>图像空间特征</strong></div>
                   <div class="mini-row"><span>相关性指标</span><strong>SROCC</strong></div>
@@ -983,8 +983,8 @@
       <div class="form-grid">
         <div class="field">
           <label for="serviceBaseInput">服务地址</label>
-          <input id="serviceBaseInput" type="text" placeholder="http://127.0.0.1:8000">
-          <div class="field-hint">本地运行服务时通常保持默认即可。</div>
+          <input id="serviceBaseInput" type="text" placeholder="/api">
+          <div class="field-hint">Nginx 同源部署时保持默认的 /api 即可。</div>
         </div>
         <div class="field">
           <label for="servicePathInput">评价路径</label>
@@ -1030,26 +1030,26 @@
   <script>
     const MODEL_OPTIONS = [
       {
-        id: "resnet_iqa",
-        name: "ResNet50 图像质量评委",
-        displayName: "IQAVQANet · ResNet50",
+        id: "iqa",
+        name: "图像质量评估模型",
+        displayName: "IQA · checkpoint-defined backbone",
         task: "iqa",
         mediaFocus: "图像空间细节",
         dataset: "TID2013",
-        benchmark: "SROCC 0.9484",
-        backbone: "resnet50",
+        benchmark: "SROCC 待评估",
+        backbone: "checkpoint-defined",
         accent: "🖼️",
         desc: "更关注清晰度、纹理、边缘和压缩伪影等空间质量线索。"
       },
       {
-        id: "timeswin_vqa",
-        name: "Swin-T 时序质量评委",
-        displayName: "IQAVQANet · Swin-T + Transformer",
+        id: "vqa",
+        name: "视频质量评估模型",
+        displayName: "VQA · checkpoint-defined backbone",
         task: "vqa",
         mediaFocus: "视频时序稳定",
         dataset: "KoNViD-1k",
         benchmark: "SROCC 0.7465",
-        backbone: "swin_t",
+        backbone: "checkpoint-defined",
         accent: "🎞️",
         desc: "更关注视频连续帧之间的稳定性、运动一致性和动态画面观感。"
       }
@@ -1343,7 +1343,7 @@
     function updateActionState() {
       const hasA = Boolean(state.samples.A);
       const hasB = state.mode === "single" || Boolean(state.samples.B);
-      const enoughModels = getSelectedModels().length >= 2;
+      const enoughModels = getSelectedModels().length >= 1;
       ui.evaluateBtn.disabled = !(hasA && hasB && enoughModels);
     }
 
@@ -1359,8 +1359,8 @@
       const models = getSelectedModels();
       const samples = getActiveSamples();
       if (!samples.length) return;
-      if (models.length < 2) {
-        showMessage(ui.messageBox, "请至少保留两位模型评委。", "error");
+      if (!models.length) {
+        showMessage(ui.messageBox, "请至少选择一位模型评委。", "error");
         return;
       }
       ui.evaluateBtn.disabled = true;
@@ -1368,13 +1368,23 @@
       ui.progressArea.classList.add("show");
       showMessage(ui.messageBox, "正在生成质量报告，请稍候。", "info");
       setProgress(0, "准备评估");
-      const total = models.length * samples.length;
+      const jobs = samples.flatMap(sampleItem => {
+        const compatibleTask = sampleItem.sample.mediaType === "video" ? "vqa" : "iqa";
+        return models
+          .filter(model => model.task === compatibleTask)
+          .map(model => ({ sampleItem, model }));
+      });
+      if (!jobs.length) {
+        showMessage(ui.messageBox, "当前选择的模型与样本类型不匹配。", "error");
+        ui.evaluateBtn.disabled = false;
+        return;
+      }
+      const total = jobs.length;
       const results = [];
       let completed = 0;
       let interrupted = false;
       const startedAt = performance.now();
-      for (const sampleItem of samples) {
-        for (const model of models) {
+      for (const { sampleItem, model } of jobs) {
           setProgress(Math.round((completed / total) * 100), `正在评估 ${sampleItem.label} · ${model.name}`);
           try {
             const oneStart = performance.now();
@@ -1403,7 +1413,6 @@
           }
           completed += 1;
           setProgress(Math.round((completed / total) * 100), `已完成 ${completed}/${total}`);
-        }
         if (interrupted) break;
       }
       ui.cancelBtn.style.display = "none";
@@ -1490,6 +1499,13 @@
     }
 
     function extractScore(payload) {
+      const datasetMos = toNumber(payload.dataset_mos) ?? toNumber(payload.mos_score) ?? toNumber(payload.mos);
+      const mosMin = toNumber(payload.mos_min);
+      const mosMax = toNumber(payload.mos_max);
+      if (datasetMos !== null && mosMin !== null && mosMax !== null && mosMax > mosMin) {
+        const normalized = clamp((datasetMos - mosMin) / (mosMax - mosMin), 0, 1);
+        return { mos: normalized * 5, normalized, source: `数据集 MOS [${mosMin}, ${mosMax}]` };
+      }
       const candidates = [
         ["mos_score", payload.mos_score], ["mos", payload.mos], ["quality_mos", payload.quality_mos], ["overall", payload.overall],
         ["score", payload.score], ["raw_score", payload.raw_score], ["quality_score", payload.quality_score], ["prediction", payload.prediction]
@@ -1801,12 +1817,18 @@
 
     function loadServiceConfig() {
       const saved = safeJson(localStorage.getItem(STORAGE_CONFIG), {});
-      ui.serviceBaseInput.value = saved.base || "http://127.0.0.1:8000";
+      const legacyBases = ["http://127.0.0.1:8000", "http://localhost:8000"];
+      const savedBase = legacyBases.includes(saved.base) ? "" : saved.base;
+      ui.serviceBaseInput.value = savedBase || getDefaultServiceBase();
       ui.servicePathInput.value = saved.path || "/evaluate";
     }
 
+    function getDefaultServiceBase() {
+      return "/api";
+    }
+
     function getServiceConfig() {
-      const base = (ui.serviceBaseInput.value || "http://127.0.0.1:8000").trim().replace(/\/$/, "");
+      const base = (ui.serviceBaseInput.value || getDefaultServiceBase()).trim().replace(/\/$/, "");
       const path = normalizePath(ui.servicePathInput.value || "/evaluate");
       return { base, path };
     }
