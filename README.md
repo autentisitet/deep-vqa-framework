@@ -59,30 +59,34 @@ The platform is organized around explicit contracts for data, models, configurat
 ### IQAVQANet: Unified Quality Assessment Network
 
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph IMAGE[Image IQA path]
-        I1[RGB decode] --> I2[Bicubic resize short side to 232]
-        I2 --> I3[Center crop to 224 x 224]
-        I3 --> I4[Scale to 0..1 and ImageNet normalize]
-        I4 --> I5[Image tensor B x 3 x 224 x 224]
-        I5 --> I6[Swin-T ImageNet backbone]
-        I6 --> I7[Adaptive average pooling]
-        I7 --> I8[Features B x 768]
-        I8 --> I9[Quality head and score B]
+        direction TB
+        I1[RGB decode] --> I2[Bicubic resize<br>short side to 232]
+        I2 --> I3[Center crop<br>to 224 x 224]
+        I3 --> I4[Scale to 0..1<br>and ImageNet normalize]
+        I4 --> I5[Image tensor<br>B x 3 x 224 x 224]
+        I5 --> I6[Swin-T<br>ImageNet backbone]
+        I6 --> I7[Adaptive<br>average pooling]
+        I7 --> I8[Features<br>B x 768]
+        I8 --> I9[Quality head<br>and score B]
     end
 
+    IMAGE ~~~ VIDEO
+
     subgraph VIDEO[Video VQA path]
-        V1[Sample or pad to num_frames] --> V2[RGB decode per frame]
-        V2 --> V3[Bicubic resize short side to 232]
-        V3 --> V4[Center crop to 224 x 224]
-        V4 --> V5[Scale to 0..1 and ImageNet normalize]
-        V5 --> V6[Video tensor B x F x 3 x 224 x 224]
-        V6 --> V7[Flatten frames to B x F x 3 x 224 x 224]
-        V7 --> V8[Swin-T spatial features]
-        V8 --> V9[Frame features B x F x 768]
-        V9 --> V10[Position encoding and TransformerEncoder]
-        V10 --> V11[Temporal average]
-        V11 --> V12[Quality head and score B]
+        direction TB
+        V1[Sample or pad<br>to num_frames] --> V2[RGB decode<br>per frame]
+        V2 --> V3[Bicubic resize<br>short side to 232]
+        V3 --> V4[Center crop<br>to 224 x 224]
+        V4 --> V5[Scale to 0..1<br>and ImageNet normalize]
+        V5 --> V6[Video tensor<br>B x F x 3 x 224 x 224]
+        V6 --> V7[Flatten frames to<br>B x F x 3 x 224 x 224]
+        V7 --> V8[Swin-T<br>spatial features]
+        V8 --> V9[Frame features<br>B x F x 768]
+        V9 --> V10[Position encoding<br>and TransformerEncoder]
+        V10 --> V11[Temporal<br>average]
+        V11 --> V12[Quality head<br>and score B]
     end
 ```
 
