@@ -1,8 +1,6 @@
 # docker/docker-compose.docker.yaml
 services:
   vqa-train:
-    build:
-      network: host
     runtime: nvidia
     network_mode: host
     environment:
@@ -10,8 +8,6 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all
 
   vqa-infer:
-    build:
-      network: host
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=all

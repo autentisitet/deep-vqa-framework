@@ -1,5 +1,6 @@
 # src/data/data_eda.py
 import json
+import math
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -21,6 +22,11 @@ from src.data.dataset_loaders import MetadataLoaderFactory
 from src.data.dataset_types import DatasetType
 from src.config.schemas import Config
 from src.utils.file_loader import CaseInsensitiveAssetResolver
+
+
+def _progress_bar(iterable, *, total: int, desc: str):
+    miniters = max(1, math.ceil(total * 0.02)) if total else 1
+    return tqdm(iterable, total=total, desc=desc, miniters=miniters)
 
 
 class DataEDA:
@@ -107,7 +113,7 @@ class DataEDA:
             self.df,
             train_ratio=train_ratio,
             val_ratio=val_ratio,
-            random_state=42,
+            random_state=self.cfg.preprocessing.seed,
             dataset_name=self.dataset_name,
         )
 
@@ -171,11 +177,7 @@ class DataEDA:
 
     def _analyze_media_properties(self):
         """Analyze media properties from disk."""
-        media_paths = []
-        for ext in self.file_extensions:
-            ext = ext.lstrip(".")
-            media_paths.extend(self.data_dir.rglob(f"*.{ext.lower()}"))
-            media_paths.extend(self.data_dir.rglob(f"*.{ext.upper()}"))
+        media_paths = [asset.path for asset in self.resolver.full_registry.values()]
 
         if not media_paths:
             logger.warning(f"No media files found in {self.data_dir}")
@@ -221,7 +223,7 @@ class DataEDA:
 
         self.corrupted_dir.mkdir(parents=True, exist_ok=True)
 
-        for i, row in tqdm(df_to_check.iterrows(), total=len(df_to_check), desc="Checking files"):
+        for i, row in _progress_bar(df_to_check.iterrows(), total=len(df_to_check), desc="Checking files"):
             sid = str(row["sample_id"])
 
             try:
@@ -335,11 +337,7 @@ class DataEDA:
         if self.df is None:
             return False
 
-        physical_names = set()
-        for ext in self.file_extensions:
-            ext = ext.lstrip(".")
-            physical_names.update({p.name.lower() for p in self.data_dir.rglob(f"*.{ext.lower()}")})
-            physical_names.update({p.name.lower() for p in self.data_dir.rglob(f"*.{ext.upper()}")})
+        physical_names = set(self.resolver.full_registry)
 
         label_names = {str(name).strip().lower() for name in self.df["sample_id"].astype(str)}
 
@@ -431,7 +429,7 @@ class DataEDA:
         return check_fold_distribution(
             df=fold_df,
             n_splits=n_splits,
-            random_state=42,
+            random_state=self.cfg.preprocessing.seed,
             dataset_name=self.dataset_name,
             verbose=True,
         )

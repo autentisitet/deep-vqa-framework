@@ -13,6 +13,8 @@ logs/
 nohup.out
 
 examples/**/*
+!examples/
+!examples/**/
 !examples/**/README.md
 
 
@@ -52,6 +54,9 @@ Thumbs.db
 .gemini/
 .aider*
 .codex/
+.agents/
 
+tmp/
+temp/
 Makefile.local
 config.mk

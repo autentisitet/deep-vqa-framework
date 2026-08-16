@@ -83,3 +83,27 @@ jobs:
         run: |
           uv lock --check
           echo "uv.lock is up-to-date with pyproject.toml"
+
+
+  code-quality:
+    name: Ruff and Mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install project and development dependencies
+        run: |
+          make install INSTALL_ARGS="--dev"
+          export PATH="$HOME/.local/bin:$PATH"
+          uv sync --extra dev --locked
+
+      - name: Run Makefile code checks
+        run: make check-code
+
+      - name: Run Makefile type checks
+        run: make typecheck

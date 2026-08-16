@@ -116,7 +116,7 @@ log_info "Output: $SAVE_NAME"
 if tar -czf "$SAVE_NAME" "${PACK_LIST[@]}" 2>/dev/null; then
     SIZE=$(du -h "$SAVE_NAME" | cut -f1)
     log_ok "Archive created successfully."
-    echo "  Path: $(CYAN)$SAVE_NAME$(RESET)"
+    echo -e "  Path: ${CYAN}${SAVE_NAME}${NC}"
     echo "  Size: $SIZE"
 else
     log_error "Archive creation failed."

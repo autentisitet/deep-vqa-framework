@@ -40,7 +40,8 @@ Thumbs.db
 .markdownlintignore
 Makefile.local
 config.mk
-
+tmp/
+temp/
 
 .cursor/
 .claude/
@@ -53,7 +54,7 @@ config.mk
 .gemini/
 .aider*
 .codex/
-
+.agents/
 
 
 .editorconfig

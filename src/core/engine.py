@@ -5,6 +5,7 @@ import re
 import shutil
 from pathlib import Path
 import json
+import math
 
 import numpy as np
 import torch
@@ -34,6 +35,12 @@ except ImportError:
 
     def autocast_context(device_type: str, enabled: bool):
         return amp_autocast(enabled=enabled)
+
+
+def progress_bar(iterable: Any, *, desc: str) -> tqdm:
+    total = len(iterable) if hasattr(iterable, "__len__") else None
+    miniters = max(1, math.ceil(total * 0.02)) if total else None
+    return tqdm(iterable, desc=desc, miniters=miniters)
 
 
 class TrainerEngine:
@@ -88,8 +95,10 @@ class TrainerEngine:
         # Checkpoint
         checkpoint_cfg = train_cfg.checkpoint
         self.checkpoint_monitor = checkpoint_cfg.monitor.lower()
+        self.checkpoint_secondary_monitor = checkpoint_cfg.secondary_monitor.lower()
         self.checkpoint_mode = checkpoint_cfg.mode
         self.best_checkpoint_score = float("-inf") if self.checkpoint_mode == "max" else float("inf")
+        self.best_checkpoint_secondary_score = float("-inf")
 
         logger.info(
             f"TrainerEngine initialized. Device: {self.device} | "
@@ -140,6 +149,10 @@ class TrainerEngine:
         if "metrics" in checkpoint:
             hist_metrics = {k.lower(): v for k, v in checkpoint["metrics"].items()}
             self.best_checkpoint_score = hist_metrics.get(self.checkpoint_monitor, self.best_checkpoint_score)
+            self.best_checkpoint_secondary_score = hist_metrics.get(
+                self.checkpoint_secondary_monitor,
+                self.best_checkpoint_secondary_score,
+            )
             if self.early_stop_enabled:
                 self.best_early_stop_score = hist_metrics.get(self.early_stop_monitor, self.best_early_stop_score)
 
@@ -154,7 +167,7 @@ class TrainerEngine:
         running_loss = 0.0
         accum_steps = self.gradient_accumulation_steps
 
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{self.epochs} [Train]")
+        pbar = progress_bar(train_loader, desc=f"Epoch {epoch}/{self.epochs} [Train]")
         for batch_idx, batch_data in enumerate(pbar):
             if isinstance(batch_data, dict):
                 inputs = batch_data["data"].to(self.device)
@@ -170,12 +183,7 @@ class TrainerEngine:
                 if outputs_f32.ndim > 1 and outputs_f32.size(-1) == 1:
                     outputs_f32 = outputs_f32.squeeze(-1)
                 labels = labels.view_as(outputs_f32).float()
-                loss_dict = self.criterion(
-                    outputs_f32,
-                    labels,
-                    model=self.model,
-                    mode=self.cfg.task_type,
-                )
+                loss_dict = self.criterion(outputs_f32, labels)
                 total_loss = loss_dict["total_loss"] / accum_steps
 
             self.scaler.scale(total_loss).backward()
@@ -195,7 +203,7 @@ class TrainerEngine:
             if batch_idx % log_interval == 0:
                 pbar.set_postfix({
                     "Loss": f"{total_loss.item() * accum_steps:.4f}",
-                    "MSE": f"{float(loss_dict.get('mse_loss', 0.0)):.4f}",
+                    "Huber": f"{float(loss_dict.get('smooth_l1_loss', 0.0)):.4f}",
                     "Rank": f"{float(loss_dict.get('rank_loss', 0.0)):.4f}",
                 })
 
@@ -217,7 +225,7 @@ class TrainerEngine:
         all_trues = []
         traditional_metrics_payload = {}
 
-        for batch_data in tqdm(val_loader, desc=f"Epoch {epoch}/{self.epochs} [Val]"):
+        for batch_data in progress_bar(val_loader, desc=f"Epoch {epoch}/{self.epochs} [Val]"):
             if isinstance(batch_data, dict):
                 inputs = batch_data["data"].to(self.device)
                 labels = batch_data["label"].to(self.device)
@@ -235,12 +243,7 @@ class TrainerEngine:
                 if outputs_f32.ndim > 1 and outputs_f32.size(-1) == 1:
                     outputs_f32 = outputs_f32.squeeze(-1)
                 labels = labels.view_as(outputs_f32).float()
-                loss_dict = self.criterion(
-                    outputs_f32,
-                    labels,
-                    model=self.model,
-                    mode=self.cfg.task_type,
-                )
+                loss_dict = self.criterion(outputs_f32, labels)
 
             running_loss += loss_dict["total_loss"].item()
             all_preds.extend(outputs_f32.cpu().numpy().flatten())
@@ -324,7 +327,9 @@ class TrainerEngine:
                     f"Val Loss: {val_loss:.4f} | SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}"
                 )
 
-            # Early stopping
+            should_stop = False
+
+            # Early stopping uses the primary validation metric only.
             if self.early_stop_enabled:
                 score = metrics.get(self.early_stop_monitor, val_loss)
                 if self.early_stop_monitor not in metrics:
@@ -341,12 +346,20 @@ class TrainerEngine:
                         f"Early stopping triggered. No improvement in '{self.early_stop_monitor}' "
                         f"for {self.early_stop_counter} epochs."
                     )
-                    break
+                    should_stop = True
 
             # Checkpoint
             ckpt_score = metrics.get(self.checkpoint_monitor, 0.0)
-            if self._is_improved(ckpt_score, self.best_checkpoint_score, self.checkpoint_mode):
+            ckpt_secondary_score = metrics.get(self.checkpoint_secondary_monitor, 0.0)
+            if self._is_primary_or_tiebreak_improved(
+                ckpt_score,
+                ckpt_secondary_score,
+                self.best_checkpoint_score,
+                self.best_checkpoint_secondary_score,
+                self.checkpoint_mode,
+            ):
                 self.best_checkpoint_score = ckpt_score
+                self.best_checkpoint_secondary_score = ckpt_secondary_score
                 self._save_checkpoint(
                     epoch,
                     val_loss,
@@ -364,12 +377,27 @@ class TrainerEngine:
                     current_fold=current_fold,
                 )
 
+            if should_stop:
+                break
+
             torch.cuda.empty_cache()
 
 
 
     def _is_improved(self, current: float, best: float, mode: str) -> bool:
         return current < best if mode == "min" else current > best
+
+    def _is_primary_or_tiebreak_improved(
+        self,
+        current: float,
+        current_secondary: float,
+        best: float,
+        best_secondary: float,
+        mode: str,
+    ) -> bool:
+        if self._is_improved(current, best, mode):
+            return True
+        return current == best and current_secondary > best_secondary
 
 
     def _save_checkpoint(
@@ -391,12 +419,13 @@ class TrainerEngine:
 
         base_name = self.evaluator.base_filename
         current_score = metrics.get(self.checkpoint_monitor, 0.0)
+        current_secondary_score = metrics.get(self.checkpoint_secondary_monitor, 0.0)
 
-        def extract_score(path: Path) -> float:
-            match = re.search(rf"{re.escape(self.checkpoint_monitor)}(-?\d+\.\d+)", path.name.lower())
+        def extract_score(path: Path, monitor: str, fallback: float) -> float:
+            match = re.search(rf"{re.escape(monitor)}(-?\d+\.\d+)", path.name.lower())
             if match:
                 return float(match.group(1))
-            return float("-inf") if self.checkpoint_mode == "max" else float("inf")
+            return fallback
 
         state = {
             "epoch": epoch,
@@ -414,7 +443,10 @@ class TrainerEngine:
             else:
                 clean_base = f"{base_name}_fold{current_fold}"
 
-            pt_name = f"{clean_base}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
+            pt_name = (
+                f"{clean_base}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.6f}_"
+                f"{self.checkpoint_secondary_monitor}{current_secondary_score:.6f}.pt"
+            )
             target_path = save_dir / pt_name
             torch.save(state, target_path)
             logger.info(f"Best checkpoint saved: {target_path.name}")
@@ -422,7 +454,14 @@ class TrainerEngine:
             all_best_pts = list(save_dir.glob(f"{clean_base}_best_epoch*.pt"))
             if len(all_best_pts) > top_k:
                 reverse_flag = self.checkpoint_mode == "max"
-                all_best_pts.sort(key=extract_score, reverse=reverse_flag)
+                primary_fallback = float("-inf") if self.checkpoint_mode == "max" else float("inf")
+
+                def checkpoint_sort_key(path: Path) -> tuple[float, float]:
+                    primary = extract_score(path, self.checkpoint_monitor, primary_fallback)
+                    secondary = extract_score(path, self.checkpoint_secondary_monitor, float("-inf"))
+                    return (primary, secondary) if reverse_flag else (-primary, secondary)
+
+                all_best_pts.sort(key=checkpoint_sort_key, reverse=True)
                 for old_pt in all_best_pts[top_k:]:
                     old_pt.unlink()
                     logger.debug(f"Removed old checkpoint: {old_pt.name}")

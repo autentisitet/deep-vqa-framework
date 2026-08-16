@@ -15,7 +15,7 @@ class IQAVQANet(nn.Module):
     """
     Quality assessment network supporting both images and videos.
 
-    - Image (4D): ResNet50 ImageNet backbone -> pooling -> MLP -> score
+    - Image (4D): Swin-T ImageNet backbone -> pooling -> MLP -> score
     - Video (5D): Swin-T ImageNet backbone -> pooling -> transformer -> MLP -> score
 
     The forward path is selected from tensor dimensionality:
@@ -33,7 +33,7 @@ class IQAVQANet(nn.Module):
             configure_torch_weight_cache(cfg)
 
         self.configured_backbone_name = model_cfg.backbone
-        self.image_backbone_name = getattr(model_cfg, "image_backbone", "resnet50")
+        self.image_backbone_name = getattr(model_cfg, "image_backbone", None) or self.configured_backbone_name
         self.video_backbone_name = getattr(model_cfg, "video_backbone", "swin_t")
         self.dropout_rate = model_cfg.dropout
         self.freeze_backbone = model_cfg.freeze_backbone

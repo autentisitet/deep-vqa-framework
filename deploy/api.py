@@ -8,6 +8,7 @@ Usage:
     uv run python -m deploy.api
 """
 
+import os
 import shutil
 import sys
 import tempfile
@@ -16,18 +17,15 @@ from pathlib import Path
 from typing import Any, Dict
 
 import cv2
-import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from deploy.core.runtime_config import cfg, ensure_runtime_dirs
-from deploy.core.preprocessor import Preprocessor
 from deploy.core.model_loader import load_checkpoint
 from deploy.core.inference import (
+    denormalize,
     predict_single,
-    predict_with_resnet_style,
-    image_to_video_tensor,
 )
 from src.config.schemas import Config
 
@@ -41,32 +39,30 @@ DEVICE = cfg.default_device
 # ---------- FastAPI ----------
 app = FastAPI(title="Deep-VQA Unified MOS API", version="4.0.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(",")
+    if origin.strip()
+]
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 model_cache: Dict[str, Dict[str, Any]] = {}
 
 
-def get_mos_params(config: Config, model_id: str) -> tuple:
-    """获取 MOS 反归一化参数"""
-    dataset_cfg = getattr(config, "dataset", {}) or {}
-    if hasattr(dataset_cfg, "model_dump"):
-        dataset_cfg = dataset_cfg.model_dump()
-    mos_min = dataset_cfg.get("mos_min", 0.0)
-    mos_max = dataset_cfg.get("mos_max", 5.0)
-
+def get_mos_params(config: Config) -> tuple[float, float]:
+    """Read and validate the MOS range embedded in the checkpoint config."""
+    mos_min = float(config.dataset.mos_min)
+    mos_max = float(config.dataset.mos_max)
+    if mos_max <= mos_min:
+        raise ValueError(f"Invalid checkpoint MOS range: [{mos_min}, {mos_max}]")
     return mos_min, mos_max
-
-
-def config_to_dict(config: Any) -> dict:
-    if hasattr(config, "model_dump"):
-        return config.model_dump()
-    return config if isinstance(config, dict) else {}
 
 
 def load_all_models():
@@ -75,17 +71,18 @@ def load_all_models():
     if DEFAULT_IQA_MODEL_PATH.exists():
         logger.info(f"[INFO] Loading IQA model: {DEFAULT_IQA_MODEL_PATH}")
         model, config_obj = load_checkpoint(DEFAULT_IQA_MODEL_PATH, device=DEVICE)
-        mos_min, mos_max = get_mos_params(config_obj, "resnet_iqa")
+        mos_min, mos_max = get_mos_params(config_obj)
         dataset_cfg = getattr(config_obj, "dataset", {}) or {}
         if hasattr(dataset_cfg, "model_dump"):
             dataset_cfg = dataset_cfg.model_dump()
-        model_cache["resnet_iqa"] = {
+        model_cache["iqa"] = {
             "model": model,
             "config": config_obj,
             "mos_min": mos_min,
             "mos_max": mos_max,
             "dataset": dataset_cfg.get("name", dataset_cfg.get("registry_key", "unknown")),
-            "num_frames": config_obj.model.num_frames,
+            "model_name": config_obj.model.name,
+            "backbone": config_obj.model.backbone,
         }
         logger.info(f"[OK] IQA loaded (MOS: {mos_min:.3f}~{mos_max:.3f})")
     else:
@@ -94,17 +91,18 @@ def load_all_models():
     if DEFAULT_VQA_MODEL_PATH.exists():
         logger.info(f"[INFO] Loading VQA model: {DEFAULT_VQA_MODEL_PATH}")
         model, config_obj = load_checkpoint(DEFAULT_VQA_MODEL_PATH, device=DEVICE)
-        mos_min, mos_max = get_mos_params(config_obj, "timeswin_vqa")
+        mos_min, mos_max = get_mos_params(config_obj)
         dataset_cfg = getattr(config_obj, "dataset", {}) or {}
         if hasattr(dataset_cfg, "model_dump"):
             dataset_cfg = dataset_cfg.model_dump()
-        model_cache["timeswin_vqa"] = {
+        model_cache["vqa"] = {
             "model": model,
             "config": config_obj,
             "mos_min": mos_min,
             "mos_max": mos_max,
             "dataset": dataset_cfg.get("name", dataset_cfg.get("registry_key", "unknown")),
-            "num_frames": config_obj.model.num_frames,
+            "model_name": config_obj.model.name,
+            "backbone": config_obj.model.backbone,
         }
         logger.info(f"[OK] VQA loaded (MOS: {mos_min:.3f}~{mos_max:.3f})")
     else:
@@ -166,7 +164,6 @@ async def evaluate(
     cached = model_cache[model]
     dl_model = cached["model"]
     dl_config = cached["config"]
-    dl_config_dict = config_to_dict(dl_config)
     mos_min = cached["mos_min"]
     mos_max = cached["mos_max"]
     dataset = cached.get("dataset", "unknown")
@@ -181,33 +178,14 @@ async def evaluate(
         media_size = get_media_size(tmp_path, media_type)
         t_start = time.time()
 
-        if model == "resnet_iqa":
-            result = predict_with_resnet_style(
-                dl_model, tmp_path, dl_config, DEVICE, mos_min, mos_max
-            )
-        elif model == "timeswin_vqa":
-            if media_type == "image":
-                preprocessor = Preprocessor()
-                img_tensor = preprocessor.process_image(tmp_path)
-                video_tensor = image_to_video_tensor(img_tensor, cached.get("num_frames", 8))
-                data_tensor = video_tensor.unsqueeze(0).to(DEVICE)
-
-                with torch.no_grad():
-                    output = dl_model(data_tensor).float()
-                    if output.ndim > 1 and output.size(-1) == 1:
-                        output = output.squeeze(-1)
-                    raw_score = float(output.flatten()[0].cpu().item())
-
-                dataset_mos = round(raw_score * (mos_max - mos_min) + mos_min, 4)
-                result = {
-                    "file": str(tmp_path),
-                    "raw_score": round(raw_score, 6),
-                    "mos_score": dataset_mos,
-                    "task_type": dl_config_dict.get("task_type", "vqa"),
-                    "model_name": dl_config_dict.get("model", {}).get("name", "IQAVQANet"),
-                }
-            else:
-                result = predict_single(dl_model, tmp_path, dl_config, DEVICE, mos_min, mos_max)
+        if model == "iqa":
+            if media_type != "image":
+                raise HTTPException(status_code=422, detail="iqa accepts image media only")
+            result = predict_single(dl_model, tmp_path, dl_config, DEVICE, mos_min, mos_max)
+        elif model == "vqa":
+            if media_type != "video":
+                raise HTTPException(status_code=422, detail="vqa accepts video media only")
+            result = predict_single(dl_model, tmp_path, dl_config, DEVICE, mos_min, mos_max)
         else:
             raise HTTPException(status_code=400, detail=f"Unknown model: {model}")
 
@@ -215,36 +193,36 @@ async def evaluate(
 
         raw_score = result.get("raw_score")
         dataset_mos = result.get("mos_score")
-        unified_mos = round(raw_score * 5.0, 4) if raw_score is not None else None
-
-        if unified_mos is None and dataset_mos is not None:
-            unified_mos = round(dataset_mos / (mos_max if mos_max else 5.0) * 5.0, 4)
-
         response = {
             "file": file.filename,
             "media_type": media_type,
             "task_type": result.get("task_type", task_type),
             "model": model,
-            "model_name": result.get("model_name", model_name),
-            "backbone": backbone,
+            "model_name": cached["model_name"],
+            "backbone": cached["backbone"],
             "dataset": dataset,
-            "mos": unified_mos,
-            "mos_score": unified_mos,
+            "mos": dataset_mos,
+            "mos_score": dataset_mos,
             "raw_score": raw_score,
+            "normalized_score": raw_score,
             "score": raw_score,
-            "overall": unified_mos,
+            "overall": dataset_mos,
             "dataset_mos": dataset_mos,
+            "mos_min": mos_min,
+            "mos_max": mos_max,
             "inference_ms": round(elapsed_ms, 2),
             "latency_ms": round(elapsed_ms, 2),
             "elapsed_ms": round(elapsed_ms, 2),
             "media_size": media_size,
             "metrics": {"plcc": None, "srocc": None, "rmse": None},
             "_debug_raw_score": raw_score,
-            "_debug_unified_mos": unified_mos,
             "_debug_dataset_mos": dataset_mos,
         }
 
-        logger.info(f"[OK] Inference: raw={raw_score}, unified={unified_mos}")
+        logger.info(
+            f"[OK] Inference: raw={raw_score}, dataset_mos={dataset_mos}, "
+            f"range=[{mos_min}, {mos_max}]"
+        )
         return response
 
     except ValueError as ve:

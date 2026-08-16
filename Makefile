@@ -1,10 +1,13 @@
-GREEN  := \033[0;32m
-BLUE   := \033[0;34m
-RED    := \033[0;31m
-YELLOW := \033[0;33m
-CYAN   := \033[0;36m
-BOLD   := \033[1m
-RESET  := \033[0m
+ESC    := $(shell printf '\033')
+GREEN  := $(ESC)[0;32m
+BLUE   := $(ESC)[0;34m
+RED    := $(ESC)[0;31m
+YELLOW := $(ESC)[0;33m
+CYAN   := $(ESC)[0;36m
+BOLD   := $(ESC)[1m
+RESET  := $(ESC)[0m
+
+SHELL := /bin/bash
 
 
 PROJECT_NAME := Deep-VQA-Framework
@@ -31,7 +34,7 @@ UV_RUN := uv run
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: help bootstrap setup install data info clean archive
+.PHONY: help bootstrap setup install data info cache_clean archive results-clean
 
 .PHONY: test-images test-videos test-all
 
@@ -87,7 +90,8 @@ help:
 
 	@echo ''
 	@echo '$(BLUE)Maintenance:$(RESET)'
-	@echo '  make clean          Remove cache and temporary files'
+	@echo '  make cache_clean    Remove cache and temporary files'
+	@echo '  make results-clean       Delete dated .pt/.csv/.log files older than 3 days'
 	@echo '  make archive        Package results'
 	@echo ''
 	@echo '$(CYAN)Info:$(RESET)'
@@ -105,16 +109,14 @@ help:
 	@echo '  make setup SETUP_ARGS="--mirror --all"'
 	@echo '  make install INSTALL_ARGS="--mirror --all"'
 	@echo '  make test-all'
-	@echo '  uv run python -m src.main --dataset tid2013 --model resnet_iqa'
-	@echo '  uv run python -m src.main --dataset konvid-1k --model timeswin_vqa'
+	@echo '  uv run python -m src.main --dataset tid2013 --model swin_iqa'
+	@echo '  uv run python -m src.main --dataset konvid-1k --model swin_vqa'
 
 
 
 INSTALL_ARGS ?=
-BOOTSTRAP_ARGS ?= $(filter --mirror, $(ARGS))
-SETUP_ARGS ?= $(ARGS)
-
-
+BOOTSTRAP_ARGS ?= $(filter --mirror, $(INSTALL_ARGS))
+SETUP_ARGS ?= $(INSTALL_ARGS)
 bootstrap:
 	@chmod +x $(ROOT_DIR)/scripts/*.sh
 	@cd $(ROOT_DIR)/scripts && bash bootstrap.sh $(BOOTSTRAP_ARGS) 2>&1 | tee $(LOG_DIR)/bootstrap.log
@@ -145,7 +147,7 @@ data:
 
 
 
-clean:
+cache_clean:
 	@echo "$(YELLOW)[WARN]$(RESET) Cleaning caches..."
 	@read -p "Remove all caches? [y/N] " confirm; \
 	if [ "$$confirm" = "y" ]; then \
@@ -156,6 +158,29 @@ clean:
 	fi
 
 
+
+
+results-clean:
+	@set -e; \
+	retention_before="$$(date -d '3 days ago' '+%Y%m%d_%H%M%S')"; \
+	read -r -p "Delete dated .pt/.csv/.log files in results older than $$retention_before? [y/N] " confirm; \
+	if [ "$$confirm" != "y" ]; then \
+		echo "$(BLUE)[INFO]$(RESET) Results cleanup aborted."; \
+		exit 0; \
+	fi; \
+	: > "$(LOG_DIR)/results_clean.log"; \
+	count=0; \
+	while IFS= read -r -d '' artifact; do \
+		filename="$$(basename "$$artifact")"; \
+		run_at="$${filename:0:15}"; \
+		if [[ "$$run_at" =~ ^[0-9]{8}_[0-9]{6}$$ ]] && [[ "$$run_at" < "$$retention_before" ]]; then \
+			printf "$(YELLOW)[INFO]$(RESET) Deleting artifact from %s: %s\n" "$$run_at" "$$filename"; \
+			rm -f -- "$$artifact"; \
+			printf '%s\n' "$$artifact" | tee -a "$(LOG_DIR)/results_clean.log"; \
+			count=$$((count + 1)); \
+		fi; \
+	done < <(find "$(ROOT_DIR)/results" -type f \( -name '*.pt' -o -name '*.csv' -o -name '*.log' \) -print0); \
+	echo "$(GREEN)[OK]$(RESET) Deleted $$count dated result file(s) older than 3 days. Log: $(CYAN)$(LOG_DIR)/results_clean.log$(RESET)"
 
 
 archive:
@@ -404,8 +429,8 @@ info:
 	@echo "  make typecheck          Run mypy type checker"
 	@echo "  make format-all         Format all code"
 	@echo "  make security-all       Run all security checks"
-	@echo "  uv run python -m src.main --dataset tid2013 --model resnet_iqa"
-	@echo "  uv run python -m src.main --dataset konvid-1k --model timeswin_vqa"
+	@echo "  uv run python -m src.main --dataset tid2013 --model swin_iqa"
+	@echo "  uv run python -m src.main --dataset konvid-1k --model swin_vqa"
 	@echo "========================================================================"
 
 
@@ -470,16 +495,17 @@ docker-train:
 	$(call check_runtime)
 	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-train
 	$(COMPOSE) $(COMPOSE_FILES) run --rm --name vqa-train vqa-train bash -c "\
+		set -o pipefail && \
 		make data && \
-		uv run python -m src.main --dataset tid2013 --model resnet_iqa > /app/results/tid2013.log 2>&1 && \
-		uv run python -m src.main --dataset konvid-1k --model timeswin_vqa > /app/results/konvid-1k.log 2>&1 \
+		uv run python -m src.main --dataset tid2013 --model swin_iqa 2>&1 | tee /app/results/tid2013.log && \
+		uv run python -m src.main --dataset konvid-1k --model swin_vqa 2>&1 | tee /app/results/konvid-1k.log \
 	"
 
 
 docker-infer:
 	$(call check_runtime)
 	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-infer
-	$(COMPOSE) $(COMPOSE_FILES) up -d vqa-infer
+	$(COMPOSE) $(COMPOSE_FILES) up -d vqa-infer nginx
 
 
 
@@ -487,6 +513,7 @@ docker-stop:
 	$(call check_runtime)
 	@echo "[INFO] Stopping containers..."
 	@$(RUNTIME) stop vqa-prod 2>/dev/null || true
+	@$(RUNTIME) stop vqa-nginx 2>/dev/null || true
 	@$(RUNTIME) stop vqa-train 2>/dev/null || true
 	@echo "$(GREEN)[OK]$(RESET) Containers stopped."
 
@@ -532,6 +559,7 @@ docker-purge-all:
 	@$(COMPOSE) $(COMPOSE_FILES) down --remove-orphans 2>/dev/null || true
 	@$(RUNTIME) ps -a --filter "name=vqa-train" -q | xargs -r $(RUNTIME) rm -f
 	@$(RUNTIME) ps -a --filter "name=vqa-prod" -q | xargs -r $(RUNTIME) rm -f
+	@$(RUNTIME) ps -a --filter "name=vqa-nginx" -q | xargs -r $(RUNTIME) rm -f
 
 	@echo "[INFO] Removing dangling images..."
 	@$(RUNTIME) images --filter "dangling=true" -q | xargs -r $(RUNTIME) rmi -f

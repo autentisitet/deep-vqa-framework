@@ -1,9 +1,9 @@
-# config/models/resnet_iqa.yaml
+# config/models/swin_iqa.yaml
 task_type: "iqa"
 
 model:
   name: "IQAVQANet"
-  backbone: "resnet50"
+  backbone: "swin_t"
   freeze_backbone: false
   pretrained: true
   dropout: 0.3
