@@ -117,6 +117,8 @@ help:
 INSTALL_ARGS ?=
 BOOTSTRAP_ARGS ?= $(filter --mirror, $(INSTALL_ARGS))
 SETUP_ARGS ?= $(INSTALL_ARGS)
+ARCHIVE_ARGS ?= --all
+GIT_LOG_FILE ?= $(ROOT_DIR)/git_log.txt
 bootstrap:
 	@chmod +x $(ROOT_DIR)/scripts/*.sh
 	@cd $(ROOT_DIR)/scripts && bash bootstrap.sh $(BOOTSTRAP_ARGS) 2>&1 | tee $(LOG_DIR)/bootstrap.log
@@ -188,7 +190,7 @@ archive:
 	@if [ -f "$(LOG_DIR)/archive.log" ]; then \
 		mv "$(LOG_DIR)/archive.log" "$(LOG_DIR)/archive.log.$$(date +%Y%m%d%H%M%S).bak"; \
 	fi
-	@cd $(ROOT_DIR)/scripts && bash archive_results.sh --all 2>&1 | tee $(LOG_DIR)/archive.log
+	@cd $(ROOT_DIR)/scripts && bash archive_results.sh $(ARCHIVE_ARGS) 2>&1 | tee $(LOG_DIR)/archive.log
 	@echo "$(GREEN)[OK]$(RESET) Archive completed."
 
 

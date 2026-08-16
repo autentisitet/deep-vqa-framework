@@ -432,6 +432,9 @@ For routine maintenance:
 make cache_clean
 make results-clean
 make archive
+# Archive only results or only datasets:
+make archive ARCHIVE_ARGS="--results"
+make archive ARCHIVE_ARGS="--datasets"
 ```
 
 `results-clean` asks for confirmation, then uses the `YYYYMMDD_HHMMSS` prefix in each filename to delete dated `.pt`, `.csv`, and `.log` files older than three days under `results/`. Files without that timestamp prefix, and files outside `results/`, are kept.

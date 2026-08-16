@@ -427,6 +427,9 @@ YAML 加载后会由 Pydantic 使用 `extra="forbid"` 校验。未知键会被�
 make cache_clean
 make results-clean
 make archive
+# 仅归档结果或数据集：
+make archive ARCHIVE_ARGS="--results"
+make archive ARCHIVE_ARGS="--datasets"
 ```
 
 `results-clean` 会要求确认，然后使用文件名开头的 `YYYYMMDD_HHMMSS` 删除
