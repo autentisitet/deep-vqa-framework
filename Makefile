@@ -115,8 +115,8 @@ help:
 
 
 INSTALL_ARGS ?=
-BOOTSTRAP_ARGS ?= $(filter --mirror, $(ARGS))
-SETUP_ARGS ?= $(ARGS)
+BOOTSTRAP_ARGS ?= $(filter --mirror, $(INSTALL_ARGS))
+SETUP_ARGS ?= $(INSTALL_ARGS)
 bootstrap:
 	@chmod +x $(ROOT_DIR)/scripts/*.sh
 	@cd $(ROOT_DIR)/scripts && bash bootstrap.sh $(BOOTSTRAP_ARGS) 2>&1 | tee $(LOG_DIR)/bootstrap.log

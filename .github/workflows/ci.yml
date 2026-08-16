@@ -91,18 +91,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install project and development dependencies
-        run: uv sync --extra dev --locked
+        run: |
+          make install INSTALL_ARGS="--dev"
+          export PATH="$HOME/.local/bin:$PATH"
+          uv sync --extra dev --locked
 
       - name: Run Makefile code checks
         run: make check-code
