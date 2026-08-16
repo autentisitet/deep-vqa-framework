@@ -18,7 +18,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 def load_config(
     config_dir: Path = Path("config"),
-    model_name: str = "resnet_iqa",
+    model_name: str = "swin_iqa",
     dataset_name: str = "tid2013",
 ) -> Config:
     dataset_key = MetadataLoaderFactory.normalize_key(dataset_name)

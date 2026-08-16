@@ -1,11 +1,11 @@
 # src/config/schemas.py
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional
 from pathlib import Path
 
 
 class _BaseModel(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
 
 # ============================================================
@@ -68,10 +68,7 @@ class PathsConfig(_BaseModel):
 # 系统配置
 # ============================================================
 class SystemConfig(_BaseModel):
-    project_name: str = "deep-vqa-framework"
-    device: str = "cuda"
     amp: bool = True
-    num_workers: int = 4
     pin_memory: bool = True
 
 
@@ -80,9 +77,6 @@ class SystemConfig(_BaseModel):
 # ============================================================
 class PreprocessingConfig(_BaseModel):
     seed: int = 42
-    shuffle: bool = True
-    pin_memory: bool = True
-    val_interval: int = 1
     k_fold: int = 5
     batch_size: int = 32
     num_workers: int = 4
@@ -99,11 +93,10 @@ class EarlyStopConfig(_BaseModel):
 
 
 class CheckpointConfig(_BaseModel):
-    save_best: bool = True
-    save_last: bool = True
     monitor: str = "val_srocc"
+    secondary_monitor: str = "val_plcc"
     mode: str = "max"
-    save_top_k: int = 3
+    save_top_k: int = 2
 
 
 # ============================================================
@@ -117,7 +110,6 @@ class TrainConfig(_BaseModel):
     gradient_accumulation_steps: int = 4
     optimizer: str = "adamw"
     scheduler: str = "cosine"
-    warmup_epochs: int = 5
     early_stop: EarlyStopConfig = Field(default_factory=EarlyStopConfig)
     checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig)
 
@@ -126,15 +118,10 @@ class TrainConfig(_BaseModel):
 # 损失配置
 # ============================================================
 class LossConfig(_BaseModel):
-    mse_weight: float = 0.7
+    smooth_l1_weight: float = 0.7
     rank_weight: float = 0.3
-    plcc_weight: float = 0.0
-    iqa_mse_weight: Optional[float] = None
-    iqa_rank_weight: Optional[float] = None
-    iqa_plcc_weight: Optional[float] = None
-    vqa_mse_weight: Optional[float] = None
-    vqa_rank_weight: Optional[float] = None
-    vqa_plcc_weight: Optional[float] = None
+    huber_delta: float = 0.1
+    rank_epsilon: float = 0.01
     max_pairs: int = 5000
 
 
@@ -144,7 +131,7 @@ class LossConfig(_BaseModel):
 class ModelArchConfig(_BaseModel):
     name: str
     backbone: str
-    image_backbone: str = "resnet50"
+    image_backbone: Optional[str] = None
     video_backbone: str = "swin_t"
     freeze_backbone: bool = False
     pretrained: bool = True
@@ -159,21 +146,6 @@ class ModelArchConfig(_BaseModel):
 # ============================================================
 class LoggingConfig(_BaseModel):
     log_interval: int = 10
-    save_period: int = 1
-    tensorboard: bool = True
-    log_level: str = "INFO"
-    print_frequency: int = 50
-    save_sample_images: bool = False
-
-
-# ============================================================
-# 评估配置
-# ============================================================
-class EvaluationConfig(_BaseModel):
-    test_after_training: bool = True
-    test_best_epoch: bool = True
-    save_predictions: bool = True
-    metrics: List[str] = ["plcc", "srocc", "krocc", "rmse"]
 
 
 # ============================================================
@@ -183,30 +155,10 @@ class DatasetPathsConfig(_BaseModel):
     root: str
     data: str
     metadata: str
-    metrics: Optional[str] = None
-    reference: Optional[str] = None
 
 
 class DatasetMetadataConfig(_BaseModel):
     mos_file: Optional[str] = None
-    file_format: Optional[str] = None
-    delimiter: Optional[str] = None
-
-
-class DatasetColumnsConfig(_BaseModel):
-    id_col: Optional[Union[str, int]] = None
-    mos_col: Optional[Union[str, int]] = None
-    std_col: Optional[Union[str, int]] = None
-
-
-class DatasetPreprocessingConfig(_BaseModel):
-    resize: Optional[List[int]] = None
-    normalize: Optional[bool] = None
-    augmentation: Optional[bool] = None
-    num_frames: Optional[int] = None
-    fragment_sampling: Optional[Dict[str, Any]] = None
-    frame_size: Optional[List[int]] = None
-    fps: Optional[float] = None
 
 
 class DatasetMetaConfig(_BaseModel):
@@ -215,10 +167,7 @@ class DatasetMetaConfig(_BaseModel):
     data_type: str  # "image" or "video"
     paths: DatasetPathsConfig
     registry_key: str = ""
-    has_text: bool = False
     metadata: DatasetMetadataConfig = Field(default_factory=DatasetMetadataConfig)
-    columns: DatasetColumnsConfig = Field(default_factory=DatasetColumnsConfig)
-    preprocessing: DatasetPreprocessingConfig = Field(default_factory=DatasetPreprocessingConfig)
     mos_min: float = 0.0
     mos_max: float = 5.0
 
@@ -232,7 +181,6 @@ class Config(_BaseModel):
     preprocessing: PreprocessingConfig
     logging: LoggingConfig
     train: TrainConfig
-    evaluation: EvaluationConfig
     paths: PathsConfig = Field(default_factory=PathsConfig)
     dataset: DatasetMetaConfig
 
