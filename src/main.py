@@ -1,6 +1,5 @@
 import argparse
 import os
-import pdb
 import shutil
 from functools import wraps
 from pathlib import Path
@@ -40,6 +39,7 @@ def _deploy_best_checkpoint(cfg: Any, dataset_name: str, base_fn: str) -> Path:
         base_fn=base_fn,
         monitor=monitor,
         mode=mode,
+        secondary_monitor=cfg.train.checkpoint.secondary_monitor.lower(),
     )
 
     deploy_dir = cfg.paths.deploy_iqa_dir() if task_type == "iqa" else cfg.paths.deploy_vqa_dir()
@@ -121,7 +121,7 @@ def _plot_training_outputs(
 @time_it
 def main() -> dict[str, Any] | bool:
     parser = argparse.ArgumentParser(description="Deep VQA/IQA General Data-Driven Framework")
-    parser.add_argument("--model", type=str, default="resnet_iqa")
+    parser.add_argument("--model", type=str, default="swin_iqa")
     parser.add_argument("--dataset", type=str, default="TID2013")
     parser.add_argument("--smoke_test", action="store_true")
     parser.add_argument(
@@ -181,7 +181,6 @@ def main() -> dict[str, Any] | bool:
 
     if eda_engine.df is None or "split" not in eda_engine.df.columns:
         logger.error("EDA pipeline failure.")
-        pdb.set_trace()
         return False
 
     if "mos_min" in eda_engine.stats and "mos_max" in eda_engine.stats:
@@ -189,12 +188,11 @@ def main() -> dict[str, Any] | bool:
 
     if args.smoke_test and eda_engine.df is not None:
         eda_engine.df = eda_engine.df.sample(
-            n=min(16, len(eda_engine.df)), random_state=42
+            n=min(16, len(eda_engine.df)), random_state=cfg.preprocessing.seed
         ).reset_index(drop=True)
 
     if "split" not in eda_engine.df.columns:
         logger.error("Data EDA did not create split column!")
-        pdb.set_trace()
         return False
 
     resolver = CaseInsensitiveAssetResolver(target_dir=data_dir)
@@ -217,7 +215,6 @@ def main() -> dict[str, Any] | bool:
         completed_folds = pipeline.execute_cross_validation(evaluator=evaluator)
     except Exception as e:
         logger.error(f"Training failed: {e}")
-        pdb.set_trace()
         return False
 
     plotter = MetricsPlotter(
@@ -225,14 +222,18 @@ def main() -> dict[str, Any] | bool:
         plots_dir=plots_dir,
     )
 
-    _plot_training_outputs(
-        plotter=plotter,
-        train_logs_dir=train_logs_dir,
-        base_fn=base_fn,
-        dataset_name=dataset_name,
-        n_splits=completed_folds,
-        fast_run=False,
-    )
+    try:
+        _plot_training_outputs(
+            plotter=plotter,
+            train_logs_dir=train_logs_dir,
+            base_fn=base_fn,
+            dataset_name=dataset_name,
+            n_splits=completed_folds,
+            fast_run=args.smoke_test,
+        )
+    except Exception as e:
+        # Checkpoint deployment is still valid if an optional visualization fails.
+        logger.exception(f"Training visualization failed; continuing to deployment: {e}")
     logger.info("System lifecycle completed successfully.")
     return {"cfg": cfg, "dataset_name": dataset_name, "base_fn": base_fn}
 

@@ -137,8 +137,21 @@ class Tid2013Loader(BaseMetadataLoader):
         except Exception as e:
             # If pandas read fails, use a cleanup function as a fallback.
             logger.warning(f"TID2013 pandas read failed, attempting to parse line by line: {e}")
-            df = self._parse_with_cleaner(meta_file, delimiter_hint=[r"\s+"])
+            records = []
+            with open(meta_file, "r", encoding="utf-8") as f:
+                for line_num, line in enumerate(f, 1):
+                    fields = clean_and_split_line(line, delimiter_hint=[" ", "\t"])
+                    if not fields:
+                        continue
+                    if len(fields) < 2:
+                        logger.warning(f"TID2013 line {line_num} has insufficient fields: {fields}")
+                        continue
+                    records.append({"mos": fields[0], "sample_id": fields[1]})
+            if not records:
+                raise ValueError(f"No valid TID2013 metadata parsed from {meta_file}")
+            df = pd.DataFrame(records)
             df = self._ensure_extension(df, ".bmp")
+            df["mos"] = pd.to_numeric(df["mos"], errors="raise")
             df = self._add_reference_id(df)
             return df[["sample_id", "mos", "reference_id"]]
 
@@ -158,9 +171,23 @@ class KonvidLoader(BaseMetadataLoader):
 
         except Exception as e:
             logger.warning(f"Konvid-1k pandas read failed, attempting to parse line by line: {e}")
-            # Konvid is a comma separator.
-            df = self._parse_with_cleaner(meta_file, delimiter_hint=[","])
+            records = []
+            with open(meta_file, "r", encoding="utf-8") as f:
+                for line_num, line in enumerate(f, 1):
+                    fields = clean_and_split_line(line, delimiter_hint=[","])
+                    if not fields:
+                        continue
+                    if line_num == 1 and fields[0].lower() == "flickr_id":
+                        continue
+                    if len(fields) < 2:
+                        logger.warning(f"KoNViD-1k line {line_num} has insufficient fields: {fields}")
+                        continue
+                    records.append({"sample_id": fields[0], "mos": fields[1]})
+            if not records:
+                raise ValueError(f"No valid KoNViD-1k metadata parsed from {meta_file}")
+            df = pd.DataFrame(records)
             df = self._ensure_extension(df, ".mp4")
+            df["mos"] = pd.to_numeric(df["mos"], errors="raise")
             return df[["sample_id", "mos"]]
 
 
@@ -185,7 +212,19 @@ class T2VqaLoader(BaseMetadataLoader):
 
         except Exception as e:
             logger.warning(f"T2VQA pandas read failed, attempting to parse line by line: {e}")
-            # T2VQA is a vertical line separator.
-            df = self._parse_with_cleaner(meta_file, delimiter_hint=["|"])
+            records = []
+            with open(meta_file, "r", encoding="utf-8") as f:
+                for line_num, line in enumerate(f, 1):
+                    fields = clean_and_split_line(line, delimiter_hint=["|"])
+                    if not fields:
+                        continue
+                    if len(fields) < 3:
+                        logger.warning(f"T2VQA line {line_num} has insufficient fields: {fields}")
+                        continue
+                    records.append({"sample_id": fields[0], "mos": fields[2]})
+            if not records:
+                raise ValueError(f"No valid T2VQA metadata parsed from {meta_file}")
+            df = pd.DataFrame(records)
             df = self._ensure_extension(df, ".mp4")
+            df["mos"] = pd.to_numeric(df["mos"], errors="raise")
             return df[["sample_id", "mos"]]

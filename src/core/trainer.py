@@ -246,7 +246,7 @@ class TrainerExecutionPipeline:
         splits, split_strategy = make_group_kfold_splits(
             df=active_df,
             n_splits=n_splits,
-            random_state=42,
+            random_state=self.cfg.preprocessing.seed,
             dataset_name=dataset_key,
         )
         if not splits:
@@ -338,17 +338,8 @@ class TrainerExecutionPipeline:
         )
 
         model = IQAVQANet(cfg=self.cfg).to(self.device)
-        optimizer_cfg = self.cfg.train
-        optimizer = torch.optim.AdamW(
-            model.parameters(),
-            lr=optimizer_cfg.lr,
-            weight_decay=optimizer_cfg.weight_decay,
-        )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=optimizer_cfg.epochs,
-            eta_min=1e-6,
-        )
+        optimizer = self._build_optimizer(model)
+        scheduler = self._build_scheduler(optimizer)
         criterion = IQAVQALoss(cfg=self.cfg)
 
         engine = TrainerEngine(
@@ -365,6 +356,63 @@ class TrainerExecutionPipeline:
             train_loader,
             val_loader,
             current_fold=current_fold,
+        )
+
+    def _build_optimizer(self, model: torch.nn.Module) -> torch.optim.Optimizer:
+        train_cfg = self.cfg.train
+        optimizer_name = train_cfg.optimizer.lower()
+
+        if optimizer_name == "adamw":
+            optimizer_cls = torch.optim.AdamW
+        elif optimizer_name == "adam":
+            optimizer_cls = torch.optim.Adam
+        elif optimizer_name == "sgd":
+            return torch.optim.SGD(
+                model.parameters(),
+                lr=train_cfg.lr,
+                momentum=0.9,
+                weight_decay=train_cfg.weight_decay,
+            )
+        else:
+            logger.warning(f"Unsupported optimizer '{train_cfg.optimizer}', falling back to AdamW.")
+            optimizer_cls = torch.optim.AdamW
+
+        return optimizer_cls(
+            model.parameters(),
+            lr=train_cfg.lr,
+            weight_decay=train_cfg.weight_decay,
+        )
+
+    def _build_scheduler(
+        self,
+        optimizer: torch.optim.Optimizer,
+    ) -> Any | None:
+        train_cfg = self.cfg.train
+        scheduler_name = train_cfg.scheduler.lower()
+
+        if scheduler_name in {"none", "off", "disabled"}:
+            return None
+
+        if scheduler_name == "cosine":
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=train_cfg.epochs,
+                eta_min=1e-6,
+            )
+
+        if scheduler_name in {"plateau", "reduce_on_plateau", "reduce_lr_on_plateau"}:
+            return torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                mode="min",
+                factor=0.5,
+                patience=max(1, train_cfg.early_stop.patience // 2),
+            )
+
+        logger.warning(f"Unsupported scheduler '{train_cfg.scheduler}', falling back to cosine.")
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=train_cfg.epochs,
+            eta_min=1e-6,
         )
 
 
@@ -396,6 +444,7 @@ class TrainerExecutionPipeline:
             base_fn=base_filename,
             monitor=self.cfg.train.checkpoint.monitor.lower(),
             mode=self.cfg.train.checkpoint.mode.lower(),
+            secondary_monitor=self.cfg.train.checkpoint.secondary_monitor.lower(),
         )
         test_base_filename = f"{base_filename}_test"
 

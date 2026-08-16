@@ -19,6 +19,7 @@ def select_best_checkpoint(
     base_fn: str,
     monitor: str,
     mode: str,
+    secondary_monitor: str = "val_plcc",
 ) -> Path:
     """Select the best checkpoint for one run across all folds."""
     mode = mode.lower()
@@ -35,17 +36,25 @@ def select_best_checkpoint(
         if path.name.startswith(prefix) and "_best_epoch" in path.name
     ]
 
-    scored_paths: list[tuple[Path, float, float]] = []
+    scored_paths: list[tuple[Path, float, float, float]] = []
     for path in best_epoch_paths:
         score = checkpoint_score_from_name(path, monitor)
         if score is not None:
-            scored_paths.append((path, score, path.stat().st_mtime))
+            secondary_score = checkpoint_score_from_name(path, secondary_monitor)
+            scored_paths.append(
+                (
+                    path,
+                    score,
+                    secondary_score if secondary_score is not None else float("-inf"),
+                    path.stat().st_mtime,
+                )
+            )
 
     if scored_paths:
         if mode == "max":
-            best_path, best_score, _ = max(scored_paths, key=lambda item: (item[1], item[2]))
+            best_path, best_score, _, _ = max(scored_paths, key=lambda item: (item[1], item[2], item[3]))
         else:
-            best_path, best_score, _ = min(scored_paths, key=lambda item: (item[1], -item[2]))
+            best_path, best_score, _, _ = min(scored_paths, key=lambda item: (item[1], -item[2], -item[3]))
         logger.info(f"Selected best checkpoint by {monitor}: {best_path.name} ({best_score:.4f})")
         return best_path
 

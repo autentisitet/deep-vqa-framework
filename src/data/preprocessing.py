@@ -1,11 +1,13 @@
 from typing import Optional, Sequence
 
-import cv2
 import numpy as np
 import torch
+from torchvision.transforms import InterpolationMode
+from torchvision.transforms import functional as tvf
 
 
 IMAGENET_INPUT_SIZE = 224
+SWIN_T_RESIZE_SIZE = 232
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
@@ -39,14 +41,16 @@ def rgb_array_to_imagenet_tensor(
     image_np: np.ndarray,
     input_size: int = IMAGENET_INPUT_SIZE,
 ) -> torch.Tensor:
-    """Convert one RGB uint8 image [H, W, 3] to normalized [3, input_size, input_size]."""
+    """Apply the torchvision Swin-T ImageNet resize/crop/normalize pipeline."""
     if image_np is None:
         raise ValueError("Image array is None")
     if image_np.ndim != 3 or image_np.shape[-1] != 3 or image_np.dtype != np.uint8:
         raise ValueError(f"Unsupported RGB image format: shape={image_np.shape}, dtype={image_np.dtype}")
 
-    resized = cv2.resize(image_np, (input_size, input_size), interpolation=cv2.INTER_LINEAR)
-    tensor = torch.from_numpy(np.ascontiguousarray(resized)).permute(2, 0, 1).float().div(255.0)
+    tensor = torch.from_numpy(np.ascontiguousarray(image_np)).permute(2, 0, 1).float().div(255.0)
+    resize_size = round(input_size * SWIN_T_RESIZE_SIZE / IMAGENET_INPUT_SIZE)
+    tensor = tvf.resize(tensor, resize_size, interpolation=InterpolationMode.BICUBIC, antialias=True)
+    tensor = tvf.center_crop(tensor, [input_size, input_size])
     return normalize_imagenet_tensor(tensor)
 
 
@@ -54,7 +58,7 @@ def rgb_video_array_to_imagenet_tensor(
     frames_np: np.ndarray,
     input_size: int = IMAGENET_INPUT_SIZE,
 ) -> torch.Tensor:
-    """Convert RGB uint8 video frames [F, H, W, 3] to normalized [F, 3, input_size, input_size]."""
+    """Apply the Swin-T ImageNet preprocessing pipeline to RGB video frames."""
     if frames_np is None:
         raise ValueError("Video frame array is None")
     if frames_np.ndim != 4 or frames_np.shape[-1] != 3 or frames_np.dtype != np.uint8:
@@ -62,12 +66,10 @@ def rgb_video_array_to_imagenet_tensor(
     if frames_np.shape[0] == 0:
         raise ValueError("Video frame array is empty")
 
-    resized = [
-        cv2.resize(frame, (input_size, input_size), interpolation=cv2.INTER_LINEAR)
-        for frame in frames_np
-    ]
-    video_np = np.stack(resized)
-    tensor = torch.from_numpy(np.ascontiguousarray(video_np)).permute(0, 3, 1, 2).float().div(255.0)
+    tensor = torch.from_numpy(np.ascontiguousarray(frames_np)).permute(0, 3, 1, 2).float().div(255.0)
+    resize_size = round(input_size * SWIN_T_RESIZE_SIZE / IMAGENET_INPUT_SIZE)
+    tensor = tvf.resize(tensor, resize_size, interpolation=InterpolationMode.BICUBIC, antialias=True)
+    tensor = tvf.center_crop(tensor, [input_size, input_size])
     return normalize_imagenet_tensor(tensor)
 
 
