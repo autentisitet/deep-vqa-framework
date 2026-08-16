@@ -81,8 +81,8 @@
 </head>
 <body>
     <div class="topbar">
-        <div class="title">Deep-VQA-Framework Pipeline v0.6.4</div>
-        <div class="subtitle">Integrity first · ImageNet adaptation · group-aware CV · automatic checkpoint deployment</div>
+        <div class="title">Deep-VQA-Framework Platform v0.7.0</div>
+        <div class="subtitle">Dataset audit · reproducible IQA/VQA training · evaluation · checkpoint handoff · API deployment</div>
     </div>
     <div class="mermaid">
     graph TD
@@ -116,7 +116,7 @@
             DE --> INT[eda/integrity.py<br/>缺失·损坏·黑白帧·跳帧检测]
             INT --> BAD[(results/{dataset}/corrupted/<br/>隔离坏文件 + 标签备份)]
             DE --> STA[eda/statistics.py<br/>EDA + MOS统计]
-            DE --> PP[preprocessing.py<br/>RGB·224·ImageNet mean/std]
+            DE --> PP[preprocessing.py<br/>RGB·bicubic 232·center crop 224<br/>ImageNet mean/std]
             DE --> SPL[eda/split.py<br/>Group train/val/test + Group K-fold]
             DE --> FL[file_loader.py<br/>CaseInsensitiveAssetResolver]
             DE --> TY[dataset_types.py]
@@ -128,7 +128,7 @@
             PP --> TR
             TR -->|"注入 evaluator 实例"| E[engine.py<br/>TrainerEngine]
             E --> N{iqavqa_model.py<br/>IQAVQANet<br/>按输入维度路由}
-            N -->|"4D tensor Bx3x224x224"| IQA[Image branch<br/>ResNet50 IMAGENET1K_V1<br/>BatchNorm2d + AdaptiveAvgPool2d<br/>feature Bx2048]
+            N -->|"4D tensor Bx3x224x224"| IQA[Image branch<br/>Swin-T IMAGENET1K_V1<br/>LayerNorm + AdaptiveAvgPool2d<br/>feature Bx768]
             N -->|"5D tensor BxFx3x224x224"| VQA[Video branch<br/>Swin-T IMAGENET1K_V1<br/>LayerNorm + spatial pooling<br/>frame feature BxFx768]
             VQA --> TF[Temporal fusion<br/>positional embedding<br/>TransformerEncoder + temporal average]
             IQA --> HD[heads.py<br/>Quality head<br/>3-layer MLP + Sigmoid]
@@ -146,12 +146,13 @@
             AR --> LOG[(Log + Config + Plots + Weights<br/>results/{dataset}/)]
         end
 
-        subgraph STAGE_7 [7. 推理部署 - 交付层]
+        subgraph STAGE_7 [7. 推理与服务 - 平台交付层]
             F -->|"训练成功后自动复制<br/>{dataset}_best.pt"| BM[(deploy/iqa-models/<br/>deploy/vqa-models/)]
             BM --> CORE[deploy/core/*.py<br/>Pydantic runtime config + preprocessing + loading + inference]
             CORE --> API[deploy/api.py<br/>FastAPI /evaluate /health]
             CORE --> CLI[deploy/cli.py<br/>Batch inference CLI]
-            API --> WEB[frontend/index.html<br/>前端可视化 Demo]
+            API --> NGINX[nginx<br/>静态前端 + /api/ 反向代理]
+            WEB[frontend/index.html<br/>浏览器前端] --> NGINX
             API --> EXT[外部应用调用]
         end
 

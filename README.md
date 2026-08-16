@@ -4,38 +4,17 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.12+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.6.4-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
 **🌐 [English](README.md) | [简体中文](README_zh.md)**
 
-**A research-to-deployment framework for Image Quality Assessment (IQA) and Video Quality Assessment (VQA).**
+**An end-to-end platform for image and video quality assessment.**
 
-Deep-VQA-Framework is a production-oriented IQA/VQA quality assessment framework covering data auditing, training and evaluation, result visualization, checkpoint publication, and inference serving.
-On the data side, corrupted samples are quarantined with label backups and reference-content groups prevent distortion variants from leaking across splits; on the model side, 4D and 5D tensors select ResNet50 or Swin-T ImageNet feature paths, and successful runs publish `{dataset}_best.pt` directly into the `deploy/` inference layout.
+Deep-VQA-Framework provides the engineering path from quality-labeled media to a usable IQA/VQA model: dataset inspection and integrity checks, leakage-aware splitting, reproducible training and evaluation, experiment artifacts, checkpoint selection, batch inference, and containerized API deployment. It is designed as an extensible platform for developing and operating image/video quality assessment models, rather than as a single model implementation.
 
-### What Stands Out
-
-| Need | Built-in Answer |
-| :--- | :--- |
-| One code path for IQA and VQA | Tensor dimensionality selects the route: 4D images use ResNet50, 5D videos use Swin-T |
-| Comparable image/video inputs | Both branches use RGB, 224x224, `[0, 1]`, ImageNet mean/std preprocessing |
-| Leakage-safe evaluation | Train/val/test and K-fold splits are group-aware, so the same reference content stays in one split |
-| Bad-data isolation | Missing/corrupted samples are removed before splitting; their labels are backed up under `results/{dataset}/corrupted/labels/` |
-| Training evidence, not just logs | EDA plots, fold training curves, residual plots, comparison plots, and fold summaries are generated after training |
-| Deployment handoff | Successful runs copy the best checkpoint to `deploy/iqa-models/{dataset}_best.pt` or `deploy/vqa-models/{dataset}_best.pt` |
-| Repeatable container runs | Docker/Podman configs mount `.cache` so uv and torchvision pretrained weights can be reused |
-
-```text
-metadata + media
-  -> integrity quarantine
-  -> EDA + MOS normalization
-  -> group-aware train/val/test split
-  -> group-aware K-fold training with ImageNet preprocessing on decode
-  -> plots + best checkpoint
-  -> deploy/{iqa-models|vqa-models}/{dataset}_best.pt
-```
+The current default model uses a Swin-T backbone for image and per-frame spatial features. Video assessment adds positional encoding and Transformer-based temporal fusion. After training, selected checkpoints can be handed off to `deploy/` for batch or API inference.
 
 ---
 
@@ -53,7 +32,6 @@ metadata + media
 - [Troubleshooting](#troubleshooting)
 - [Dependency Security](#dependency-security)
 - [License](#license)
-- [Contributors](#contributors)
 - [Acknowledgements](#acknowledgments)
 
 ---
@@ -62,17 +40,17 @@ metadata + media
 
 ### Design Contracts
 
-The framework treats IQA/VQA training as a set of explicit contracts instead of a loose script chain.
+The platform is organized around explicit contracts for data, models, configuration, evaluation, and deployment. This keeps the training and serving paths reproducible as new datasets and model variants are added.
 
 | Contract | Implementation |
 | :--- | :--- |
 | **Modality routing** | 4D tensors are image batches, 5D tensors are video batches; invalid channel layouts fail early |
-| **Backbone policy** | Images use ResNet50 ImageNet features with BN; videos use Swin-T ImageNet features with LN and temporal fusion |
-| **Preprocessing** | Images and sampled video frames share RGB, 224x224, `[0, 1]`, ImageNet mean/std normalization |
+| **Backbone policy** | The image backbone is selected by the model configuration (Swin-T by default; ResNet50 supported); video reuses its spatial backbone with positional encoding and temporal fusion |
+| **Preprocessing** | Images and sampled video frames use RGB, bicubic resize 232, center crop 224, and ImageNet mean/std normalization |
 | **Data rejection** | Missing/corrupted media is removed before EDA and splitting; labels are backed up instead of rewritten to zero |
 | **Split isolation** | Train/val/test and K-fold splits are group-aware to keep repeated reference content in one partition |
 | **Artifacts** | Outputs use lowercase dataset keys under `results/{dataset}/`; successful runs publish `{dataset}_best.pt` into `deploy/` |
-| **Runtime config** | Training and serving both use typed Pydantic configuration rather than scattered path constants |
+| **Runtime config** | Training and serving use typed Pydantic configuration with centralized path resolution |
 
 ---
 
@@ -80,62 +58,58 @@ The framework treats IQA/VQA training as a set of explicit contracts instead of 
 
 ### IQAVQANet: Unified Quality Assessment Network
 
-```text
-# Data preprocessing + IQAVQANet / ImageNet pretrained-backbone adaptation
+```mermaid
+flowchart TB
+    subgraph IMAGE[Image IQA path]
+        I1[RGB decode] --> I2[Bicubic resize short side to 232]
+        I2 --> I3[Center crop to 224 x 224]
+        I3 --> I4[Scale to 0..1 and ImageNet normalize]
+        I4 --> I5[Image tensor B x 3 x 224 x 224]
+        I5 --> I6[Swin-T ImageNet backbone]
+        I6 --> I7[Adaptive average pooling]
+        I7 --> I8[Features B x 768]
+        I8 --> I9[Quality head and score B]
+    end
 
-Image media
-  -> RGB decode
-  -> resize to 224x224
-  -> scale pixels to [0, 1]
-  -> ImageNet mean/std normalization
-  -> model input [B, 3, 224, 224], routed to the IQA branch as 4D
-  -> ResNet50(IMAGENET1K_V1): conv1 + bn1 + layer1..4
-  -> AdaptiveAvgPool2d
-  -> image features [B, 2048]
-  -> quality head
-  -> quality score [B]
-
-Video media
-  -> sample/pad frames to num_frames
-  -> per-frame RGB decode
-  -> resize to 224x224
-  -> scale pixels to [0, 1]
-  -> ImageNet mean/std normalization
-  -> model input [B, F, 3, 224, 224], routed to the VQA branch as 5D
-  -> reshape to [B*F, 3, 224, 224] for frame-wise feature extraction
-  -> Swin-T(IMAGENET1K_V1): patch embedding + shifted-window stages + final LayerNorm
-  -> spatial pooling to frame features [B, F, 768]
-  -> positional embedding + TransformerEncoder temporal fusion
-  -> temporal average
-  -> quality head
-  -> quality score [B]
+    subgraph VIDEO[Video VQA path]
+        V1[Sample or pad to num_frames] --> V2[RGB decode per frame]
+        V2 --> V3[Bicubic resize short side to 232]
+        V3 --> V4[Center crop to 224 x 224]
+        V4 --> V5[Scale to 0..1 and ImageNet normalize]
+        V5 --> V6[Video tensor B x F x 3 x 224 x 224]
+        V6 --> V7[Flatten frames to B x F x 3 x 224 x 224]
+        V7 --> V8[Swin-T spatial features]
+        V8 --> V9[Frame features B x F x 768]
+        V9 --> V10[Position encoding and TransformerEncoder]
+        V10 --> V11[Temporal average]
+        V11 --> V12[Quality head and score B]
+    end
 ```
 
 ### Supported Configurations
 
 | Input | Tensor Shape | Backbone | Normalization |
 | :--- | :--- | :--- | :--- |
-| Image | `[B, 3, H, W]` | ResNet50 ImageNet backbone (`BatchNorm2d`) | RGB, 224x224, `[0, 1]`, ImageNet mean/std |
-| Video | `[B, F, 3, H, W]` | Swin-T ImageNet backbone (`LayerNorm`) + Transformer temporal fusion | RGB frames, 224x224, `[0, 1]`, ImageNet mean/std |
+| Image | `[B, 3, H, W]` | Configured ImageNet backbone (Swin-T default; ResNet50 supported) | RGB, bicubic resize 232, center crop 224, ImageNet mean/std |
+| Video | `[B, F, 3, H, W]` | Swin-T ImageNet backbone (`LayerNorm`) + Transformer temporal fusion | RGB frames, bicubic resize 232, center crop 224, `[0, 1]`, ImageNet mean/std |
 
 The model no longer keeps legacy Swin compatibility shims. Checkpoints should be produced by the current `IQAVQANet` implementation.
 
 ### Loss Function: Task-Aware Hybrid Loss
 
-`IQAVQALoss` combines three components, weighted differently depending on `task_type` (`iqa` vs `vqa`):
+`IQAVQALoss` combines robust MOS regression with pairwise ordering:
 
 ```text
-Total Loss = w_mse × MSE + w_rank × RankLoss + w_plcc × (1 − PLCC)
+Total Loss = w_huber × SmoothL1 + w_rank × PairwiseLogisticRank
 ```
 
-| Task | MSE | Rank | PLCC |
-| :--- | :-- | :--- | :--- |
-| IQA (`resnet_iqa`) | 0.7 | 0.3 | 0.0 |
-| VQA (`timeswin_vqa`) | 0.4 | 0.3 | 0.3 |
+| Task | SmoothL1 | Rank |
+| :--- | :------- | :--- |
+| IQA (`swin_iqa`) | 0.7 | 0.3 |
+| VQA (`swin_vqa`) | 0.7 | 0.3 |
 
-- **MSE Loss**: Absolute prediction accuracy
-- **Rank Loss**: Pairwise ranking consistency (sampled, capped at `max_pairs` pairs)
-- **PLCC Loss**: `1 − Pearson correlation`, weighted in for VQA to directly optimize linear alignment with human MOS
+- **SmoothL1/Huber Loss**: Preserves MOS regression accuracy while reducing sensitivity to subjective-label outliers
+- **Pairwise Logistic Rank Loss**: Optimizes pairwise ordering and ignores unreliable pairs below `rank_epsilon`
 
 ---
 
@@ -162,13 +136,13 @@ Run training directly with uv:
 
 ```bash
 # TID2013 (Image Quality Assessment)
-uv run python -m src.main --model resnet_iqa --dataset tid2013
+uv run python -m src.main --model swin_iqa --dataset tid2013
 
 # KoNViD-1k (Video Quality Assessment)
-uv run python -m src.main --model timeswin_vqa --dataset konvid-1k
+uv run python -m src.main --model swin_vqa --dataset konvid-1k
 
 # T2VQA-DB (Text-to-Video Quality Assessment)
-uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
+uv run python -m src.main --model swin_vqa --dataset t2vqa-db
 ```
 
 The training entry point runs the pipeline in this order:
@@ -180,30 +154,13 @@ integrity check -> EDA/statistics -> group-aware train/val/test split -> group-a
 *Note: By default, DEBUG=0 is applied in make commands. You can override it by appending DEBUG=1 if needed.*
 
 > [!NOTE]
-> Only two model configs ship today: `resnet_iqa` (image/ResNet50) and `timeswin_vqa` (video/Swin-T). Model configs are auto-discovered from `config/models/*.yaml` — drop a new YAML there (e.g. `resnet_vqa.yaml`) to register another combination before referencing it in commands.
+> The default IQA configuration is `swin_iqa` (image/Swin-T). `resnet_iqa` remains an optional ResNet50 fallback, while `swin_vqa` uses Swin-T plus Transformer temporal fusion. Model configs are loaded from `config/models/*.yaml` by file name.
 
 > [!NOTE]
 > `scripts/setup_env.sh` also installs and verifies `hatchling`, so `deploy/` can be built from `pyproject.toml` without extra manual setup.
 
 > [!WARNING]
 > `--skip_integrity` skips media decoding checks and is intended only for fast debugging. Normal training should keep integrity checks enabled so corrupted/missing samples cannot enter cross-validation.
-
-### Advanced Options
-
-You can extend the framework capabilities using the following training and debugging modes:
-
-| Mode | Use Case | uv / Shell Command |
-| :----- | :--------- | :------------------- |
-| **Smoke Test** | Quick functionality check | `uv run python -m src.main --smoke_test` |
-| **Debug Mode** | Enable breakpoints & verbose logs | `LOG_LEVEL=DEBUG uv run python -m src.main` |
-| **Background** | Run on remote server persistently | `nohup uv run python -m src.main > results/scripts_logs/train.log 2>&1 &` |
-
-> [!TIP]
-> Monitor real-time training progress with:
->
-> ```bash
-> tail -f results/scripts_logs/train.log
-> ```
 
 ---
 
@@ -231,73 +188,43 @@ The framework automatically generates:
 
 - **Fold Summary**: Per-fold PLCC/SROCC/RMSE/R² summary and stability views
 
-- **Cross-Model/Fold Comparison**: Bar charts generated from available fold histories
+- **Fold Comparison**: Bar charts generated from available fold histories
 
-Output location: `results/{dataset}/plots/`
-
-EDA plots are saved under `results/{dataset}/eda/`. All `{dataset}` output folders use the lowercase dataset registry key, for example `results/tid2013/` and `results/konvid-1k/`.
+Training, evaluation, and comparison plots are saved under `results/{dataset}/plots/`.
+Dataset audit and EDA plots are saved under `results/{dataset}/eda/`.
+Other artifacts, including logs, manifests, CSV files, and checkpoints, use the same
+lowercase dataset key under `results/{dataset}/`; for example, `tid2013` and `konvid-1k`.
 
 ---
 
 ## Deployment & Inference API <a id="deployment-api"></a>
 
-Deployment is split into `deploy/api.py` for the FastAPI service, `deploy/cli.py` for batch inference, and `deploy/core/` for Pydantic-backed runtime config, preprocessing, checkpoint loading, and prediction helpers. Both entry points share the same runtime defaults.
-
-### Directory Layout
+Training publishes the selected checkpoint to one of these task-specific locations:
 
 ```text
-deploy/
-├── api.py               # FastAPI service (this file)
-├── cli.py               # Batch inference CLI for images/videos
-├── core/                # Runtime config, preprocessing, loading, and inference helpers
-├── iqa-models/
-│   └── tid2013_best.pt   # Default IQA checkpoint (resnet_iqa, trained on TID2013)
-└── vqa-models/
-    └── konvid-1k_best.pt # Default VQA checkpoint (timeswin_vqa, trained on KoNViD-1k)
+deploy/iqa-models/{dataset}_best.pt
+deploy/vqa-models/{dataset}_best.pt
 ```
 
-After a successful training run, the best checkpoint for the current run is copied automatically:
+The checkpoint contains the model configuration and MOS range required by the
+deployment loader. The API uses the task roles `iqa` and `vqa`; the actual
+backbone is read from the loaded checkpoint.
 
-```text
-IQA -> deploy/iqa-models/{dataset}_best.pt
-VQA -> deploy/vqa-models/{dataset}_best.pt
-```
-
-### Starting the Service
+### FastAPI Service
 
 ```bash
 uv run python -m deploy.api
 ```
 
-The service listens on `0.0.0.0:8000` and loads both checkpoints eagerly on startup; if neither model file is found, startup fails with `RuntimeError: No models loaded`.
+For containerized deployment, `make docker-infer` starts FastAPI and Nginx.
+Nginx serves `frontend/` on host port `8000` and proxies `/api/health` and
+`/api/evaluate`; set `WEB_PORT=80` to use port 80. Direct development with a
+separate frontend origin requires `CORS_ALLOW_ORIGINS`.
 
-### Endpoints
+At startup, the service loads available IQA/VQA checkpoints. `/health` reports
+loaded tasks and device; startup fails if no checkpoint is available.
 
-| Endpoint | Method | Purpose |
-| :--- | :--- | :--- |
-| `/health` | GET | Returns loaded model IDs and inference device |
-| `/evaluate` | POST | Runs inference on an uploaded image/video and returns a unified MOS score |
-
-`/evaluate` accepts `multipart/form-data` with:
-
-| Field | Type | Notes |
-| :--- | :--- | :--- |
-| `file` | file | Image or video to score |
-| `media_type` | string | `"image"` or `"video"` |
-| `task_type` | string | Echoed back in the response, not used for routing |
-| `model` | string | `"resnet_iqa"` or `"timeswin_vqa"` — selects which cached model handles the request |
-
-Cross-media inference is supported in both directions: `resnet_iqa` averages predictions across sampled frames when given a video, and `timeswin_vqa` expands a single image into a pseudo-video (`image_to_video_tensor`) when given an image.
-
-The response includes both `mos` (unified 0–5 scale, `raw_score × 5`) and `dataset_mos` (denormalized back to the source dataset's original MOS range, for debugging).
-
-> [!NOTE]
-> MOS range (`mos_min`/`mos_max`) is stored in the checkpoint's config and restored on load for checkpoints saved with v0.5.0+. Denormalization is automatic.
-
-> [!TIP]
-> The `dataset_mos` field returns scores in the original dataset's MOS scale (e.g., TID2013: 0-9, KoNViD-1k: 1-5), while `mos` is always normalized to 0-5 for cross-dataset comparison.
-
-### Batch CLI
+### Batch Inference
 
 ```bash
 uv run python -m deploy.cli -i examples/images/
@@ -305,7 +232,9 @@ uv run python -m deploy.cli -i examples/videos/
 uv run python -m deploy.cli -i examples/
 ```
 
-The CLI auto-detects image and video files, writes JSON reports to `reports/iqa-test/` or `reports/vqa-test/`, and is what the `make test-images`, `make test-videos`, and `make test-all` targets use.
+The CLI selects the task-specific checkpoint, detects image/video files, and
+writes JSON reports to `reports/iqa-test/` or `reports/vqa-test/`. The Make
+targets `test-images`, `test-videos`, and `test-all` call this CLI.
 
 ---
 
@@ -441,16 +370,7 @@ make docker-train BUILD_ARGS='--build-arg USE_BUILD_PROXY=true'
 
 ## System Overview <a id="system-overview"></a>
 
-To help you quickly grasp the system architecture and execution flow, we provide an **interactive pipeline visualization**.
-
-[**→ Open Interactive Architecture Map**](docs/pipeline.html)
-
-This map illustrates:
-- How data flows through each stage of the system
-- Key components and their interactions
-- Execution order of the entire workflow
-
-> Charts are rendered using Mermaid and support interactive viewing in the browser.
+The interactive pipeline map is available at [docs/pipeline.html](docs/pipeline.html).
 
 ---
 
@@ -474,61 +394,43 @@ The merged result is validated by Pydantic when `Config(**merged)` is constructe
 
 ### CUDA Out of Memory (OOM)
 
-When OOM occurs, adjust the following parameters in your model's YAML config (e.g., `config/models/timeswin_vqa.yaml`):
+Adjust the model YAML in this order, starting with the least disruptive change:
 
-**Reduce memory consumption:**
+1. Keep `system.amp: true` on CUDA. AMP is implemented by the training engine and reduces activation memory.
+2. Reduce `preprocessing.batch_size`.
+3. Reduce `model.num_frames` for VQA.
+4. Reduce `model.transformer_layers` for the temporal branch.
+5. Increase `train.gradient_accumulation_steps` to preserve the effective batch size after lowering the physical batch size.
+6. Use `resnet_iqa` only when a lighter image backbone is acceptable; it is an optional fallback, not the default IQA path.
 
-- Lower `preprocessing.batch_size` — reduces per-batch memory
-- Reduce `model.num_frames` — fewer video frames to process
-- Switch to a lighter `model.backbone` (e.g., `resnet50` instead of `swin_t`)
-- Lower `model.transformer_layers` — shallower temporal fusion
+`train.grad_clip` limits gradient values after backpropagation. It prevents unstable updates but does not reduce activation memory.
 
-**Compensate for smaller batch size:**
+### Slow Training or High CPU Usage
 
-- Increase `train.gradient_accumulation_steps` — maintains effective batch size = `batch_size × gradient_accumulation_steps`
-- Ensure `amp: true` — mixed precision significantly reduces memory
-
-> [!NOTE]
-> Gradient checkpointing is not currently implemented in `IQAVQANet` — don't set `gradient_checkpointing: true` in configs yet; it has no effect.
-
-### Video Loading Backend (AutoDL Specific)
-
-> [!WARNING]
-On AutoDL or similar cloud GPU instances, OpenCV's VideoCapture may fail due to missing system dependencies.
-
-Solution: Use Decord
-
-```bash
-uv add decord
-```
-
-Decord is pre-configured as the default backend. If Decord is not available, the framework automatically falls back to OpenCV, but on AutoDL this fallback may fail. Always use Decord for video training on AutoDL.
-
-### Slow Training
-
-| Issue | Optimization |
+| Symptom | Adjustment |
 | :--- | :--- |
-| Data loading bottleneck | Increase `num_workers: 8` |
-| Small batch size | Use `gradient_accumulation_steps` |
-| Video decoding slow | Ensure Decord is installed |
+| Data loading is the bottleneck | Tune `preprocessing.num_workers` to the CPU and storage capacity; more workers are not always faster |
+| GPU is underutilized | Increase `preprocessing.batch_size` only if GPU memory allows, and keep AMP enabled |
+| Video batches are expensive | Reduce `model.num_frames` or use gradient accumulation with a smaller physical batch |
+| Logs are noisy | Training progress updates are throttled to approximately 2% increments |
+
+### Configuration Validation Errors
+
+YAML is loaded and then validated by Pydantic with `extra="forbid"`. An unknown key is therefore an intentional configuration error, not a silently ignored option. Remove obsolete keys or add a corresponding schema and runtime consumer before using them.
 
 ### Disk Filling Up
 
-`results/{dataset}/corrupted/` stores files moved aside by `DataEDA.check_integrity()`.
-- Clear manually if no longer needed
-- Or add a cleanup step to `scripts/cache_clean.sh`
+`results/{dataset}/corrupted/` stores media and label backups moved aside by the integrity audit. Keep these files when investigating data quality; remove them only after the audit is no longer needed.
 
-> [!TIP]
-> `results/{dataset}/corrupted/labels/` stores CSV/JSONL backups for missing or corrupted labels. Repeated `sample_id` values are reported as `repeated_sample_ids` and kept, because IQA/VQA datasets may legitimately contain multiple distorted samples or labels for the same content.
+For routine maintenance:
 
-### Training Hangs With No Error (Background Runs)
+```bash
+make cache_clean
+make results-clean
+make archive
+```
 
-If a `nohup`/background training run appears frozen with no new log lines, check for `pdb.set_trace()` breakpoints in `src/main.py`. These are triggered on exceptions and will wait for stdin input, blocking non-interactive processes.
-
-**Solutions:**
-- Run training interactively (without `nohup`) when debugging
-- Check `results/{dataset}/train_logs/*.log` for error details
-- Kill the process and fix the underlying issue before retrying
+`results-clean` asks for confirmation, then uses the `YYYYMMDD_HHMMSS` prefix in each filename to delete dated `.pt`, `.csv`, and `.log` files older than three days under `results/`. Files without that timestamp prefix, and files outside `results/`, are kept.
 
 ---
 
@@ -552,22 +454,7 @@ The framework includes security tools to audit dependencies:
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.6.4
-
-
----
-
-## 👥 Contributors <a id="contributors"></a>
-
-| Name | Role | Contributions |
-| :--- | :--- | :--- |
-| **[@autentisitet](https://github.com/autentisitet)** | Project Lead / Core Developer | Framework architecture, training pipeline, inference engine,  Docker/Podman containerization, multi-stage builds, inference API design |
-| **[@yss0120](https://github.com/yss0120)** | Frontend Developer | Interactive UI/UX (`index.html`), subjective blind rating system, quality passport visualization |
-| **[@Zed-23](https://github.com/Zed-23)** | DevOps & Quality Assurance | CI/CD pipeline, automated & smoke testing, Shell script fixes, CUDA OOM debugging |
-| **[@bazhina-5566](https://github.com/bazhina-5566)** | Backend API Developer | FastAPI service (`deploy/api.py`), model checkpoint loading, deploy API design |
-
-> [!NOTE]
-> We welcome contributions! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md) for guidelines.
+- **Version**: 0.7.0
 
 ---
 

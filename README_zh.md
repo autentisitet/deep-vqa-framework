@@ -4,38 +4,17 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.12+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.6.4-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
 **🌐 [English](README.md) | [简体中文](README_zh.md)**
 
-**一个从研究训练走到推理部署的图像/视频质量评估框架。**
+**一个面向图像和视频质量评估的端到端平台。**
 
-Deep-VQA-Framework 是面向生产交付的 IQA/VQA 质量评估框架，覆盖数据审计、训练评估、结果可视化、checkpoint 发布和推理服务化。
-它在数据侧先隔离坏样本并备份标签，再按参考内容分组避免失真版本跨 split 泄漏；在模型侧根据 4D/5D 张量自动选择 ResNet50 或 Swin-T 的 ImageNet 特征路径，训练完成后产出可直接进入 `deploy/` 推理链路的 `{dataset}_best.pt`。
+Deep-VQA-Framework 提供从带质量标签的媒体数据到可用 IQA/VQA 模型的完整工程路径：数据检查与完整性审计、防止泄漏的分组划分、可复现训练与评估、实验产物管理、checkpoint 选择、批量推理以及容器化 API 部署。它的定位是一个可以持续扩展数据集和模型变体的图像/视频质量评估平台，而不是单一模型实现。
 
-### 核心亮点
-
-| 需求 | 内置处理 |
-| :--- | :--- |
-| IQA/VQA 共用入口 | 根据张量维度路由：4D 图像走 ResNet50，5D 视频走 Swin-T |
-| 图像/视频输入可比 | 两条分支统一 RGB、224x224、`[0, 1]`、ImageNet mean/std 预处理 |
-| 防止评估泄漏 | train/val/test 和 K 折都使用分组划分，同一参考内容只会出现在一个 split |
-| 坏数据隔离 | 缺失/损坏样本在划分前剔除，对应标签备份到 `results/{dataset}/corrupted/labels/` |
-| 不只保存日志 | 自动生成 EDA 图、fold 训练曲线、残差图、对比图和 fold summary |
-| 部署交付闭环 | 成功训练后复制最佳 checkpoint 到 `deploy/iqa-models/{dataset}_best.pt` 或 `deploy/vqa-models/{dataset}_best.pt` |
-| 容器重复运行友好 | Docker/Podman 挂载 `.cache`，复用 uv 缓存和 torchvision 预训练权重 |
-
-```text
-metadata + media
-  -> 完整性检查与坏数据隔离
-  -> EDA + MOS 归一化
-  -> 分组 train/val/test 划分
-  -> 解码时应用 ImageNet 预处理的分组 K 折训练
-  -> 训练图表 + 最佳 checkpoint
-  -> deploy/{iqa-models|vqa-models}/{dataset}_best.pt
-```
+当前默认模型使用 Swin-T 提取图像和视频逐帧空间特征；视频分支进一步使用位置编码和 Transformer 进行时序融合。训练完成后，选定的 checkpoint 可以交付到 `deploy/`，用于批量推理或 API 服务。
 
 ---
 
@@ -53,7 +32,6 @@ metadata + media
 - [故障排查](#troubleshooting)
 - [依赖项安全](#dependency-security)
 - [许可证](#license)
-- [贡献者](#contributors)
 - [致谢](#acknowledgments)
 
 ---
@@ -62,17 +40,17 @@ metadata + media
 
 ### 设计约束
 
-这个项目把 IQA/VQA 训练流程拆成明确约束，而不是松散脚本串联。
+这个平台围绕数据、模型、配置、评估和部署建立明确约束，使训练和推理链路能够在加入新数据集或模型变体后保持可复现和可维护。
 
 | 约束 | 实现方式 |
 | :--- | :--- |
 | **模态路由** | 4D 张量视为图像 batch，5D 张量视为视频 batch；通道布局不合法会提前失败 |
-| **Backbone 策略** | 图像使用 ResNet50 ImageNet 特征和 BN；视频使用 Swin-T ImageNet 特征、LN 与时序融合 |
-| **预处理** | 图像和采样视频帧共享 RGB、224x224、`[0, 1]`、ImageNet mean/std 归一化 |
+| **Backbone 策略** | 图像主干由模型配置选择（默认 Swin-T，也支持 ResNet50）；视频复用对应空间主干并增加位置编码与时序融合 |
+| **预处理** | 图像和采样视频帧使用 RGB、bicubic resize 232、center crop 224 和 ImageNet mean/std 归一化 |
 | **数据剔除** | 缺失/损坏媒体在 EDA 和划分前剔除；标签备份，不会改写成 0 分 |
 | **划分隔离** | train/val/test 和 K 折都做分组划分，同一参考内容只进入一个分区 |
 | **产物路径** | 输出使用小写数据集 key 放在 `results/{dataset}/`；成功训练后发布 `{dataset}_best.pt` 到 `deploy/` |
-| **运行配置** | 训练和推理共用 Pydantic 类型化配置，不再散落硬编码路径 |
+| **运行配置** | 训练和推理共用 Pydantic 类型化配置，并集中处理路径解析 |
 
 ---
 
@@ -80,62 +58,58 @@ metadata + media
 
 ### IQAVQANet：统一质量评估网络
 
-```text
-# 数据预处理 + IQAVQANet / ImageNet 预训练 backbone 适配
+```mermaid
+flowchart TB
+    subgraph IMAGE[图像 IQA 路径]
+        I1[RGB 解码] --> I2[Bicubic 将短边 resize 到 232]
+        I2 --> I3[Center crop 到 224 x 224]
+        I3 --> I4[缩放到 0..1 并进行 ImageNet 归一化]
+        I4 --> I5[图像张量 B x 3 x 224 x 224]
+        I5 --> I6[Swin-T ImageNet 主干]
+        I6 --> I7[自适应平均池化]
+        I7 --> I8[图像特征 B x 768]
+        I8 --> I9[质量预测头与分数 B]
+    end
 
-图像媒体
-  -> RGB 解码
-  -> resize 到 224x224
-  -> 像素缩放到 [0, 1]
-  -> ImageNet mean/std 归一化
-  -> 模型输入 [B, 3, 224, 224]，按 4D 路由到 IQA 分支
-  -> ResNet50(IMAGENET1K_V1): conv1 + bn1 + layer1..4
-  -> AdaptiveAvgPool2d
-  -> 图像特征 [B, 2048]
-  -> 质量预测头
-  -> 质量分数 [B]
-
-视频媒体
-  -> 帧采样/补齐到 num_frames
-  -> 逐帧 RGB 解码
-  -> resize 到 224x224
-  -> 像素缩放到 [0, 1]
-  -> ImageNet mean/std 归一化
-  -> 模型输入 [B, F, 3, 224, 224]，按 5D 路由到 VQA 分支
-  -> reshape 为 [B*F, 3, 224, 224] 后逐帧抽特征
-  -> Swin-T(IMAGENET1K_V1): patch embedding + shifted-window stages + final LayerNorm
-  -> 空间池化得到帧特征 [B, F, 768]
-  -> 位置编码 + TransformerEncoder 时序融合
-  -> 时序平均
-  -> 质量预测头
-  -> 质量分数 [B]
+    subgraph VIDEO[视频 VQA 路径]
+        V1[采样或补齐到 num_frames] --> V2[逐帧 RGB 解码]
+        V2 --> V3[Bicubic 将短边 resize 到 232]
+        V3 --> V4[Center crop 到 224 x 224]
+        V4 --> V5[缩放到 0..1 并进行 ImageNet 归一化]
+        V5 --> V6[视频张量 B x F x 3 x 224 x 224]
+        V6 --> V7[展开为逐帧张量]
+        V7 --> V8[Swin-T 空间特征]
+        V8 --> V9[帧特征 B x F x 768]
+        V9 --> V10[位置编码与 TransformerEncoder]
+        V10 --> V11[时序平均]
+        V11 --> V12[质量预测头与分数 B]
+    end
 ```
 
 ### 支持的配置
 
 | 输入 | 张量形状 | 主干网络 | 归一化 |
 | :--- | :--- | :--- | :--- |
-| 图像 | `[B, 3, H, W]` | ResNet50 ImageNet backbone (`BatchNorm2d`) | RGB、224x224、`[0, 1]`、ImageNet mean/std |
-| 视频 | `[B, F, 3, H, W]` | Swin-T ImageNet backbone (`LayerNorm`) + Transformer 时序融合 | RGB 帧、224x224、`[0, 1]`、ImageNet mean/std |
+| 图像 | `[B, 3, H, W]` | 配置指定的 ImageNet 主干（默认 Swin-T，也支持 ResNet50） | RGB、bicubic resize 232、center crop 224、ImageNet mean/std |
+| 视频 | `[B, F, 3, H, W]` | Swin-T ImageNet backbone (`LayerNorm`) + Transformer 时序融合 | RGB 帧、bicubic resize 232、center crop 224、`[0, 1]`、ImageNet mean/std |
 
 当前模型不再保留旧 Swin 兼容 shim。检查点应由当前 `IQAVQANet` 实现生成。
 
 ### 损失函数：任务感知混合损失
 
-`IQAVQALoss` 包含三个部分，根据 `task_type`（`iqa` 或 `vqa`）赋予不同的权重：
+`IQAVQALoss` 将稳健 MOS 回归与成对排序结合：
 
 ```text
-总损失 = w_mse × MSE + w_rank × RankLoss + w_plcc × (1 − PLCC)
+总损失 = w_huber × SmoothL1 + w_rank × PairwiseLogisticRank
 ```
 
-| 任务 | MSE | Rank | PLCC |
-| :--- | :-- | :--- | :--- |
-| IQA (`resnet_iqa`) | 0.7 | 0.3 | 0.0 |
-| VQA (`timeswin_vqa`) | 0.4 | 0.3 | 0.3 |
+| 任务 | SmoothL1 | Rank |
+| :--- | :------- | :--- |
+| IQA (`swin_iqa`) | 0.7 | 0.3 |
+| VQA (`swin_vqa`) | 0.7 | 0.3 |
 
-- **MSE 损失 (MSE Loss)**：绝对预测准确度
-- **排序损失 (Rank Loss)**：成对排序一致性（采用采样策略，限制最大配对数为 `max_pairs`）
-- **PLCC 损失 (PLCC Loss)**：`1 − Pearson 相关系数`；在 VQA 任务中引入该项，旨在直接优化与人类 MOS（平均主观评分）的线性对齐程度
+- **SmoothL1/Huber 损失**：保持 MOS 回归精度，同时降低主观标签离群值的影响
+- **Pairwise Logistic Rank 损失**：优化成对排序，并忽略差异小于 `rank_epsilon` 的不可靠样本对
 
 ---
 
@@ -162,13 +136,13 @@ make data
 
 ```bash
 # TID2013 (图像质量评估)
-uv run python -m src.main --model resnet_iqa --dataset tid2013
+uv run python -m src.main --model swin_iqa --dataset tid2013
 
 # KoNViD-1k (视频质量评估)
-uv run python -m src.main --model timeswin_vqa --dataset konvid-1k
+uv run python -m src.main --model swin_vqa --dataset konvid-1k
 
 # T2VQA-DB (文生视频质量评估)
-uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
+uv run python -m src.main --model swin_vqa --dataset t2vqa-db
 ```
 
 训练入口按以下顺序执行：
@@ -180,30 +154,13 @@ uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
 *注意：默认情况下，`make` 命令使用 `DEBUG=0`。如有需要，可通过追加 `DEBUG=1` 来覆盖此设置。*
 
 > [!NOTE]
-> 目前仅提供两种模型配置：`resnet_iqa`（图像/ResNet50）和 `timeswin_vqa`（视频/Swin-T）。模型配置会自动从 `config/models/*.yaml` 加载——只需在该目录下放入新的 YAML 文件（例如 `resnet_vqa.yaml`）即可注册新的配置组合，随后即可在命令中引用。
+> 默认 IQA 配置是 `swin_iqa`（图像/Swin-T）；`resnet_iqa` 保留为可选的 ResNet50 回退配置，`swin_vqa` 使用 Swin-T 加 Transformer 时序融合。模型配置按 `config/models/*.yaml` 的文件名加载。
 
 > [!NOTE]
 > `scripts/setup_env.sh` 现在会安装并验证 `hatchling`，因此 `deploy/` 可以直接通过 `pyproject.toml` 完成构建，无需额外手动配置。
 
 > [!WARNING]
 > `--skip_integrity` 只建议用于快速调试。正常训练应保留完整性检查，避免缺失或损坏样本进入交叉验证。
-
-### 进阶选项
-
-您可以使用以下训练和调试模式来扩展框架功能：
-
-| 模式 | 适用场景 | uv / Shell 命令 |
-| :----- | :--------- | :------------------- |
-| **冒烟测试 (Smoke Test)** | 快速功能检查 | `uv run python -m src.main --smoke_test` |
-| **调试模式 (Debug Mode)** | 启用断点和详细日志 | `LOG_LEVEL=DEBUG uv run python -m src.main` |
-| **后台运行 (Background)** | 在远程服务器上持久运行 | `nohup uv run python -m src.main > results/scripts_logs/train.log 2>&1 &` |
-
-> [!TIP]
-> 使用以下命令监控实时训练进度：
->
-> ```bash
-> tail -f results/scripts_logs/train.log
-> ```
 
 ---
 
@@ -231,73 +188,42 @@ uv run python -m src.main --model timeswin_vqa --dataset t2vqa-db
 
 - **Fold 汇总**：每折 PLCC/SROCC/RMSE/R² 汇总与稳定性视图
 
-- **跨模型/跨折比较**：基于已有 fold history 生成对比柱状图
+- **Fold 比较**：基于已有 fold history 生成对比柱状图
 
-输出路径：`results/{dataset}/plots/`
-
-EDA 图表保存在 `results/{dataset}/eda/`。所有 `{dataset}` 输出目录统一使用数据集注册表中的小写 key，例如 `results/tid2013/` 和 `results/konvid-1k/`。
+训练、评估和对比图表保存在 `results/{dataset}/plots/`。
+数据审计和 EDA 图表保存在 `results/{dataset}/eda/`。
+日志、manifest、CSV 和 checkpoint 等其他产物也使用数据集注册表中的小写 key，
+统一放在 `results/{dataset}/` 下，例如 `tid2013` 和 `konvid-1k`。
 
 ---
 
 ## 部署与推理 API <a id="deployment-api"></a>
 
-部署侧现在拆分为 `deploy/api.py`（FastAPI 服务）、`deploy/cli.py`（批量推理 CLI）和 `deploy/core/`（基于 Pydantic 的运行时配置、预处理、权重加载与推理辅助函数）。两个入口共享同一套运行时默认配置。
-
-### 目录结构
+训练完成后，选定的 checkpoint 会发布到对应任务目录：
 
 ```text
-deploy/
-├── api.py               # FastAPI 服务（本文件）
-├── cli.py               # 图像/视频批量推理 CLI
-├── core/                # 运行时配置、预处理、加载与推理辅助函数
-├── iqa-models/
-│   └── tid2013_best.pt   # 默认 IQA 检查点 (resnet_iqa，基于 TID2013 训练)
-└── vqa-models/
-    └── konvid-1k_best.pt # 默认 VQA 检查点 (timeswin_vqa，基于 KoNViD-1k 训练)
+deploy/iqa-models/{dataset}_best.pt
+deploy/vqa-models/{dataset}_best.pt
 ```
 
-训练成功后，当前 run 中表现最好的检查点会自动复制到部署目录：
+checkpoint 中包含部署加载器所需的模型配置和 MOS 区间。API 使用 `iqa`
+和 `vqa` 两个任务角色，具体 backbone 从加载的 checkpoint 中读取。
 
-```text
-IQA -> deploy/iqa-models/{dataset}_best.pt
-VQA -> deploy/vqa-models/{dataset}_best.pt
-```
-
-### 启动服务
+### FastAPI 服务
 
 ```bash
 uv run python -m deploy.api
 ```
 
-该服务监听 `0.0.0.0:8000` 端口，并在启动时预先加载两个检查点；如果未找到任何模型文件，启动将失败并抛出 `RuntimeError: No models loaded`。
+容器化部署使用 `make docker-infer`，它会启动 FastAPI 和 Nginx。Nginx 默认通过
+宿主机 `8000` 端口提供 `frontend/`，并代理 `/api/health` 和 `/api/evaluate`；
+设置 `WEB_PORT=80` 可改用 80 端口。直接开发时，如果前端和 API 不同源，需要设置
+`CORS_ALLOW_ORIGINS`。
 
-### 接口 (Endpoints)
+服务启动时加载可用的 IQA/VQA checkpoint。`/health` 返回已加载任务和推理设备；
+如果没有任何 checkpoint，服务会启动失败。
 
-| 接口路径 | 方法 | 用途 |
-| :--- | :--- | :--- |
-| `/health` | GET | 返回已加载的模型 ID 和推理设备 |
-| `/evaluate` | POST | 对上传的图像/视频进行推理，并返回统一的 MOS 分数 |
-
-`/evaluate` 接口接受 `multipart/form-data` 格式的请求，包含以下字段：
-
-| 字段 | 类型 | 说明 |
-| :--- | :--- | :--- |
-| `file` | file | 待评分的图像或视频 |
-| `media_type` | string | `"image"` 或 `"video"` |
-| `task_type` | string | 原样返回在响应中，不用于路由选择 |
-| `model` | string | `"resnet_iqa"` 或 `"timeswin_vqa"` —— 指定由哪个已缓存模型处理请求 |
-
-支持双向跨模态推理：当输入为视频时，`resnet_iqa` 会对采样帧的预测结果取平均值；当输入为图像时，`timeswin_vqa` 会将单张图像扩展为伪视频（`image_to_video_tensor`）。
-
-响应包含 `mos`（统一的 0–5 分制，计算方式为 `raw_score × 5`）和 `dataset_mos`（反归一化回源数据集原始 MOS 范围的分数，用于调试）。
-
-> [!NOTE]
-> 对于使用 v0.5.0 及以上版本保存的检查点（checkpoint），MOS 范围（`mos_min`/`mos_max`）存储在配置中，并在加载时恢复。反归一化过程是自动进行的。
-
-> [!TIP]
-> `dataset_mos` 字段返回的是基于源数据集原始 MOS 范围的分数（例如 TID2013 为 0-9，KoNViD-1k 为 1-5），而 `mos` 字段则统一归一化为 0-5 分制，以便进行跨数据集比较。
-
-### 批量 CLI
+### 批量推理
 
 ```bash
 uv run python -m deploy.cli -i examples/images/
@@ -305,7 +231,9 @@ uv run python -m deploy.cli -i examples/videos/
 uv run python -m deploy.cli -i examples/
 ```
 
-CLI 会自动识别图像和视频文件，并将结果写入 `reports/iqa-test/` 或 `reports/vqa-test/`；`make test-images`、`make test-videos` 和 `make test-all` 目标就是调用它。
+CLI 会选择对应任务的 checkpoint，自动识别图像和视频文件，并将 JSON 结果写入
+`reports/iqa-test/` 或 `reports/vqa-test/`。`test-images`、`test-videos` 和
+`test-all` 这些 Make 目标都会调用这个 CLI。
 
 ---
 
@@ -441,16 +369,7 @@ make docker-train BUILD_ARGS='--build-arg USE_BUILD_PROXY=true'
 
 ## 系统概览 <a id="system-overview"></a>
 
-为了帮助您快速理解系统架构与执行流程，我们提供了**交互式流水线可视化图表**。
-
-[**→ 打开交互式架构图**](docs/pipeline.html)
-
-该图表展示了：
-- 数据在系统各阶段的流转方式
-- 关键组件及其交互关系
-- 整个工作流的执行顺序
-
-> 图表使用 Mermaid 绘制，支持在浏览器中交互式查看
+交互式流水线图见 [docs/pipeline.html](docs/pipeline.html)。
 
 ---
 
@@ -472,63 +391,47 @@ make docker-train BUILD_ARGS='--build-arg USE_BUILD_PROXY=true'
 
 ## 故障排查 <a id="troubleshooting"></a>
 
-### CUDA 显存溢出 (OOM)
+### CUDA 显存溢出（OOM）
 
-当发生 OOM 时，请调整模型 YAML 配置文件（例如 `config/models/timeswin_vqa.yaml`）中的以下参数：
+建议按以下顺序调整，先采用影响较小的措施：
 
-**降低显存占用：**
+1. 在 CUDA 上保持 `system.amp: true`。训练引擎已实现 AMP，可降低激活值显存占用。
+2. 减小 `preprocessing.batch_size`。
+3. 对 VQA 减小 `model.num_frames`。
+4. 减少视频时序分支的 `model.transformer_layers`。
+5. 减小实际 batch 后增加 `train.gradient_accumulation_steps`，保持有效 batch size。
+6. 只有在可以接受更轻量图像 backbone 时，才使用 `resnet_iqa`；默认 IQA 路径仍然是 Swin-T。
 
-- 减小 `preprocessing.batch_size` — 降低单批次显存占用
-- 减小 `model.num_frames` — 减少待处理的视频帧数
-- 切换到更轻量级的 `model.backbone`（例如使用 `resnet50` 替代 `swin_t`）
-- 减少 `model.transformer_layers` — 降低时间维度融合的深度
+`train.grad_clip` 在反向传播后限制梯度值，用于抑制训练不稳定，但不会降低激活值显存占用。
 
-**补偿较小的批次大小：**
+### 训练慢或 CPU 占用高
 
-- 增加 `train.gradient_accumulation_steps` — 保持有效批次大小（即 `batch_size × gradient_accumulation_steps`）
-- 确保设置 `amp: true` — 混合精度训练可显著降低显存占用
-
-> [!NOTE]
-> `IQAVQANet` 尚未实现梯度检查点（gradient checkpointing）功能 — 请勿在配置中设置 `gradient_checkpointing: true`，该设置目前无效。
-
-### 视频加载后端（AutoDL 特有）
-
-> [!WARNING]
-在 AutoDL 或类似的云端 GPU 实例上，OpenCV 的 `VideoCapture` 可能会因缺少系统依赖项而失败。
-
-解决方案：使用 Decord
-
-```bash
-uv add decord
-```
-
-Decord 已预配置为默认后端。如果 Decord 不可用，框架会自动回退到 OpenCV，但在 AutoDL 上这种回退可能会失败。在 AutoDL 上进行视频训练时，请务必使用 Decord。
-
-### 训练速度慢
-
-| 问题 | 优化方案 |
+| 现象 | 调整方式 |
 | :--- | :--- |
-| 数据加载瓶颈 | 增加 `num_workers`（例如设为 8） |
-| Batch size（批次大小）过小 | 使用 `gradient_accumulation_steps` |
-| 视频解码缓慢 | 确保已安装 Decord |
+| 数据加载成为瓶颈 | 根据 CPU 和存储速度调整 `preprocessing.num_workers`，worker 越多不一定越快 |
+| GPU 利用率偏低 | 在显存允许时增加 `preprocessing.batch_size`，并保持 AMP 开启 |
+| 视频 batch 成本高 | 减小 `model.num_frames`，或使用更小的实际 batch 配合梯度累积 |
+| 日志输出过密 | 训练进度条已限制在约 2% 的增量更新 |
+
+### 配置校验错误
+
+YAML 加载后会由 Pydantic 使用 `extra="forbid"` 校验。未知键会被视为明确的配置错误，不会静默忽略。删除过时字段，或者先为它补充 schema 和实际运行时读取逻辑。
 
 ### 磁盘空间耗尽
 
-`results/{dataset}/corrupted/` 目录存储了由 `DataEDA.check_integrity()` 移出的文件。
-- 若不再需要，可手动清理
-- 或在 `scripts/cache_clean.sh` 中添加清理步骤
+`results/{dataset}/corrupted/` 保存完整性审计时隔离的媒体和标签备份。排查数据质量期间应保留这些文件，确认不再需要后再清理。
 
-> [!TIP]
-> `results/{dataset}/corrupted/labels/` 会保存缺失或损坏样本对应标签的 CSV/JSONL 备份。重复的 `sample_id` 会作为 `repeated_sample_ids` 报告并保留，因为 IQA/VQA 数据集中同一内容可能合法对应多个失真样本或多个标签。
+日常维护命令：
 
-### 训练无报错挂起（后台运行）
+```bash
+make cache_clean
+make results-clean
+make archive
+```
 
-如果使用 `nohup` 或在后台运行的训练任务看似卡住且没有新的日志输出，请检查 `src/main.py` 中是否存在 `pdb.set_trace()` 断点。这些断点会在异常发生时触发并等待标准输入（stdin），从而阻塞非交互式进程。
-
-**解决方案：**
-- 调试时以交互方式（不使用 `nohup`）运行训练
-- 检查 `results/{dataset}/train_logs/*.log` 以获取错误详情
-- 终止进程并修复根本问题后再重试
+`results-clean` 会要求确认，然后使用文件名开头的 `YYYYMMDD_HHMMSS` 删除
+`results/` 下三天以前的 `.pt`、`.csv` 和 `.log` 文件。没有该时间戳前缀的文件，
+以及 `results/` 之外的文件都会保留。
 
 ---
 
@@ -546,25 +449,13 @@ Decord 已预配置为默认后端。如果 Decord 不可用，框架会自动�
 > [!NOTE]
 > `pip-audit` 是主要的漏洞扫描工具。`safety` 工具需要注册或登录。
 
+---
+
 ## 📄 许可证 <a id="license"></a>
 
 - **框架**: [MIT](LICENSE)
 - **作者**: [@autentisitet](https://github.com/autentisitet)
-- **版本**: 0.6.4
-
----
-
-## 👥 贡献者 <a id="contributors"></a>
-
-| 姓名 | 角色 | 贡献内容 |
-| :--- | :--- | :--- |
-| **[@autentisitet](https://github.com/autentisitet)** | 项目负责人 / 核心开发者 | 框架架构、训练流水线、推理引擎、Docker/Podman 容器化、多阶段构建、推理 API 设计 |
-| **[@yss0120](https://github.com/yss0120)** | 前端开发者 | 交互式 UI/UX (`index.html`)、主观盲测评分系统、质量概览（Quality Passport）可视化 |
-| **[@Zed-23](https://github.com/Zed-23)** | DevOps 与质量保证 | CI/CD 流水线、自动化测试与冒烟测试、Shell 脚本修复、CUDA 显存溢出 (OOM) 调试 |
-| **[@bazhina-5566](https://github.com/bazhina-5566)** | 后端 API 开发者 | FastAPI 服务 (`deploy/api.py`)、模型检查点加载、部署 API 设计 |
-
-> [!NOTE]
-> 欢迎贡献代码！请参阅 [CONTRIBUTING.md](.github/CONTRIBUTING.md) 了解贡献指南。
+- **版本**: 0.7.0
 
 ---
 
