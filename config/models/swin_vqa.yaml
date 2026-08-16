@@ -1,23 +1,24 @@
-# config/models/resnet_iqa.yaml
-task_type: "iqa"
+# config/models/swin_vqa.yaml
+task_type: "vqa"
 
 model:
   name: "IQAVQANet"
-  backbone: "resnet50"
+  backbone: "swin_t"
   freeze_backbone: false
   pretrained: true
+  num_frames: 16
+  transformer_layers: 2
   dropout: 0.3
   input_size: 224
-  num_frames: 8
 
 preprocessing:
-  batch_size: 32
+  batch_size: 8
   num_workers: 4
 
 train:
-  epochs: 50
-  lr: 0.0001
-  weight_decay: 1.0e-4
+  epochs: 30
+  lr: 0.00005
+  weight_decay: 0.0001
   grad_clip: 0.5
   gradient_accumulation_steps: 4
   early_stop:
@@ -27,6 +28,7 @@ train:
     mode: "max"
   checkpoint:
     monitor: "val_srocc"
+    secondary_monitor: "val_plcc"
     mode: "max"
     save_top_k: 2
 

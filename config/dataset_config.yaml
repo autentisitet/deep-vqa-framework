@@ -15,23 +15,9 @@ TID2013:
     root: "datasets/TID2013"   # 数据集根目录路径
     data: "distorted_images"
     metadata: "."
-    metrics: "metrics_values"
-    reference: "reference_images"
 
   metadata:
     mos_file: "mos_with_names.txt"
-    file_format: "txt"
-    delimiter: r'\s+'
-
-  columns:
-    id_col: 1
-    mos_col: 0
-    std_col: 2
-
-  preprocessing:
-    resize: [224, 224]
-    normalize: true
-    augmentation: false
 
 
 
@@ -52,22 +38,6 @@ KoNViD-1k:
 
   metadata:
     mos_file: "KoNViD_1k_mos.csv"
-    file_format: "csv"
-    delimiter: ","
-
-  columns:
-    id_col: "flickr_id"  # CSV 依然支持名称
-    mos_col: "mos"
-    std_col: "std"
-
-  preprocessing:
-    num_frames: 8           # 采样帧数
-    fragment_sampling:
-      num_fragments: 8
-      fragment_len: 4
-    frame_size: [224, 224]
-    fps: 30
-    normalize: true
 
 
 
@@ -78,7 +48,6 @@ T2VQA-DB:
   name: "T2VQA-DB"
   task_type: "vqa"
   data_type: "video"
-  has_text: true
   mos_min: 0.0
   mos_max: 5.0
 
@@ -89,18 +58,3 @@ T2VQA-DB:
 
   metadata:
     mos_file: "info.txt"
-    file_format: "txt"
-    delimiter: "|"
-
-  columns:
-    id_col: 0
-    mos_col: 2
-
-  preprocessing:
-    num_frames: 8
-    fragment_sampling:
-      num_fragments: 8
-      fragment_len: 4
-    frame_size: [224, 224]
-    fps: 30
-    normalize: true

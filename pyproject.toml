@@ -1,6 +1,6 @@
 [project]
 name = "deep-vqa-framework"
-version = "0.6.4"
+version = "0.7.0"
 description = "Unified deep learning framework for Image and Video Quality Assessment (IQA/VQA)"
 readme = "README.md"
 requires-python = ">=3.12"
