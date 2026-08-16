@@ -34,7 +34,7 @@ UV_RUN := uv run
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: help bootstrap setup install data info cache_clean archive results-clean
+.PHONY: help bootstrap setup install data info cache_clean archive results-clean git-log
 
 .PHONY: test-images test-videos test-all
 
@@ -92,7 +92,8 @@ help:
 	@echo '$(BLUE)Maintenance:$(RESET)'
 	@echo '  make cache_clean    Remove cache and temporary files'
 	@echo '  make results-clean       Delete dated .pt/.csv/.log files older than 3 days'
-	@echo '  make archive        Package results'
+	@echo '  make archive [ARCHIVE_ARGS="..."]       Package results'
+	@echo '  make git-log        Export git history and update ignore files'
 	@echo ''
 	@echo '$(CYAN)Info:$(RESET)'
 	@echo '  make info           Show environment details'
@@ -102,12 +103,16 @@ help:
 	@echo '  BOOTSTRAP_ARGS="--mirror"    Pass args to bootstrap.sh'
 	@echo '  SETUP_ARGS="--mirror --all"  Pass args to setup_env.sh'
 	@echo '  INSTALL_ARGS="..."           Pass args to install (bootstrap + setup)'
+	@echo '  ARCHIVE_ARGS="--all"         Pass args to archive_results.sh'
+	@echo '  GIT_LOG_FILE="git_log.txt"  Git history output path'
 	@echo '  BUILD_ARGS="--no-cache"      Pass args to docker build'
 	@echo ''
 	@echo '$(BOLD)Examples:$(RESET)'
 	@echo '  make bootstrap BOOTSTRAP_ARGS="--mirror"'
 	@echo '  make setup SETUP_ARGS="--mirror --all"'
 	@echo '  make install INSTALL_ARGS="--mirror --all"'
+	@echo '  make archive ARCHIVE_ARGS="--results"'
+	@echo '  make git-log GIT_LOG_FILE="results/git_log.txt"'
 	@echo '  make test-all'
 	@echo '  uv run python -m src.main --dataset tid2013 --model swin_iqa'
 	@echo '  uv run python -m src.main --dataset konvid-1k --model swin_vqa'
@@ -192,6 +197,25 @@ archive:
 	fi
 	@cd $(ROOT_DIR)/scripts && bash archive_results.sh $(ARCHIVE_ARGS) 2>&1 | tee $(LOG_DIR)/archive.log
 	@echo "$(GREEN)[OK]$(RESET) Archive completed."
+
+git-log:
+	@mkdir -p "$$(dirname "$(GIT_LOG_FILE)")"
+	@git --no-pager log --oneline --graph --all --decorate > "$(GIT_LOG_FILE)"
+	@ignore_path="$(GIT_LOG_FILE)"; \
+	case "$$ignore_path" in \
+		"$(ROOT_DIR)"/*) ignore_path="$${ignore_path#$(ROOT_DIR)/}" ;; \
+		./*) ignore_path="$${ignore_path#./}" ;; \
+	esac; \
+	for ignore_file in "$(ROOT_DIR)/.gitignore" "$(ROOT_DIR)/.dockerignore"; do \
+		if ! grep -Fxq -- "$$ignore_path" "$$ignore_file"; then \
+			if [ -s "$$ignore_file" ] && [ "$$(tail -c 1 "$$ignore_file" | wc -l)" -eq 0 ]; then \
+				printf '\n' >> "$$ignore_file"; \
+			fi; \
+			printf '%s\n' "$$ignore_path" >> "$$ignore_file"; \
+			echo "$(GREEN)[OK]$(RESET) Added $$ignore_path to $$(basename "$$ignore_file")"; \
+		fi; \
+	done
+	@echo "$(GREEN)[OK]$(RESET) Git history written to $(GIT_LOG_FILE)"
 
 
 

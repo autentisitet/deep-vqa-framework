@@ -60,3 +60,5 @@ tmp/
 temp/
 Makefile.local
 config.mk
+
+git_log.txt
