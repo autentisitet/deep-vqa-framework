@@ -24,14 +24,13 @@ Examples:
     # VQA inference
     uv run python -m deploy.cli -i examples/video.mp4
 
-    # Custom MOS range (for denormalization)
-    uv run python -m deploy.cli -i test.jpg --mos_min 0 --mos_max 5
+    # Generate feature maps and Grad-CAM for a single IQA image
+    uv run python -m deploy.cli -i test.jpg --visualize
 
 Args:
     -i, --input        Input file or directory path
     -c, --checkpoint   Custom model checkpoint (automatically selected if omitted)
-    --mos_min          Minimum MOS value for denormalization
-    --mos_max          Maximum MOS value for denormalization
+    --visualize        Save feature maps and Grad-CAM for a single image
 """
 
 import argparse
@@ -40,15 +39,68 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import torch
+import yaml
 from loguru import logger
 
 from deploy.core.runtime_config import cfg, ensure_runtime_dirs
 from deploy.core.model_loader import load_checkpoint, select_checkpoint
 from deploy.core.inference import predict_batch
+from src.visualization.feature_visualizer import FeatureVisualizer, load_image_tensor
 
 
 REPORTS_DIR = cfg.resolve(cfg.reports_dir)
 SUPPORTED_EXTS = {ext.lower() for ext in (cfg.image_exts | cfg.video_exts)}
+DATASET_CONFIG_PATH = cfg.resolve(Path("config/dataset_config.yaml"))
+VISUALIZATION_OUTPUT_DIR = cfg.resolve(Path("results/diagnostics"))
+
+
+def load_dataset_mos_range(config: object) -> tuple[float, float]:
+    """Load MOS bounds from config/dataset_config.yaml for the checkpoint dataset."""
+    if not DATASET_CONFIG_PATH.exists():
+        raise FileNotFoundError(f"Dataset configuration not found: {DATASET_CONFIG_PATH}")
+
+    with DATASET_CONFIG_PATH.open("r", encoding="utf-8") as stream:
+        dataset_configs = yaml.safe_load(stream) or {}
+
+    dataset_cfg = getattr(config, "dataset", None)
+    candidates = {
+        str(getattr(dataset_cfg, "registry_key", "")),
+        str(getattr(dataset_cfg, "name", "")),
+    }
+    candidates = {candidate.strip().lower() for candidate in candidates if candidate.strip()}
+    matched = next(
+        (value for key, value in dataset_configs.items() if str(key).strip().lower() in candidates),
+        None,
+    )
+    if not isinstance(matched, dict):
+        raise KeyError(f"No dataset MOS configuration found for {sorted(candidates)}")
+
+    mos_min = float(matched["mos_min"])
+    mos_max = float(matched["mos_max"])
+    if mos_max <= mos_min:
+        raise ValueError(f"Invalid MOS range in dataset configuration: [{mos_min}, {mos_max}]")
+    return mos_min, mos_max
+
+
+def visualize_image(model: torch.nn.Module, config: object, image_path: Path, device: str) -> None:
+    """Save the default feature-map and Grad-CAM views for one IQA image."""
+    if image_path.suffix.lower() not in cfg.image_exts:
+        raise ValueError("Visualization currently supports image inputs only")
+
+    input_size = int(config.model.input_size)
+    image = load_image_tensor(image_path, input_size)
+    visualizer = FeatureVisualizer(model, device)
+    layers = visualizer.default_image_layers()
+    result = visualizer.run_image(image, layers, cam_layer="image_backbone")
+
+    VISUALIZATION_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    for name, activation in result.activations.items():
+        safe_name = name.replace(".", "_")
+        visualizer.save_feature_grid(activation, VISUALIZATION_OUTPUT_DIR / f"{safe_name}.png")
+    if result.cam is not None:
+        visualizer.save_cam_overlay(image, result.cam, VISUALIZATION_OUTPUT_DIR / "gradcam.png")
+    logger.info(f"Feature visualization complete: score={result.score:.6f} | output={VISUALIZATION_OUTPUT_DIR}")
 
 
 def collect_targets(input_path: Path) -> list[Path]:
@@ -96,8 +148,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="IQA/VQA Inference CLI")
     parser.add_argument("-i", "--input", type=str, required=True, help="File or directory")
     parser.add_argument("-c", "--checkpoint", type=str, default=None, help="Model checkpoint")
-    parser.add_argument("--mos_min", type=float, default=None)
-    parser.add_argument("--mos_max", type=float, default=None)
+    parser.add_argument("--visualize", action="store_true", help="Save feature maps and Grad-CAM for one image")
 
     args = parser.parse_args()
     device = cfg.default_device
@@ -120,9 +171,16 @@ def main() -> None:
         sys.exit(1)
 
     model, config = load_checkpoint(ckpt_path, device)
+    mos_min, mos_max = load_dataset_mos_range(config)
 
     # Run inference
-    results = predict_batch(model, targets, config, device, args.mos_min, args.mos_max)
+    results = predict_batch(model, targets, config, device, mos_min, mos_max)
+
+    if args.visualize:
+        if len(targets) != 1:
+            logger.error("Visualization requires exactly one input image")
+            sys.exit(1)
+        visualize_image(model, config, targets[0], device)
 
     # Output
     task_group = resolve_task_group(config)
