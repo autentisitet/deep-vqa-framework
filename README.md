@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.12+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.7.5-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -25,6 +25,8 @@ The current default model uses a Swin-T backbone for image and per-frame spatial
 - [Training Pipeline](#training-pipeline)
 - [Evaluation & Metrics](#evaluation-metrics)
 - [Deployment & Inference API](#deployment-api)
+- [Deployment Guide](deploy/GUIDE.md)
+- [Frontend](frontend/index.html)
 - [Project Main Structure](#project-main-structure)
 - [Docker / Podman Support](#docker-support)
 - [System Overview](#system-overview)
@@ -32,7 +34,9 @@ The current default model uses a Swin-T backbone for image and per-frame spatial
 - [Troubleshooting](#troubleshooting)
 - [Dependency Security](#dependency-security)
 - [License](#license)
+- [Security Policy](SECURITY.md)
 - [Acknowledgements](#acknowledgments)
+- [References](#references)
 
 ---
 
@@ -149,6 +153,8 @@ uv run python -m src.main --model swin_vqa --dataset konvid-1k
 uv run python -m src.main --model swin_vqa --dataset t2vqa-db
 ```
 
+> Dataset note: TID2013 is a full-reference image quality assessment (FR-IQA) dataset, where each distorted image has a corresponding pristine reference image. KoNViD-1k is a no-reference video quality assessment (NR-VQA) dataset. The current TID2013 training/inference entry point reads only distorted images and MOS labels and does not pass reference images to the model, so it runs as a single-image IQA pipeline.
+
 The training entry point runs the pipeline in this order:
 
 ```text
@@ -185,19 +191,40 @@ integrity check -> EDA/statistics -> group-aware train/val/test split -> group-a
 The framework automatically generates:
 
 - **EDA Distribution**: MOS histogram and boxplot
+- **Training History**: Loss, PLCC/SROCC/KROCC, RMSE/R² and available training metrics
+- **Residual Diagnostics**: Residual vs predicted MOS, residual vs true MOS, true-vs-predicted scatter and error distribution
+- **MOS-bin Analysis**: Mean absolute error grouped by true MOS intervals
+- **Fold Summary/Comparison**: Per-fold PLCC/SROCC/RMSE/R² summaries, stability views and comparison bars
+- **Sample-level Error Reports**: Complete prediction manifests and automatically exported top-k error samples
+- **Feature Interpretability**: Backbone feature grids and regression Grad-CAM overlays for image inputs
 
-- **Training History**: Loss curves, PLCC/SROCC progression
+The browser frontend is intentionally focused on media upload, no-reference IQA/VQA inference, model output, and interpretability. For distribution analysis, use an offline feature-artifact workflow: extract embeddings for every training sample, fit PCA once on the training split, save the projection and normalization parameters, then project a problem sample into that same space for comparison.
 
-- **Residual Analysis**: Scatter plots, error distribution
+This keeps the trained no-reference IQA/VQA models as the core capability while making dataset coverage and outlier analysis reproducible. The saved artifact should include the feature extractor/checkpoint identifier, dataset split, sample IDs, feature normalization parameters, PCA components/mean, and 2-D coordinates.
 
-- **Fold Summary**: Per-fold PLCC/SROCC/RMSE/R² summary and stability views
+The workflow is implemented in `src/data/eda/feature_distribution.py`:
 
-- **Fold Comparison**: Bar charts generated from available fold histories
+```bash
+# Fit the training distribution (use the train split only)
+uv run python -m src.data.eda.feature_distribution build \
+  --checkpoint deploy/vqa-models/konvid-1k_best.pt \
+  --dataset konvid-1k
 
-Training, evaluation, and comparison plots are saved under `results/{dataset}/plots/`.
-Dataset audit and EDA plots are saved under `results/{dataset}/eda/`.
-Other artifacts, including logs, manifests, CSV files, and checkpoints, use the same
-lowercase dataset key under `results/{dataset}/`; for example, `tid2013` and `konvid-1k`.
+# Project new/problem samples into the saved space
+uv run python -m src.data.eda.feature_distribution project \
+  --artifact results/konvid-1k/eda/feature_distribution/train_pca.npz \
+  --checkpoint deploy/vqa-models/konvid-1k_best.pt \
+  --input path/to/problem.mp4 \
+  --output results/konvid-1k/eda/feature_distribution/problem_projection.json
+```
+
+The build command saves the compressed feature/PCA artifact, metadata JSON, and
+training scatter plot. The project command reports PCA coordinates, nearest
+training sample, and an empirical nearest-distance percentile, together with a
+query scatter plot. The model embedding is produced by the same
+`IQAVQANet.extract_quality_features()` path used by inference.
+
+See the Project Structure section below for the complete artifact and directory layout.
 
 ---
 
@@ -213,20 +240,46 @@ deploy/vqa-models/{dataset}_best.pt
 The checkpoint contains the model configuration and MOS range required by the
 deployment loader. The API uses the task roles `iqa` and `vqa`; the actual
 backbone is read from the loaded checkpoint.
+Checkpoint usage and release restrictions are covered by the project disclaimer; review
+[DISCLAIMER.md](DISCLAIMER.md) before redistribution.
 
 ### FastAPI Service
 
+See the dedicated [deployment guide](deploy/GUIDE.md) for host mode, Docker/Podman
+startup, API routes, batch CLI, proxy handling, SELinux mounts, and troubleshooting.
+
 ```bash
-uv run python -m deploy.api
+uv run python -m uvicorn deploy.api:app --host 127.0.0.1 --port 8000
 ```
 
 For containerized deployment, `make docker-infer` starts FastAPI and Nginx.
-Nginx serves `frontend/` on host port `8000` and proxies `/api/health` and
-`/api/evaluate`; set `WEB_PORT=80` to use port 80. Direct development with a
+Nginx serves `frontend/` on host port `8000` and proxies `/api/v1/*`; set
+`WEB_PORT=80` to use port 80. Direct development with a
 separate frontend origin requires `CORS_ALLOW_ORIGINS`.
 
-At startup, the service loads available IQA/VQA checkpoints. `/health` reports
-loaded tasks and device; startup fails if no checkpoint is available.
+FastAPI generates OpenAPI documentation automatically:
+
+```text
+Swagger UI: http://localhost:8000/api/docs
+ReDoc:      http://localhost:8000/api/redoc
+OpenAPI:    http://localhost:8000/api/openapi.json
+```
+
+The main REST resources are `GET /api/v1/health`, `GET /api/v1/models`,
+`GET /api/v1/models/{model_id}`, and `POST /api/v1/evaluations?model_id=iqa`.
+The evaluation endpoint accepts one multipart `file` and returns a typed
+evaluation resource.
+
+On startup, the service also writes the generated schema to
+`docs/openapi.json` for offline inspection and version control.
+The production compose service mounts the host `docs/` directory so this file
+persists after the container is recreated.
+
+When running FastAPI directly without Nginx, use `/docs`, `/redoc`, and
+`/openapi.json` instead of the `/api/...` proxy paths shown above.
+
+At startup, the service loads available IQA/VQA checkpoints. `/api/v1/health`
+reports loaded tasks and device; startup fails if no checkpoint is available.
 
 ### Batch Inference
 
@@ -234,11 +287,16 @@ loaded tasks and device; startup fails if no checkpoint is available.
 uv run python -m deploy.cli -i examples/images/
 uv run python -m deploy.cli -i examples/videos/
 uv run python -m deploy.cli -i examples/
+
+# Optional image feature-map and Grad-CAM visualization
+uv run python -m deploy.cli -i examples/images/sample.jpg --visualize
 ```
 
 The CLI selects the task-specific checkpoint, detects image/video files, and
 writes JSON reports to `reports/iqa-test/` or `reports/vqa-test/`. The Make
-targets `test-images`, `test-videos`, and `test-all` call this CLI.
+targets `test-images`, `test-videos`, and `test-all` call this CLI. MOS bounds
+are loaded from `config/dataset_config.yaml` using the dataset stored in the
+checkpoint configuration.
 
 ---
 
@@ -268,9 +326,12 @@ deep-vqa-framework/
 ├── reports/                  # Security reports from pip-audit, SBOM, and safety
 |
 ├── results/
+│   ├── diagnostics/             # Feature maps and Grad-CAM outputs
 |   ├── {dataset}/
 │   │   ├── train_logs/           # Training history, CSV logs
 │   │   ├── plots/                # Loss curves, residual plots
+│   │   ├── analysis/             # Error diagnostics and grouped metrics
+│   │   │   └── errors/           # Top-error samples and MOS-bin summaries
 │   │   ├── eda/                  # Dataset analysis plots
 │   │   ├── model_outputs/        # Checkpoints (.pt files)
 │   │   └── corrupted/            # Quarantined corrupt media + rejected label backups
@@ -299,18 +360,26 @@ deep-vqa-framework/
 │   ├── iqa-models/               # IQA .pt checkpoints served by api.py
 │   └── vqa-models/               # VQA .pt checkpoints served by api.py
 │
+├── frontend/                # Static browser UI for model inference
+│   ├── index.html                 # Upload, inference and interpretation UI
+│   └── index.html                 # Upload, inference and interpretation UI
+│
 └── src/                       # Core framework logic
     ├── main.py                   # Global execution entry point
-    ├── core/                        # Training engine & evaluation pipeline
     ├── data/                        # Data loaders, preprocessing, EDA & integrity analysis
+    │   └── eda/feature_distribution.py # Training embedding/PCA artifacts and projection CLI
+    ├── core/                        # Training engine & evaluation pipeline
     ├── models/                      # Backbones, heads, losses, metrics, and IQAVQANet
     ├── utils/                        # Configuration, logging & path management
-    └── config/                     # Pydantic config system (code)
+    ├── config/                     # Pydantic config system (code)
+    └── visualization/              # Training plots and feature/Grad-CAM visualization
 ```
 
 ---
 
 ## Docker / Podman Support <a id="docker-support"></a>
+
+For the complete deployment workflow, see [deploy/GUIDE.md](deploy/GUIDE.md).
 
 The framework supports containerized development and deployment with both Docker and Podman.
 
@@ -350,17 +419,42 @@ make docker-manage
 | Component | Description |
 | :--- | :--- |
 | `Dockerfile` | Multi-stage builds: `base` (shared deps), `train` (training), `prod` (inference) |
-| `docker-compose.yaml` | Main compose configuration with json-file log rotation and `.cache` mounts |
+| `docker-compose.yaml` | Main compose configuration with API health checks, json-file log rotation, model/report/cache mounts, and persistent OpenAPI output |
 | `docker-compose.docker.yaml` | Docker-specific GPU support plus host-network builds |
 | `docker-compose.podman.yaml` | Podman-specific GPU support plus host-network builds |
 
 The Makefile auto-detects Docker vs Podman. For Podman users, `make docker-*` does not require `alias docker=podman`; aliases are only useful if you run container commands manually.
+
+Use `make help` for the command index and `make help-TARGET` for focused guidance, for example `make help-docker-infer` or `make help-docker-purge-all`. Podman is supported on both SELinux and non-SELinux distributions; the Podman overlay applies `:Z` labels for SELinux hosts while remaining usable on Ubuntu and other distributions.
+
+Choose the runtime mode that fits the workflow:
+
+```bash
+make docker-api       # API-only development mode on http://127.0.0.1:8001
+make docker-infer     # Full API + Nginx + frontend mode with automatic verification
+```
+
+The API can also run directly on the host when the Python environment and checkpoints are available:
+
+```bash
+uv run python -m uvicorn deploy.api:app --host 0.0.0.0 --port 8000
+```
+
+Use `http://127.0.0.1:8000/v1/health` and `http://127.0.0.1:8000/docs` in host mode. In the Nginx mode, use the `/api` prefix (`/api/v1/health`).
+
+The frontend's responsive and accessibility checks are documented in [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md). It is designed for keyboard and reduced-motion use; formal WCAG conformance still requires Lighthouse/axe scans and human assistive-technology testing.
+
+Frontend evaluations are appended to `reports/frontend-evaluations.jsonl` as one JSON object per line. Each record contains `timestamp`, `file_name`, `file_hash` (SHA-256), `task_type`, `model_used`, `mos_score`, `mos_interval`, and `inference_time_ms`.
 
 Dataset scripts detect `http_proxy`/`HTTP_PROXY`. On AutoDL cloud GPU instances, enable the platform proxy before downloading datasets:
 
 ```bash
 source /etc/network_turbo
 ```
+
+Compose forwards optional upper- and lowercase proxy variables to the containers. It also extends `NO_PROXY`/`no_proxy` with localhost and the Compose service/container names, so health checks and API-to-Nginx traffic remain direct even when the host uses a proxy.
+
+The generic Docker Compose file uses portable bind mounts. On SELinux-enforcing Fedora/RHEL hosts, the Podman overlay adds `:Z` so Podman can relabel the frontend and `default.conf` for the container. If an older container was created before this option was added, recreate it with `podman-compose down` followed by `podman-compose up -d`.
 
 Torch/uv caches are mounted at `/app/.cache` in containers. Runtime services set `XDG_CACHE_HOME=/app/.cache`, `TORCH_HOME=/app/.cache/torch`, and `UV_CACHE_DIR=/app/.cache/uv`, so previously downloaded torchvision backbones can be reused.
 
@@ -383,6 +477,12 @@ The interactive pipeline map is available at [docs/pipeline.html](docs/pipeline.
 Configuration is assembled by `load_config()` which returns a Pydantic `Config` object.
 All settings are validated at load time with type checking.
 Paths are resolved via `cfg.paths.xxx_dir(dataset_name)` methods.
+
+Preprocessing actions are described by `src.data.preprocessing.PREPROCESSING_REGISTRY`.
+The registry records the image/video action key, media type, implementation method,
+and ordered steps (validation, resize/crop, and normalization). It is metadata for
+auditing and extension; the current model path still uses the registered ImageNet
+image/video actions directly.
 
 | Stage | File | How it's merged |
 | ------- | ------ | --------- |
@@ -461,7 +561,7 @@ The framework includes security tools to audit dependencies:
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.7.0
+- **Version**: 0.7.5
 
 ---
 
@@ -474,8 +574,21 @@ The framework includes security tools to audit dependencies:
 
 ---
 
+## References <a id="references"></a>
+
+- Liu, Z., et al. (2021). *Swin Transformer: Hierarchical Vision Transformer Using Shifted Windows.* ICCV. [Paper](https://arxiv.org/abs/2103.14030)
+- He, K., et al. (2016). *Deep Residual Learning for Image Recognition.* CVPR. [Paper](https://arxiv.org/abs/1512.03385)
+- Chen, L.-C., et al. (2017). *Understanding Convolution for Semantic Segmentation.* arXiv:1702.08502. [Paper](https://arxiv.org/abs/1702.08502)
+- Ponomarenko, N., et al. (2015). *Image Database TID2013: Peculiarities, Results and Perspectives.* Signal Processing: Image Communication. [Dataset](https://www.ponomarenko.info/tid2013.htm)
+- Hosu, V., et al. (2017). *The Konstanz Natural Video Database (KoNViD-1k).* QoMEX. [Paper](https://doi.org/10.1109/QoMEX.2017.7965631); [Dataset](https://database.mmsp-kn.de/konvid-1k-database.html)
+- Wang, Y., et al. (n.d.). *T2VQA-DB: A Database for Text-to-Video Quality Assessment.* [Project and dataset](https://github.com/QMME/T2VQA)
+- Hüsem, H., Aydın, Z. G., & Demir, O. (2025). *Analysis of the Impact of RGB-to-Achromatic Color Space Transformations on Single-Image Superresolution Performance.* Black Sea Journal of Engineering and Science, 8(2), 330–340. [Paper](https://scholar.google.com/scholar?q=%22Analysis+of+the+Impact+of+RGB-to-Achromatic+Color+Space+Transformations+on+Single-Image+Superresolution+Performance%22)
+- Barkowsky, M., Eskofier, B., Bitto, R., Bialkowski, J., & Kaup, A. (2007). *A Perceptually Driven Spatial and Temporal Integration of Pixel-Based Video Quality Measures.* Proceedings of the Mobile Content Quality of Experience Conference. [Paper](https://scholar.google.com/scholar?q=%22A+Perceptually+Driven+Spatial+and+Temporal+Integration+of+Pixel-Based+Video+Quality+Measures%22)
+
+---
+
 ## ⚖️ Legal & Disclaimer
-For details regarding third-party tool usage, dataset compliance, and resource usage, please refer to the [DISCLAIMER.md](DISCLAIMER.md) file.
+For details regarding third-party tool usage, dataset compliance, and resource usage, see [DISCLAIMER.md](DISCLAIMER.md) or [DISCLAIMER_zh.md](DISCLAIMER_zh.md). Security reports should follow [SECURITY.md](SECURITY.md).
 
 ---
 

@@ -1,0 +1,591 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Deep-VQA Quality Assessment API",
+    "description": "REST API for image and video quality assessment inference.",
+    "version": "5.0.0"
+  },
+  "paths": {
+    "/v1/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Check service health",
+        "operationId": "health_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "tags": [
+          "models"
+        ],
+        "summary": "List loaded quality assessment models",
+        "operationId": "list_models_v1_models_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCollectionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models/{model_id}": {
+      "get": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Get one loaded model",
+        "operationId": "get_model_v1_models__model_id__get",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSummary"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/evaluations": {
+      "post": {
+        "tags": [
+          "evaluations"
+        ],
+        "summary": "Evaluate one uploaded image or video",
+        "operationId": "create_evaluation_v1_evaluations_post",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Serving model role: iqa or vqa",
+              "default": "iqa",
+              "title": "Model Id"
+            },
+            "description": "Serving model role: iqa or vqa"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_evaluation_v1_evaluations_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/v1/visualizations": {
+      "post": {
+        "tags": [
+          "visualizations"
+        ],
+        "summary": "Generate feature maps and Grad-CAM for an image",
+        "operationId": "create_visualization_v1_visualizations_post",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Loaded image model role",
+              "default": "iqa",
+              "title": "Model Id"
+            },
+            "description": "Loaded image model role"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_visualization_v1_visualizations_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VisualizationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_create_evaluation_v1_evaluations_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "Image or video file to evaluate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_create_evaluation_v1_evaluations_post"
+      },
+      "Body_create_visualization_v1_visualizations_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "Image file to visualize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_create_visualization_v1_visualizations_post"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "example": {
+          "error": "Model 'iqa' is not loaded"
+        }
+      },
+      "EvaluationResponse": {
+        "properties": {
+          "evaluation_id": {
+            "type": "string",
+            "title": "Evaluation Id"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "model_id": {
+            "type": "string",
+            "title": "Model Id"
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          },
+          "task_type": {
+            "type": "string",
+            "title": "Task Type"
+          },
+          "model_name": {
+            "type": "string",
+            "title": "Model Name"
+          },
+          "backbone": {
+            "type": "string",
+            "title": "Backbone"
+          },
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score",
+            "description": "Normalized predicted quality score"
+          },
+          "mos_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mos Score",
+            "description": "Score converted to dataset MOS range"
+          },
+          "mos_min": {
+            "type": "number",
+            "title": "Mos Min"
+          },
+          "mos_max": {
+            "type": "number",
+            "title": "Mos Max"
+          },
+          "media_size": {
+            "type": "string",
+            "title": "Media Size"
+          },
+          "latency_ms": {
+            "type": "number",
+            "title": "Latency Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "evaluation_id",
+          "filename",
+          "model_id",
+          "media_type",
+          "task_type",
+          "model_name",
+          "backbone",
+          "dataset",
+          "score",
+          "mos_score",
+          "mos_min",
+          "mos_max",
+          "media_size",
+          "latency_ms"
+        ],
+        "title": "EvaluationResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "loaded_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Loaded Models"
+          },
+          "device": {
+            "type": "string",
+            "title": "Device"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "loaded_models",
+          "device"
+        ],
+        "title": "HealthResponse"
+      },
+      "ModelCollectionResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ModelSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "count"
+        ],
+        "title": "ModelCollectionResponse"
+      },
+      "ModelSummary": {
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "title": "Model Id",
+            "description": "Serving role: iqa or vqa"
+          },
+          "task_type": {
+            "type": "string",
+            "title": "Task Type"
+          },
+          "model_name": {
+            "type": "string",
+            "title": "Model Name"
+          },
+          "backbone": {
+            "type": "string",
+            "title": "Backbone"
+          },
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          },
+          "mos_min": {
+            "type": "number",
+            "title": "Mos Min"
+          },
+          "mos_max": {
+            "type": "number",
+            "title": "Mos Max"
+          },
+          "checkpoint": {
+            "type": "string",
+            "title": "Checkpoint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model_id",
+          "task_type",
+          "model_name",
+          "backbone",
+          "dataset",
+          "media_type",
+          "mos_min",
+          "mos_max",
+          "checkpoint"
+        ],
+        "title": "ModelSummary"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VisualizationResponse": {
+        "properties": {
+          "visualization_id": {
+            "type": "string",
+            "title": "Visualization Id"
+          },
+          "model_id": {
+            "type": "string",
+            "title": "Model Id"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "layers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Layers"
+          },
+          "feature_maps": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Feature Maps"
+          },
+          "gradcam": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gradcam"
+          }
+        },
+        "type": "object",
+        "required": [
+          "visualization_id",
+          "model_id",
+          "filename",
+          "score",
+          "layers",
+          "feature_maps"
+        ],
+        "title": "VisualizationResponse"
+      }
+    }
+  }
+}

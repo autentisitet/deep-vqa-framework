@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.12+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.7.5-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -25,6 +25,8 @@ Deep-VQA-Framework 提供从带质量标签的媒体数据到可用 IQA/VQA 模�
 - [训练流程](#training-pipeline)
 - [评估与指标](#evaluation-metrics)
 - [部署与推理 API](#deployment-api)
+- [部署指南](deploy/GUIDE_zh.md)
+- [前端](frontend/index.html)
 - [项目主要结构](#project-main-structure)
 - [Docker / Podman 支持](#docker-support)
 - [系统概览](#system-overview)
@@ -32,7 +34,9 @@ Deep-VQA-Framework 提供从带质量标签的媒体数据到可用 IQA/VQA 模�
 - [故障排查](#troubleshooting)
 - [依赖项安全](#dependency-security)
 - [许可证](#license)
+- [安全策略](SECURITY.md)
 - [致谢](#acknowledgments)
+- [参考文献](#references)
 
 ---
 
@@ -59,29 +63,33 @@ Deep-VQA-Framework 提供从带质量标签的媒体数据到可用 IQA/VQA 模�
 ### IQAVQANet：统一质量评估网络
 
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph IMAGE[图像 IQA 路径]
-        I1[RGB 解码] --> I2[Bicubic 将短边 resize 到 232]
-        I2 --> I3[Center crop 到 224 x 224]
-        I3 --> I4[缩放到 0..1 并进行 ImageNet 归一化]
-        I4 --> I5[图像张量 B x 3 x 224 x 224]
-        I5 --> I6[Swin-T ImageNet 主干]
-        I6 --> I7[自适应平均池化]
-        I7 --> I8[图像特征 B x 768]
+        direction TB
+        I1[RGB 解码] --> I2[Bicubic resize<br>短边到 232]
+        I2 --> I3[Center crop<br>到 224 x 224]
+        I3 --> I4[缩放到 0..1<br>并进行 ImageNet 归一化]
+        I4 --> I5[图像张量<br>B x 3 x 224 x 224]
+        I5 --> I6[Swin-T<br>ImageNet 主干]
+        I6 --> I7[自适应<br>平均池化]
+        I7 --> I8[图像特征<br>B x 768]
         I8 --> I9[质量预测头与分数 B]
     end
 
+    IMAGE ~~~ VIDEO
+
     subgraph VIDEO[视频 VQA 路径]
-        V1[采样或补齐到 num_frames] --> V2[逐帧 RGB 解码]
-        V2 --> V3[Bicubic 将短边 resize 到 232]
-        V3 --> V4[Center crop 到 224 x 224]
-        V4 --> V5[缩放到 0..1 并进行 ImageNet 归一化]
-        V5 --> V6[视频张量 B x F x 3 x 224 x 224]
-        V6 --> V7[展开为逐帧张量]
-        V7 --> V8[Swin-T 空间特征]
-        V8 --> V9[帧特征 B x F x 768]
-        V9 --> V10[位置编码与 TransformerEncoder]
-        V10 --> V11[时序平均]
+        direction TB
+        V1[采样或补齐<br>到 num_frames] --> V2[逐帧 RGB 解码]
+        V2 --> V3[Bicubic resize<br>短边到 232]
+        V3 --> V4[Center crop<br>到 224 x 224]
+        V4 --> V5[缩放到 0..1<br>并进行 ImageNet 归一化]
+        V5 --> V6[视频张量<br>B x F x 3 x 224 x 224]
+        V6 --> V7[展开为逐帧张量<br>B x F x 3 x 224 x 224]
+        V7 --> V8[Swin-T<br>空间特征]
+        V8 --> V9[帧特征<br>B x F x 768]
+        V9 --> V10[位置编码与<br>TransformerEncoder]
+        V10 --> V11[时序<br>平均]
         V11 --> V12[质量预测头与分数 B]
     end
 ```
@@ -145,6 +153,8 @@ uv run python -m src.main --model swin_vqa --dataset konvid-1k
 uv run python -m src.main --model swin_vqa --dataset t2vqa-db
 ```
 
+> 数据集属性说明：TID2013 是全参考图像质量评估（FR-IQA）数据集，每个失真图像对应一张原始参考图；KoNViD-1k 是无参考视频质量评估（NR-VQA）数据集。本项目当前的 TID2013 训练/推理入口只读取失真图像和 MOS，不将参考图像作为模型输入，因此实际运行仍是单图 IQA 流程。
+
 训练入口按以下顺序执行：
 
 ```text
@@ -181,19 +191,38 @@ uv run python -m src.main --model swin_vqa --dataset t2vqa-db
 该框架会自动生成：
 
 - **EDA 分布图**：MOS 直方图与箱线图
+- **训练历史**：Loss、PLCC/SROCC/KROCC、RMSE/R² 及其他可用训练指标
+- **残差诊断**：Residual vs Predicted MOS、Residual vs True MOS、真实值-预测值散点图与误差分布
+- **MOS 区间分析**：按真实 MOS 区间统计平均绝对误差
+- **Fold 汇总与比较**：每折 PLCC/SROCC/RMSE/R² 汇总、稳定性视图与对比柱状图
+- **样本级误差报告**：完整预测 manifest，以及自动导出的 top-k 高误差样本
+- **特征可解释性**：图像输入的 backbone 特征图网格与回归 Grad-CAM 热力图
 
-- **训练历史**：损失曲线、PLCC/SROCC 变化趋势
+浏览器前端聚焦于媒体上传、无参考 IQA/VQA 推理、模型输出和可解释性。对于训练集分布分析，建议采用离线特征产物流程：先对训练集全部样本提取特征，在训练划分上一次性拟合 PCA，保存投影和归一化参数；出现问题样本时，将它投影到同一个特征空间中进行对比。
 
-- **残差分析**：散点图、误差分布
+这样既保持训练好的无参考 IQA/VQA 模型作为核心能力，也能让数据集覆盖范围和异常样本分析可复现。保存的特征产物应包含特征提取器/checkpoint 标识、数据集划分、样本 ID、特征归一化参数、PCA 均值与主成分以及二维坐标。
 
-- **Fold 汇总**：每折 PLCC/SROCC/RMSE/R² 汇总与稳定性视图
+该流程已在 `src/data/eda/feature_distribution.py` 中实现：
 
-- **Fold 比较**：基于已有 fold history 生成对比柱状图
+```bash
+# 只使用 train 划分拟合训练集分布
+uv run python -m src.data.eda.feature_distribution build \
+  --checkpoint deploy/vqa-models/konvid-1k_best.pt \
+  --dataset konvid-1k
 
-训练、评估和对比图表保存在 `results/{dataset}/plots/`。
-数据审计和 EDA 图表保存在 `results/{dataset}/eda/`。
-日志、manifest、CSV 和 checkpoint 等其他产物也使用数据集注册表中的小写 key，
-统一放在 `results/{dataset}/` 下，例如 `tid2013` 和 `konvid-1k`。
+# 将问题样本投影到已保存的同一空间
+uv run python -m src.data.eda.feature_distribution project \
+  --artifact results/konvid-1k/eda/feature_distribution/train_pca.npz \
+  --checkpoint deploy/vqa-models/konvid-1k_best.pt \
+  --input path/to/problem.mp4 \
+  --output results/konvid-1k/eda/feature_distribution/problem_projection.json
+```
+
+构建命令会保存压缩后的特征/PCA 产物、元数据 JSON 和训练集散点图；投影命令
+会输出 PCA 坐标、最近训练样本及经验最近距离百分位，并生成问题样本散点图。
+特征来自 `IQAVQANet.extract_quality_features()`，与实际推理使用同一条模型特征路径。
+
+完整的产物目录与文件组织见后文“项目结构”章节。
 
 ---
 
@@ -208,19 +237,42 @@ deploy/vqa-models/{dataset}_best.pt
 
 checkpoint 中包含部署加载器所需的模型配置和 MOS 区间。API 使用 `iqa`
 和 `vqa` 两个任务角色，具体 backbone 从加载的 checkpoint 中读取。
+checkpoint 的使用和发布限制请参阅 [DISCLAIMER_zh.md](DISCLAIMER_zh.md)，再进行再分发。
 
 ### FastAPI 服务
 
+主机直运行、Docker/Podman 启动、API 路由、批量 CLI、代理、SELinux 挂载和排障
+请参阅专门的[中文部署指南](deploy/GUIDE_zh.md)，也可查看[英文版](deploy/GUIDE.md)。
+
 ```bash
-uv run python -m deploy.api
+uv run python -m uvicorn deploy.api:app --host 127.0.0.1 --port 8000
 ```
 
 容器化部署使用 `make docker-infer`，它会启动 FastAPI 和 Nginx。Nginx 默认通过
-宿主机 `8000` 端口提供 `frontend/`，并代理 `/api/health` 和 `/api/evaluate`；
+宿主机 `8000` 端口提供 `frontend/`，并代理 `/api/v1/*`；
 设置 `WEB_PORT=80` 可改用 80 端口。直接开发时，如果前端和 API 不同源，需要设置
 `CORS_ALLOW_ORIGINS`。
 
-服务启动时加载可用的 IQA/VQA checkpoint。`/health` 返回已加载任务和推理设备；
+FastAPI 会自动生成 OpenAPI 接口文档：
+
+```text
+Swagger UI: http://localhost:8000/api/docs
+ReDoc:      http://localhost:8000/api/redoc
+OpenAPI:    http://localhost:8000/api/openapi.json
+```
+
+主要 REST 资源包括 `GET /api/v1/health`、`GET /api/v1/models`、
+`GET /api/v1/models/{model_id}` 和 `POST /api/v1/evaluations?model_id=iqa`。
+评估接口接收一个 multipart `file`，并返回带类型约束的评估资源。
+
+服务启动时还会把动态生成的接口 schema 保存到 `docs/openapi.json`，
+便于离线查看和纳入版本控制。
+生产环境的 Compose 会将宿主机 `docs/` 挂载到容器，因此重建容器后该文件仍会保留。
+
+如果不经过 Nginx、直接启动 FastAPI，则使用 `/docs`、`/redoc` 和
+`/openapi.json`，不需要 `/api` 代理前缀。
+
+服务启动时加载可用的 IQA/VQA checkpoint。`/api/v1/health` 返回已加载任务和推理设备；
 如果没有任何 checkpoint，服务会启动失败。
 
 ### 批量推理
@@ -229,11 +281,15 @@ uv run python -m deploy.api
 uv run python -m deploy.cli -i examples/images/
 uv run python -m deploy.cli -i examples/videos/
 uv run python -m deploy.cli -i examples/
+
+# 可选：生成单张图像的特征图和 Grad-CAM
+uv run python -m deploy.cli -i examples/images/sample.jpg --visualize
 ```
 
 CLI 会选择对应任务的 checkpoint，自动识别图像和视频文件，并将 JSON 结果写入
 `reports/iqa-test/` 或 `reports/vqa-test/`。`test-images`、`test-videos` 和
-`test-all` 这些 Make 目标都会调用这个 CLI。
+`test-all` 这些 Make 目标都会调用这个 CLI。MOS 范围会根据 checkpoint 中的数据集
+标识，从 `config/dataset_config.yaml` 读取。
 
 ---
 
@@ -263,9 +319,12 @@ deep-vqa-framework/
 ├── reports/                  # pip-audit、SBOM、safety 的安全报告
 |
 ├── results/
+│   ├── diagnostics/             # 特征图与 Grad-CAM 输出
 |   ├── {dataset}/
 │   │   ├── train_logs/           # 训练历史记录、CSV 日志
 │   │   ├── plots/                # 损失曲线、残差图
+│   │   ├── analysis/             # 误差诊断与分组指标
+│   │   │   └── errors/           # 高误差样本与 MOS 区间汇总
 │   │   ├── eda/                  # 数据集分析图表
 │   │   ├── model_outputs/        # .pt 文件
 │   │   └── corrupted/            # 隔离的损坏媒体文件与被拒绝标签备份
@@ -294,18 +353,26 @@ deep-vqa-framework/
 │   ├── iqa-models/               # 由 api.py 提供的 IQA .pt 模型权重
 │   └── vqa-models/               # 由 api.py 提供的 VQA .pt 模型权重
 │
+├── frontend/                # 面向模型推理的静态浏览器界面
+│   ├── index.html                 # 上传、推理和可解释性界面
+│   └── index.html                 # 上传、推理和可解释性界面
+│
 └── src/                       # 核心框架逻辑
     ├── main.py                   # 全局执行入口
     ├── core/                        # 训练引擎与评估流程
     ├── data/                        # 数据加载器、预处理、EDA（探索性数据分析）与完整性分析
+    │   └── eda/feature_distribution.py # 训练集特征/PCA 产物与投影 CLI
     ├── models/                      # Backbones、heads、losses、metrics 与 IQAVQANet
     ├── utils/                        # 配置、日志记录与路径管理
-    └── config/                     # Pydantic 配置系统（代码实现）
+    ├── config/                     # Pydantic 配置系统（代码实现）
+    └── visualization/              # 训练绘图与特征图/Grad-CAM 可视化
 ```
 
 ---
 
 ## Docker / Podman 支持 <a id="docker-support"></a>
+
+完整部署流程请参阅[中文部署指南](deploy/GUIDE_zh.md)，也可查看[英文部署指南](deploy/GUIDE.md)。
 
 该框架支持使用 Docker 和 Podman 进行容器化开发与部署。
 
@@ -345,17 +412,42 @@ make docker-manage
 | 组件 | 描述 |
 | :--- | :--- |
 | `Dockerfile` | 多阶段构建：`base`（共享依赖）、`train`（训练）、`prod`（推理） |
-| `docker-compose.yaml` | 主 Compose 配置文件，启用 `json-file` 日志轮转并挂载 `.cache` |
+| `docker-compose.yaml` | 主 Compose 配置文件，包含 API 健康检查、`json-file` 日志轮转、模型/报告/缓存挂载以及持久化 OpenAPI 输出 |
 | `docker-compose.docker.yaml` | Docker 专用 GPU 支持，并为构建阶段启用 host 网络 |
 | `docker-compose.podman.yaml` | Podman 专用 GPU 支持，并为构建阶段启用 host 网络 |
 
 Makefile 会自动识别 Docker 或 Podman。Podman 用户直接运行 `make docker-*` 即可，不需要设置 `alias docker=podman`；只有手动运行容器命令时才可能需要 alias。
+
+使用 `make help` 查看命令索引，使用 `make help-TARGET` 查看单个目标的详细说明，例如 `make help-docker-infer` 或 `make help-docker-purge-all`。Podman 同时支持启用和未启用 SELinux 的发行版；Podman overlay 会在 SELinux 主机上应用 `:Z` 标签，在 Ubuntu 等其他发行版上也可以正常使用。
+
+可根据开发场景选择启动模式：
+
+```bash
+make docker-api       # API-only 开发模式，直接访问 http://127.0.0.1:8001
+make docker-infer     # 完整 API + Nginx + 前端模式，自动等待并验证健康状态
+```
+
+如果主机已经准备好 Python 环境和模型检查点，也可以不使用容器，直接运行 API：
+
+```bash
+uv run python -m uvicorn deploy.api:app --host 0.0.0.0 --port 8000
+```
+
+主机直运行时访问 `http://127.0.0.1:8000/v1/health` 和 `http://127.0.0.1:8000/docs`；使用 Nginx 时使用带 `/api` 前缀的路径，例如 `/api/v1/health`。
+
+前端的响应式与无障碍检查说明见 [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md)。页面支持键盘操作和减少动画模式；正式声明符合 WCAG 仍需要运行 Lighthouse/axe 检查，并进行人工辅助技术测试。
+
+前端评估记录会以每行一个 JSON 对象的 JSONL 格式追加到 `reports/frontend-evaluations.jsonl`。每条记录包含 `timestamp`、`file_name`、`file_hash`（SHA-256）、`task_type`、`model_used`、`mos_score`、`mos_interval` 和 `inference_time_ms`。
 
 数据集脚本会检测 `http_proxy`/`HTTP_PROXY`。在 AutoDL 云 GPU 实例上，下载数据集前可以先启用平台代理：
 
 ```bash
 source /etc/network_turbo
 ```
+
+Compose 会将宿主机可选的大小写代理变量传入容器，同时自动在 `NO_PROXY`/`no_proxy` 中追加 localhost、Compose 服务名和容器名。因此，无论宿主机是否启用代理，健康检查及 API 与 Nginx 之间的容器通信都不会绕行代理。
+
+通用 Docker Compose 文件使用可移植的普通 bind mount；在启用 SELinux 的 Fedora/RHEL 主机上，Podman overlay 会为 Nginx 的前端目录和 `default.conf` 自动追加 `:Z` 并重新标记文件。若容器是在加入该选项前创建的，请先执行 `podman-compose down`，再重新 `up -d` 创建容器。
 
 容器内的 torch/uv 缓存挂载到 `/app/.cache`。运行服务会设置 `XDG_CACHE_HOME=/app/.cache`、`TORCH_HOME=/app/.cache/torch` 和 `UV_CACHE_DIR=/app/.cache/uv`，因此已下载的 torchvision backbone 可以复用。
 
@@ -378,6 +470,10 @@ make docker-train BUILD_ARGS='--build-arg USE_BUILD_PROXY=true'
 配置由 `load_config()` 函数组装，并返回一个 Pydantic `Config` 对象。
 所有设置均在加载时进行验证和类型检查。
 路径通过 `cfg.paths.xxx_dir(dataset_name)` 方法进行解析。
+
+预处理 action 由 `src.data.preprocessing.PREPROCESSING_REGISTRY` 登记。
+注册表记录图像/视频 action key、媒体类型、实现方法和有序步骤（校验、缩放/裁剪、
+归一化），用于审计和扩展；当前模型路径仍直接使用已登记的 ImageNet 图像/视频 action。
 
 | 阶段 | 文件 | 合并方式 |
 | ------- | ------ | --------- |
@@ -458,7 +554,7 @@ make archive ARCHIVE_ARGS="--datasets"
 
 - **框架**: [MIT](LICENSE)
 - **作者**: [@autentisitet](https://github.com/autentisitet)
-- **版本**: 0.7.0
+- **版本**: 0.7.5
 
 ---
 
@@ -471,8 +567,21 @@ make archive ARCHIVE_ARGS="--datasets"
 
 ---
 
+## 参考文献 <a id="references"></a>
+
+- Liu, Z., et al. (2021). *Swin Transformer: Hierarchical Vision Transformer Using Shifted Windows.* ICCV. [论文](https://arxiv.org/abs/2103.14030)
+- He, K., et al. (2016). *Deep Residual Learning for Image Recognition.* CVPR. [论文](https://arxiv.org/abs/1512.03385)
+- Chen, L.-C., et al. (2017). *Understanding Convolution for Semantic Segmentation.* arXiv:1702.08502. [论文](https://arxiv.org/abs/1702.08502)
+- Ponomarenko, N., et al. (2015). *Image Database TID2013: Peculiarities, Results and Perspectives.* Signal Processing: Image Communication. [数据集](https://www.ponomarenko.info/tid2013.htm)
+- Hosu, V., et al. (2017). *The Konstanz Natural Video Database (KoNViD-1k).* QoMEX. [论文](https://doi.org/10.1109/QoMEX.2017.7965631)；[数据集](https://database.mmsp-kn.de/konvid-1k-database.html)
+- Wang, Y., et al. (n.d.). *T2VQA-DB: A Database for Text-to-Video Quality Assessment.* [项目与数据集](https://github.com/QMME/T2VQA)
+- Hüsem, H., Aydın, Z. G., & Demir, O. (2025). *Analysis of the Impact of RGB-to-Achromatic Color Space Transformations on Single-Image Superresolution Performance.* Black Sea Journal of Engineering and Science, 8(2), 330–340. [论文](https://scholar.google.com/scholar?q=%22Analysis+of+the+Impact+of+RGB-to-Achromatic+Color+Space+Transformations+on+Single-Image+Superresolution+Performance%22)
+- Barkowsky, M., Eskofier, B., Bitto, R., Bialkowski, J., & Kaup, A. (2007). *A Perceptually Driven Spatial and Temporal Integration of Pixel-Based Video Quality Measures.* Proceedings of the Mobile Content Quality of Experience Conference. [论文](https://scholar.google.com/scholar?q=%22A+Perceptually+Driven+Spatial+and+Temporal+Integration+of+Pixel-Based+Video+Quality+Measures%22)
+
+---
+
 ## ⚖️ 法律声明与免责条款
-有关第三方工具使用、数据集合规性及资源使用的详细信息，请参阅 [DISCLAIMER.md](DISCLAIMER.md) 文件。
+有关第三方工具使用、数据集合规性及资源使用的详细信息，请参阅 [DISCLAIMER.md](DISCLAIMER.md) 或 [DISCLAIMER_zh.md](DISCLAIMER_zh.md)。安全问题请遵循 [SECURITY.md](SECURITY.md)。
 
 ---
 
