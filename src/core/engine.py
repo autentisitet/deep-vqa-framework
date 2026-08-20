@@ -272,6 +272,8 @@ class TrainerEngine:
             val_loss=val_loss,
             traditional_metrics=traditional_metrics,
             save_manifest=save_manifest,
+            manifest_thresholds=self.cfg.train.manifest.thresholds,
+            manifest_enabled=self.cfg.train.manifest.enabled,
         )
 
         return metrics

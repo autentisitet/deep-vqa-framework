@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Optional, Sequence
 
 import numpy as np
@@ -5,11 +6,49 @@ import torch
 from torchvision.transforms import InterpolationMode
 from torchvision.transforms import functional as tvf
 
+from src.utils.registry import Registry
+
 
 IMAGENET_INPUT_SIZE = 224
 SWIN_T_RESIZE_SIZE = 232
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+@dataclass(frozen=True)
+class PreprocessingAction:
+    """Metadata describing one registered media preprocessing action."""
+
+    key: str
+    media_type: str
+    method: str
+    steps: tuple[str, ...]
+
+
+PREPROCESSING_REGISTRY = Registry[PreprocessingAction]("preprocessing_actions")
+PREPROCESSING_REGISTRY.register(
+    "image_imagenet",
+    PreprocessingAction(
+        key="image_imagenet",
+        media_type="image",
+        method="rgb_array_to_imagenet_tensor",
+        steps=("RGB uint8 validation", "scale to [0, 1]", "bicubic resize", "center crop", "ImageNet normalize"),
+    ),
+)
+PREPROCESSING_REGISTRY.register(
+    "video_imagenet",
+    PreprocessingAction(
+        key="video_imagenet",
+        media_type="video",
+        method="rgb_video_array_to_imagenet_tensor",
+        steps=("RGB frame validation", "scale to [0, 1]", "bicubic resize", "center crop", "ImageNet normalize"),
+    ),
+)
+
+
+def preprocessing_actions() -> list[PreprocessingAction]:
+    """Return the registered preprocessing action metadata."""
+    return [action for _, action in PREPROCESSING_REGISTRY.items()]
 
 
 def normalize_imagenet_tensor(
@@ -84,3 +123,18 @@ def blank_imagenet_tensor(
     if num_frames is None:
         return image
     return image.unsqueeze(0).repeat(num_frames, 1, 1, 1)
+
+
+__all__ = [
+    "IMAGENET_INPUT_SIZE",
+    "SWIN_T_RESIZE_SIZE",
+    "IMAGENET_MEAN",
+    "IMAGENET_STD",
+    "PreprocessingAction",
+    "PREPROCESSING_REGISTRY",
+    "preprocessing_actions",
+    "normalize_imagenet_tensor",
+    "rgb_array_to_imagenet_tensor",
+    "rgb_video_array_to_imagenet_tensor",
+    "blank_imagenet_tensor",
+]

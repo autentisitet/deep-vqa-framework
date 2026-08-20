@@ -105,7 +105,7 @@ class ImageVideoDataset(Dataset):
             raise RuntimeError(f"Failed to read {target_path}") from e
 
         label = torch.tensor(row.get("normalized_score", row["mos"]), dtype=torch.float32)
-        payload = {"data": data_tensor, "label": label}
+        payload = {"data": data_tensor, "label": label, "sample_id": sample_id}
 
         if self.traditional_cols:
             payload["traditional"] = {
@@ -491,4 +491,11 @@ class TrainerExecutionPipeline:
             logger.warning("No MOS range found, RMSE is in [0,1] scale.")
 
         evaluator.base_filename = test_base_filename
-        evaluator.evaluate(y_true_real, y_pred_real, save_manifest=True)
+        evaluator.evaluate(
+            y_true_real,
+            y_pred_real,
+            save_manifest=True,
+            sample_ids=test_df["sample_id"].astype(str).to_numpy(),
+            manifest_thresholds=self.cfg.train.manifest.thresholds,
+            manifest_enabled=self.cfg.train.manifest.enabled,
+        )

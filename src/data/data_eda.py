@@ -22,11 +22,16 @@ from src.data.dataset_loaders import MetadataLoaderFactory
 from src.data.dataset_types import DatasetType
 from src.config.schemas import Config
 from src.utils.file_loader import CaseInsensitiveAssetResolver
+from src.utils.registry import Registry
 
 
 def _progress_bar(iterable, *, total: int, desc: str):
     miniters = max(1, math.ceil(total * 0.02)) if total else 1
     return tqdm(iterable, total=total, desc=desc, miniters=miniters)
+
+
+EDA_PLOT_REGISTRY = Registry[dict]("eda_plots")
+EDA_PLOT_REGISTRY.register("mos_distribution", {"method": "visualize_mos_distribution", "enabled": True})
 
 
 class DataEDA:
@@ -46,6 +51,7 @@ class DataEDA:
         self.dataset_slug = self.cfg.paths.dataset_slug(self.dataset_name)
         self.df = None
         self.stats = {}
+        self.duplicate_physical_names = {}
 
         self.dataset_info = cfg.dataset
         self.is_video = self.dataset_info.data_type == "video"
@@ -337,19 +343,24 @@ class DataEDA:
         if self.df is None:
             return False
 
-        physical_names = set(self.resolver.full_registry)
+        physical_names = {Path(name).stem.strip().lower() for name in self.resolver.full_registry}
+        label_names = {Path(str(name).strip()).stem.lower() for name in self.df["sample_id"].astype(str)}
 
-        label_names = {str(name).strip().lower() for name in self.df["sample_id"].astype(str)}
-
-        if len(label_names) > 0 and "." not in list(label_names)[0]:
-            physical_names = {Path(name).stem for name in physical_names}
-            label_names = {Path(name).stem for name in label_names}
+        physical_stems = {}
+        for filename in self.resolver.full_registry:
+            physical_stems.setdefault(Path(filename).stem.strip().lower(), []).append(filename)
+        duplicate_stems = {stem: names for stem, names in physical_stems.items() if len(names) > 1}
+        self.duplicate_physical_names = duplicate_stems
 
         match = physical_names == label_names
-        logger.info(f"Filename-label match: {match}")
+        logger.info(f"Filename-label match: {match} | files={len(physical_names)} labels={len(label_names)}")
         if not match:
             logger.warning(f"Excess files on disk: {len(physical_names - label_names)}")
             logger.warning(f"Missing from labels: {len(label_names - physical_names)}")
+        if duplicate_stems:
+            logger.warning(f"Duplicate physical sample names: {len(duplicate_stems)}")
+            for stem, names in list(duplicate_stems.items())[:10]:
+                logger.warning(f"  {stem}: {', '.join(sorted(names))}")
         return match
 
 
@@ -386,6 +397,15 @@ class DataEDA:
         plt.savefig(output_path, dpi=150, bbox_inches="tight")
         plt.close()
         logger.info(f"MOS distribution saved: {output_path}")
+
+
+    def render_eda_plot(self, plot_name: str, **kwargs) -> None:
+        """Render an EDA plot through the shared registry contract."""
+        spec = EDA_PLOT_REGISTRY.get(plot_name)
+        if not spec.get("enabled", True):
+            return
+        renderer = getattr(self, spec["method"])
+        renderer(**kwargs)
 
 
     def normalize_scores(self) -> pd.DataFrame:
@@ -452,19 +472,27 @@ class DataEDA:
             return {}
 
         if skip_integrity:
-            integrity_res = {"corrupted": [], "missing": [], "repeated_sample_ids": []}
+            integrity_res = {
+                "corrupted": [],
+                "missing": [],
+                "repeated_sample_ids": [],
+                "filename_label_match": None,
+                "duplicate_physical_names": {},
+            }
             logger.info("Skipping integrity check")
         else:
             integrity_res = self.check_integrity(skip_video_check=False)
 
         self.basic_statistics()
         self.ensure_split_column()
-        self.check_filename_label_match()
-        self.visualize_mos_distribution(save_dir)
+        filename_label_match = self.check_filename_label_match()
+        self.render_eda_plot("mos_distribution", save_dir=save_dir)
         self.normalize_scores()
         self.detect_outliers_3sigma()
         fold_res = self.check_fold_score_distribution()
 
+        integrity_res["filename_label_match"] = filename_label_match
+        integrity_res["duplicate_physical_names"] = self.duplicate_physical_names
         self.stats.update({"integrity": integrity_res, "fold_variance": fold_res})
         logger.info(f"EDA complete for {self.dataset_name}")
         return self.stats
