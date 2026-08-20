@@ -34,14 +34,14 @@ UV_RUN := uv run
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: help bootstrap setup install data info cache_clean archive results-clean git-log
+.PHONY: help help-% bootstrap setup install data info cache_clean archive results-clean git-log
 
 .PHONY: test-images test-videos test-all
 
 .PHONY: check-code fmt black isort format-all typecheck
 .PHONY: vuln-audit sbom safety security-all
 
-.PHONY: docker-dev docker-train docker-infer docker-stop docker-manage
+.PHONY: docker-dev docker-train docker-api docker-infer docker-stop docker-manage
 .PHONY: docker-purge-all
 
 
@@ -78,10 +78,11 @@ help:
 
 	@echo '  make docker-dev [BUILD_ARGS="..."]         Enter development container'
 	@echo '  make docker-train [BUILD_ARGS="..."]       Run training in background'
-	@echo '  make docker-infer [BUILD_ARGS="..."]       Start inference API service'
+	@echo '  make docker-api                           API-only mode; direct host port 8001'
+	@echo '  make docker-infer [BUILD_ARGS="..."]       Full API + Nginx + frontend; waits and verifies'
 	@echo '  make docker-stop                           Stop all containers'
 	@echo '  make docker-manage                         Check container environment'
-	@echo '  make docker-purge                          Remove all project containers/images'
+	@echo '  make docker-purge-all                      Remove all project containers/images'
 	@echo ''
 	@echo '$(BLUE)Inference:$(RESET)'
 	@echo '  make test-images     Batch inference on examples/images/'
@@ -116,6 +117,22 @@ help:
 	@echo '  make test-all'
 	@echo '  uv run python -m src.main --dataset tid2013 --model swin_iqa'
 	@echo '  uv run python -m src.main --dataset konvid-1k --model swin_vqa'
+	@echo ''
+	@echo '  Detailed help: make help-TARGET (for example: make help-docker-infer)'
+	@echo '  Full deployment guide: deploy/GUIDE.md'
+
+help-%:
+	@case "$*" in \
+		setup) echo 'make setup SETUP_ARGS="--mirror --dev"'; echo '  Install project dependencies with uv.' ;; \
+		data) echo 'make data'; echo '  Download/prepare datasets according to the configured dataset scripts.' ;; \
+		docker-infer) echo 'make docker-infer BUILD_ARGS="..."'; echo '  Full demo/deployment mode: API + Nginx + frontend, with automatic health verification.' ;; \
+		docker-api) echo 'make docker-api BUILD_ARGS="..."'; echo '  Build and start FastAPI only; direct API is exposed on port 8001.' ;; \
+		docker-train) echo 'make docker-train BUILD_ARGS="..."'; echo '  Build the training image and run the configured training workflow.' ;; \
+		docker-stop) echo 'make docker-stop'; echo '  Stop project containers without failing when a container is absent.' ;; \
+		docker-purge-all) echo 'make docker-purge-all'; echo '  Remove project containers, dangling images, volumes, and networks.' ;; \
+		test-images|test-videos|test-all) echo 'make $*'; echo '  Run deployment batch inference against the example media set.' ;; \
+		*) echo "No detailed help is available for '$*'. Run 'make help' to list targets."; exit 1 ;; \
+	esac
 
 
 
@@ -528,17 +545,31 @@ docker-train:
 	"
 
 
-docker-infer:
+docker-api:
 	$(call check_runtime)
 	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-infer
-	$(COMPOSE) $(COMPOSE_FILES) up -d vqa-infer nginx
+	$(COMPOSE) $(COMPOSE_FILES) up -d vqa-infer
+	@echo "[INFO] Waiting for FastAPI health at http://127.0.0.1:$${API_PORT:-8001}/v1/health..."
+	@for i in $$(seq 1 40); do \
+		if curl --noproxy '*' -fsS --max-time 5 "http://127.0.0.1:$${API_PORT:-8001}/v1/health" >/dev/null 2>&1; then \
+			echo "$(GREEN)[OK]$(RESET) FastAPI is healthy."; exit 0; \
+		fi; sleep 3; \
+	done; echo "$(RED)[ERROR]$(RESET) FastAPI did not become healthy."; $(COMPOSE) $(COMPOSE_FILES) logs --tail=80 vqa-infer; exit 1
+
+
+docker-infer: docker-api
+	$(COMPOSE) $(COMPOSE_FILES) up -d nginx
+	@echo "[INFO] Verifying proxied API..."
+	@curl --noproxy '*' -fsS --max-time 10 "http://127.0.0.1:$${WEB_PORT:-8000}/api/v1/health" || \
+		(echo "$(RED)[ERROR]$(RESET) Nginx/API health check failed."; exit 1)
+	@echo "$(GREEN)[OK]$(RESET) Inference stack is ready: http://127.0.0.1:$${WEB_PORT:-8000}/"
 
 
 
 docker-stop:
 	$(call check_runtime)
 	@echo "[INFO] Stopping containers..."
-	@$(RUNTIME) stop vqa-prod 2>/dev/null || true
+	@$(RUNTIME) stop vqa-infer 2>/dev/null || true
 	@$(RUNTIME) stop vqa-nginx 2>/dev/null || true
 	@$(RUNTIME) stop vqa-train 2>/dev/null || true
 	@echo "$(GREEN)[OK]$(RESET) Containers stopped."
@@ -584,7 +615,7 @@ docker-purge-all:
 	@echo "[INFO] Stopping and removing containers..."
 	@$(COMPOSE) $(COMPOSE_FILES) down --remove-orphans 2>/dev/null || true
 	@$(RUNTIME) ps -a --filter "name=vqa-train" -q | xargs -r $(RUNTIME) rm -f
-	@$(RUNTIME) ps -a --filter "name=vqa-prod" -q | xargs -r $(RUNTIME) rm -f
+	@$(RUNTIME) ps -a --filter "name=vqa-infer" -q | xargs -r $(RUNTIME) rm -f
 	@$(RUNTIME) ps -a --filter "name=vqa-nginx" -q | xargs -r $(RUNTIME) rm -f
 
 	@echo "[INFO] Removing dangling images..."

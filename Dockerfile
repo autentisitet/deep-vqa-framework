@@ -57,6 +57,9 @@ FROM base AS prod
 COPY src/config/ ./src/config/
 COPY src/data/ ./src/data/
 COPY src/models/ ./src/models/
+COPY src/utils/ ./src/utils/
+COPY src/visualization/ ./src/visualization/
+COPY config/dataset_config.yaml ./config/dataset_config.yaml
 
 COPY deploy/core/ ./deploy/core/
 COPY deploy/api.py ./deploy/api.py
@@ -65,5 +68,6 @@ COPY deploy/cli.py ./deploy/cli.py
 # Expose FastAPI ports
 EXPOSE 8000
 
-# Start service
-CMD [".venv/bin/python", "-m", "deploy.api"]
+# Start the ASGI application directly. This avoids executing deploy.api as
+# __main__ and then importing it a second time through uvicorn.run().
+CMD [".venv/bin/python", "-m", "uvicorn", "deploy.api:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
