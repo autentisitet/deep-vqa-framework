@@ -10,9 +10,11 @@ from .schemas import (
     CheckpointConfig,
     PathsConfig,
     DatasetPathsConfig,
+    DatasetMetadataConfig,
     DatasetMetaConfig,
     ModelArchConfig,
     LossConfig,
+    ManifestConfig,
 )
 
 __all__ = [
@@ -26,7 +28,9 @@ __all__ = [
     "CheckpointConfig",
     "PathsConfig",
     "DatasetPathsConfig",
+    "DatasetMetadataConfig",
     "DatasetMetaConfig",
     "ModelArchConfig",
     "LossConfig",
+    "ManifestConfig",
 ]

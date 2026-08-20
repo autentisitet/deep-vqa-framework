@@ -45,6 +45,10 @@ class PathsConfig(_BaseModel):
         """results/{dataset_name}/eda/"""
         return self.dataset_results_dir(dataset_name) / "eda"
 
+    def feature_distribution_dir(self, dataset_name: str) -> Path:
+        """Directory for saved training feature-distribution artifacts."""
+        return self.eda_dir(dataset_name) / "feature_distribution"
+
     def model_outputs_dir(self, dataset_name: str) -> Path:
         """results/{dataset_name}/model_outputs/"""
         return self.dataset_results_dir(dataset_name) / "model_outputs"
@@ -102,6 +106,13 @@ class CheckpointConfig(_BaseModel):
 # ============================================================
 # 训练配置
 # ============================================================
+class ManifestConfig(_BaseModel):
+    """Controls which high-error predictions are written to manifests."""
+
+    enabled: bool = True
+    thresholds: list[float] = Field(default_factory=lambda: [0.1, 0.25, 0.5])
+
+
 class TrainConfig(_BaseModel):
     epochs: int = 50
     lr: float = 0.0001
@@ -110,6 +121,7 @@ class TrainConfig(_BaseModel):
     gradient_accumulation_steps: int = 4
     optimizer: str = "adamw"
     scheduler: str = "cosine"
+    manifest: ManifestConfig = Field(default_factory=ManifestConfig)
     early_stop: EarlyStopConfig = Field(default_factory=EarlyStopConfig)
     checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig)
 

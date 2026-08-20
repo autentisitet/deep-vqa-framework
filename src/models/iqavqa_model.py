@@ -226,6 +226,54 @@ class IQAVQANet(nn.Module):
         pooled = self.spatial_pool(features)
         return torch.flatten(pooled, 1)
 
+    def extract_quality_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Return the representation consumed by the quality regression head.
+
+        This keeps offline feature-distribution analysis on the exact same
+        embedding path as trained IQA/VQA inference.
+        """
+        if x.dim() == 4 and x.shape[1] == 1:
+            x = x.repeat(1, 3, 1, 1)
+        elif x.dim() == 5 and x.shape[2] == 1:
+            x = x.repeat(1, 1, 3, 1, 1)
+
+        if x.dim() == 4:
+            if x.shape[1] != 3:
+                raise ValueError(f"Expected image input [B, 3, H, W], got shape={tuple(x.shape)}")
+            self._ensure_image_branch()
+            if self.image_backbone is None:
+                raise RuntimeError("Image branch was not initialized.")
+            return self._extract_features(
+                x, self.image_backbone, self.image_num_features, self.image_feature_norm
+            )
+
+        if x.dim() == 5:
+            if x.shape[2] != 3:
+                raise ValueError(f"Expected video input [B, F, 3, H, W], got shape={tuple(x.shape)}")
+            self._ensure_video_branch()
+            if self.video_backbone is None or self.temporal_fusion is None:
+                raise RuntimeError("Video branch was not initialized.")
+            batch, frames, channels, height, width = x.shape
+            if frames < 1:
+                raise ValueError(f"Expected at least 1 video frame, got {frames}")
+            if frames != self.num_frames:
+                indices = torch.linspace(0, frames - 1, self.num_frames, device=x.device).long()
+                x = x[:, indices, :, :, :]
+                batch, frames, channels, height, width = x.shape
+
+            frame_features = self._extract_features(
+                x.reshape(batch * frames, channels, height, width),
+                self.video_backbone,
+                self.video_num_features,
+                self.video_feature_norm,
+            ).view(batch, frames, self.video_num_features)
+            frame_features = frame_features + self._position_embedding_for(
+                frames, device=frame_features.device, dtype=frame_features.dtype
+            )
+            return torch.mean(self.temporal_fusion(frame_features), dim=1)
+
+        raise ValueError(f"Expected 4D or 5D input, got {x.dim()}D")
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass.

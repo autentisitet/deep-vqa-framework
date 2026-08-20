@@ -7,20 +7,15 @@ from loguru import logger
 
 from src.data.dataset_types import DatasetType
 
-# TODO:
-# 检查是否有sample data损坏、缺失、重复
-# 检查file name是否和label匹配: assert set(img_names) == set(labels['image_id'])
-
-
 # Attempt to import Decord, fall back to OpenCV if it fails
 try:
     from decord import VideoReader, cpu
 
     DECORD_AVAILABLE = True
-    logger.info("✅ Video processing using Decord (high-performance mode)")
+    logger.info("<green>Video processing backend: Decord (high-performance mode)</green>")
 except ImportError:
     DECORD_AVAILABLE = False
-    logger.warning("⚠️ Decord is not installed; revert to OpenCV (lower performance).")
+    logger.warning("<yellow>Decord is not installed; using OpenCV fallback (lower performance).</yellow>")
 
 
 def check_video_integrity_decord(path: Path, sample_interval: int = 30) -> Tuple[bool, Optional[str], Dict]:

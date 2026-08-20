@@ -9,6 +9,9 @@ __all__ = [
     "Tid2013Loader",
     "KonvidLoader",
     "T2VqaLoader",
+    "PreprocessingAction",
+    "PREPROCESSING_REGISTRY",
+    "preprocessing_actions",
 ]
 
 _LAZY_IMPORTS = {
@@ -19,6 +22,9 @@ _LAZY_IMPORTS = {
     "Tid2013Loader": ".metadata_loaders",
     "KonvidLoader": ".metadata_loaders",
     "T2VqaLoader": ".metadata_loaders",
+    "PreprocessingAction": ".preprocessing",
+    "PREPROCESSING_REGISTRY": ".preprocessing",
+    "preprocessing_actions": ".preprocessing",
 }
 
 

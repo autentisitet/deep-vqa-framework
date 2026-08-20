@@ -86,6 +86,9 @@ class Evaluator:
         val_loss: Optional[float] = None,
         traditional_metrics: Optional[dict] = None,
         save_manifest: bool = False,
+        sample_ids=None,
+        manifest_thresholds: Optional[list[float]] = None,
+        manifest_enabled: bool = True,
     ) -> dict:
         """Calculate metrics and save history."""
         y_true = self._to_clean_numpy(y_true).flatten()
@@ -112,7 +115,15 @@ class Evaluator:
         self._save_history(metrics)
 
         if save_manifest:
-            self._save_manifest(y_true, y_pred, traditional_metrics)
+            self._save_manifest(
+                y_true,
+                y_pred,
+                traditional_metrics,
+                sample_ids=sample_ids,
+                epoch=epoch,
+                thresholds=manifest_thresholds,
+                enabled=manifest_enabled,
+            )
 
         return metrics
 
@@ -125,6 +136,9 @@ class Evaluator:
         val_loss: Optional[float] = None,
         traditional_metrics: Optional[dict] = None,
         save_manifest: bool = False,
+        sample_ids=None,
+        manifest_thresholds: Optional[list[float]] = None,
+        manifest_enabled: bool = True,
     ) -> dict:
         """Alias for execute() for compatibility with TrainerEngine."""
         return self.execute(
@@ -135,6 +149,9 @@ class Evaluator:
             val_loss=val_loss,
             traditional_metrics=traditional_metrics,
             save_manifest=save_manifest,
+            sample_ids=sample_ids,
+            manifest_thresholds=manifest_thresholds,
+            manifest_enabled=manifest_enabled,
         )
 
     def _to_clean_numpy(self, data: Any) -> np.ndarray:
@@ -202,9 +219,33 @@ class Evaluator:
         else:
             df_new.to_csv(history_path, index=False)
 
-    def _save_manifest(self, y_true: np.ndarray, y_pred: np.ndarray, traditional_metrics: Optional[dict] = None) -> None:
-        """Save predictions and optional traditional metrics."""
-        manifest_data = {"true": y_true, "pred": y_pred}
+    def _save_manifest(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        traditional_metrics: Optional[dict] = None,
+        sample_ids=None,
+        epoch: Optional[int] = None,
+        thresholds: Optional[list[float]] = None,
+        enabled: bool = True,
+    ) -> None:
+        """Save only meaningful prediction errors with original sample labels."""
+        if not enabled:
+            logger.info("Manifest output disabled")
+            return
+
+        thresholds = sorted({float(value) for value in (thresholds or [0.1, 0.25, 0.5]) if float(value) > 0})
+        absolute_error = np.abs(y_true - y_pred)
+        manifest_data = {
+            "sample_id": np.asarray(sample_ids, dtype=object) if sample_ids is not None else np.arange(len(y_true)),
+            "true_mos": y_true,
+            "pred_mos": y_pred,
+            "signed_error": y_pred - y_true,
+            "absolute_error": absolute_error,
+            "relative_error": absolute_error / np.maximum(np.abs(y_true), 1e-6),
+            "epoch": np.full(len(y_true), epoch if epoch is not None else "final"),
+            "error_level": np.asarray([self._error_level(error, thresholds) for error in absolute_error]),
+        }
 
         if traditional_metrics and isinstance(traditional_metrics, dict):
             for metric_name, val_source in traditional_metrics.items():
@@ -214,4 +255,23 @@ class Evaluator:
                 else:
                     logger.debug(f"Metric {metric_name} length mismatch, skipped")
 
-        pd.DataFrame(manifest_data).to_csv(self.manifest_path, index=False)
+        # Keep every sample so downstream diagnostics can analyze the full error
+        # distribution; ``error_level`` still identifies threshold crossings.
+        manifest_df = pd.DataFrame(manifest_data).reset_index(drop=True)
+        manifest_df.to_csv(self.manifest_path, index=False)
+        logger.info(
+            f"Saved error manifest: {len(manifest_df)}/{len(y_true)} samples | "
+            f"threshold={thresholds[0] if thresholds else 0.0:.3f} | path={self.manifest_path}"
+        )
+
+    @staticmethod
+    def _error_level(error: float, thresholds: list[float]) -> str:
+        if not thresholds or error < thresholds[0]:
+            return "below_threshold"
+        if len(thresholds) == 1:
+            return "high"
+        if error >= thresholds[-1]:
+            return "critical"
+        if error >= thresholds[-2]:
+            return "high"
+        return "moderate"

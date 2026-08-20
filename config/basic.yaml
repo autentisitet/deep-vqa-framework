@@ -17,6 +17,11 @@ train:
   scheduler: "cosine"
   gradient_accumulation_steps: 4  # 每 4 个 batch 更新一次
 
+  manifest:
+    enabled: true
+    # Absolute MOS error thresholds: moderate, high, critical.
+    thresholds: [0.1, 0.25, 0.5]
+
   early_stop:
     enabled: true
     patience: 10
