@@ -19,6 +19,12 @@ services:
       - XDG_CACHE_HOME=/app/.cache
       - TORCH_HOME=/app/.cache/torch
       - UV_CACHE_DIR=/app/.cache/uv
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - http_proxy=${http_proxy:-}
+      - https_proxy=${https_proxy:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1},vqa-train,vqa-infer,vqa-nginx,nginx
+      - no_proxy=${no_proxy:-localhost,127.0.0.1},vqa-train,vqa-infer,vqa-nginx,nginx
     stdin_open: true
     tty: true
     command: ["/bin/bash"]
@@ -34,21 +40,31 @@ services:
       context: ..
       dockerfile: Dockerfile
       target: prod
-    image: vqa-prod:latest
-    container_name: vqa-prod
+    image: vqa-infer:latest
+    container_name: vqa-infer
     shm_size: 8gb
     expose:
       - "8000"
+    ports:
+      - "${API_PORT:-8001}:8000"
     volumes:
       - ../deploy/iqa-models:/app/deploy/iqa-models
       - ../deploy/vqa-models:/app/deploy/vqa-models
       - ../examples:/app/examples
       - ../reports:/app/reports
+      - ../results:/app/results
+      - ../docs:/app/docs
       - ../.cache:/app/.cache
     environment:
       - XDG_CACHE_HOME=/app/.cache
       - TORCH_HOME=/app/.cache/torch
       - UV_CACHE_DIR=/app/.cache/uv
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - http_proxy=${http_proxy:-}
+      - https_proxy=${https_proxy:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1},vqa-train,vqa-infer,vqa-nginx,nginx
+      - no_proxy=${no_proxy:-localhost,127.0.0.1},vqa-train,vqa-infer,vqa-nginx,nginx
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -56,22 +72,32 @@ services:
         max-size: "50m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      test: ["CMD", ".venv/bin/python", "-c", "import urllib.request; opener=urllib.request.build_opener(urllib.request.ProxyHandler({})); opener.open('http://127.0.0.1:8000/v1/health', timeout=5)"]
+      start_period: 90s
+      interval: 15s
+      timeout: 10s
+      retries: 10
 
   nginx:
     image: nginx:alpine
     container_name: vqa-nginx
     depends_on:
-      - vqa-infer
+      vqa-infer:
+        condition: service_healthy
     ports:
       - "${WEB_PORT:-8000}:80"
     volumes:
       - ../frontend:/usr/share/nginx/html:ro
+      - ../results:/srv/deep-vqa/results:ro
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
+    environment:
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - http_proxy=${http_proxy:-}
+      - https_proxy=${https_proxy:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1},vqa-train,vqa-infer,vqa-nginx,nginx
+      - no_proxy=${no_proxy:-localhost,127.0.0.1},vqa-train,vqa-infer,vqa-nginx,nginx
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
       interval: 30s
