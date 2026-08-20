@@ -81,7 +81,7 @@
 </head>
 <body>
     <div class="topbar">
-        <div class="title">Deep-VQA-Framework Platform v0.7.0</div>
+        <div class="title">Deep-VQA-Framework Platform v0.7.5</div>
         <div class="subtitle">Dataset audit · reproducible IQA/VQA training · evaluation · checkpoint handoff · API deployment</div>
     </div>
     <div class="mermaid">
@@ -118,7 +118,7 @@
             DE --> STA[eda/statistics.py<br/>EDA + MOS统计]
             DE --> PP[preprocessing.py<br/>RGB·bicubic 232·center crop 224<br/>ImageNet mean/std]
             DE --> SPL[eda/split.py<br/>Group train/val/test + Group K-fold]
-            DE --> FL[file_loader.py<br/>CaseInsensitiveAssetResolver]
+            DE --> FL[utils/file_loader.py<br/>CaseInsensitiveAssetResolver]
             DE --> TY[dataset_types.py]
             DE --> DF[(处理后的 DataFrame<br/>+ MOS归一化统计)]
         end
@@ -141,7 +141,7 @@
 
         subgraph STAGE_6 [6. 成果归档 - 存储层]
             TR --> F[(best checkpoints<br/>results/{dataset}/model_outputs/)]
-            MP --> PLOTS[(EDA + training + residual + fold summary<br/>results/{dataset}/plots/)]
+            MP --> PLOTS[(EDA + training + residual + fold diagnostics<br/>results/{dataset}/plots/)]
             TR --> AR[archive_results.sh]
             AR --> LOG[(Log + Config + Plots + Weights<br/>results/{dataset}/)]
         end
@@ -149,11 +149,13 @@
         subgraph STAGE_7 [7. 推理与服务 - 平台交付层]
             F -->|"训练成功后自动复制<br/>{dataset}_best.pt"| BM[(deploy/iqa-models/<br/>deploy/vqa-models/)]
             BM --> CORE[deploy/core/*.py<br/>Pydantic runtime config + preprocessing + loading + inference]
-            CORE --> API[deploy/api.py<br/>FastAPI /evaluate /health]
+            CORE --> API[deploy/api.py<br/>FastAPI /v1/evaluations /v1/health]
             CORE --> CLI[deploy/cli.py<br/>Batch inference CLI]
-            API --> NGINX[nginx<br/>静态前端 + /api/ 反向代理]
+            API --> DIAG[(Feature maps + Grad-CAM<br/>results/diagnostics/)]
+            API --> NGINX[nginx<br/>静态前端 + /api/ 反向代理<br/>完整演示模式]
             WEB[frontend/index.html<br/>浏览器前端] --> NGINX
             API --> EXT[外部应用调用]
+            DEV[主机直运行 Uvicorn<br/>API-only 开发模式 :8000] --> EXT
         end
 
         STAGE_1 ==> STAGE_2
