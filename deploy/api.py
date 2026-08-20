@@ -1,63 +1,117 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-# deploy/api.py
-"""
-FastAPI inference service.
+"""REST API for image and video quality assessment.
 
-Usage:
-    uv run python -m deploy.api
+The service exposes OpenAPI documentation automatically:
+
+* Swagger UI: ``/docs``
+* ReDoc: ``/redoc``
+* OpenAPI document: ``/openapi.json``
 """
 
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+import hashlib
+import json
 import os
 import shutil
-import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import cv2
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from loguru import logger
+from pydantic import BaseModel, ConfigDict, Field
 
-from deploy.core.runtime_config import cfg, ensure_runtime_dirs
+from deploy.core.inference import predict_single
 from deploy.core.model_loader import load_checkpoint
-from deploy.core.inference import (
-    denormalize,
-    predict_single,
-)
-from src.config.schemas import Config
+from deploy.core.runtime_config import cfg, ensure_runtime_dirs
+from src.visualization.feature_visualizer import FeatureVisualizer, load_image_tensor
 
 
-# ---------- Configuration ----------
-DEFAULT_IQA_MODEL_PATH = cfg.iqa_model_path
-DEFAULT_VQA_MODEL_PATH = cfg.vqa_model_path
+API_PREFIX = "/v1"
 DEVICE = cfg.default_device
+MODEL_PATHS = {
+    "iqa": cfg.resolve(cfg.iqa_model_path),
+    "vqa": cfg.resolve(cfg.vqa_model_path),
+}
+OPENAPI_OUTPUT_PATH = cfg.resolve(Path("docs/openapi.json"))
+FRONTEND_EVALUATION_LOG_PATH = cfg.resolve(cfg.reports_dir / "frontend-evaluations.jsonl")
+_frontend_log_lock = threading.Lock()
 
 
-# ---------- FastAPI ----------
-app = FastAPI(title="Deep-VQA Unified MOS API", version="4.0.0")
+class ErrorResponse(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": {"error": "Model 'iqa' is not loaded"}})
 
-cors_origins = [
-    origin.strip()
-    for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(",")
-    if origin.strip()
-]
-if cors_origins:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins,
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
+    error: str
+    detail: str | None = None
+
+
+class HealthResponse(BaseModel):
+    status: str
+    loaded_models: list[str]
+    device: str
+
+
+class ModelSummary(BaseModel):
+    model_id: str = Field(description="Serving role: iqa or vqa")
+    task_type: str
+    model_name: str
+    backbone: str
+    dataset: str
+    media_type: str
+    mos_min: float
+    mos_max: float
+    checkpoint: str
+
+
+class ModelCollectionResponse(BaseModel):
+    items: list[ModelSummary]
+    count: int
+
+
+class EvaluationResponse(BaseModel):
+    evaluation_id: str
+    filename: str
+    model_id: str
+    media_type: str
+    task_type: str
+    model_name: str
+    backbone: str
+    dataset: str
+    score: float = Field(description="Normalized predicted quality score")
+    mos_score: float | None = Field(description="Score converted to dataset MOS range")
+    mos_min: float
+    mos_max: float
+    media_size: str
+    latency_ms: float
+
+
+class VisualizationResponse(BaseModel):
+    visualization_id: str
+    model_id: str
+    filename: str
+    score: float
+    layers: list[str]
+    feature_maps: dict[str, str]
+    gradcam: str | None = None
+
+
+model_cache: dict[str, dict[str, Any]] = {}
+
+
+def _error(message: str, detail: str | None = None) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=ErrorResponse(error=message, detail=detail).model_dump(),
     )
 
-model_cache: Dict[str, Dict[str, Any]] = {}
 
-
-def get_mos_params(config: Config) -> tuple[float, float]:
-    """Read and validate the MOS range embedded in the checkpoint config."""
+def _mos_range(config: Any) -> tuple[float, float]:
     mos_min = float(config.dataset.mos_min)
     mos_max = float(config.dataset.mos_max)
     if mos_max <= mos_min:
@@ -65,181 +119,338 @@ def get_mos_params(config: Config) -> tuple[float, float]:
     return mos_min, mos_max
 
 
-def load_all_models():
-    logger.info(f"[INFO] Using device: {DEVICE}")
-
-    if DEFAULT_IQA_MODEL_PATH.exists():
-        logger.info(f"[INFO] Loading IQA model: {DEFAULT_IQA_MODEL_PATH}")
-        model, config_obj = load_checkpoint(DEFAULT_IQA_MODEL_PATH, device=DEVICE)
-        mos_min, mos_max = get_mos_params(config_obj)
-        dataset_cfg = getattr(config_obj, "dataset", {}) or {}
-        if hasattr(dataset_cfg, "model_dump"):
-            dataset_cfg = dataset_cfg.model_dump()
-        model_cache["iqa"] = {
-            "model": model,
-            "config": config_obj,
-            "mos_min": mos_min,
-            "mos_max": mos_max,
-            "dataset": dataset_cfg.get("name", dataset_cfg.get("registry_key", "unknown")),
-            "model_name": config_obj.model.name,
-            "backbone": config_obj.model.backbone,
-        }
-        logger.info(f"[OK] IQA loaded (MOS: {mos_min:.3f}~{mos_max:.3f})")
-    else:
-        logger.warning(f"[WARN] IQA model not found: {DEFAULT_IQA_MODEL_PATH}")
-
-    if DEFAULT_VQA_MODEL_PATH.exists():
-        logger.info(f"[INFO] Loading VQA model: {DEFAULT_VQA_MODEL_PATH}")
-        model, config_obj = load_checkpoint(DEFAULT_VQA_MODEL_PATH, device=DEVICE)
-        mos_min, mos_max = get_mos_params(config_obj)
-        dataset_cfg = getattr(config_obj, "dataset", {}) or {}
-        if hasattr(dataset_cfg, "model_dump"):
-            dataset_cfg = dataset_cfg.model_dump()
-        model_cache["vqa"] = {
-            "model": model,
-            "config": config_obj,
-            "mos_min": mos_min,
-            "mos_max": mos_max,
-            "dataset": dataset_cfg.get("name", dataset_cfg.get("registry_key", "unknown")),
-            "model_name": config_obj.model.name,
-            "backbone": config_obj.model.backbone,
-        }
-        logger.info(f"[OK] VQA loaded (MOS: {mos_min:.3f}~{mos_max:.3f})")
-    else:
-        logger.warning(f"[WARN] VQA model not found: {DEFAULT_VQA_MODEL_PATH}")
-
-    if not model_cache:
-        raise RuntimeError("No models loaded")
+def _dataset_name(config: Any) -> str:
+    dataset = config.dataset
+    return str(getattr(dataset, "name", None) or getattr(dataset, "registry_key", "unknown"))
 
 
-@app.on_event("startup")
-async def startup_event():
-    ensure_runtime_dirs()
-    load_all_models()
+def _sha256(path: Path) -> str:
+    """Return the SHA-256 digest of an uploaded media file."""
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
-@app.get("/health")
-async def health():
-    return {
-        "status": "ok",
-        "loaded_models": list(model_cache.keys()),
-        "device": DEVICE,
+def _append_frontend_evaluation_log(response: EvaluationResponse, media_path: Path) -> None:
+    """Append one successful browser evaluation as a JSON Lines record."""
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "file_name": response.filename,
+        "file_hash": _sha256(media_path),
+        "task_type": response.task_type,
+        "model_used": response.model_name,
+        "mos_score": response.mos_score,
+        "mos_interval": [response.mos_min, response.mos_max],
+        "inference_time_ms": response.latency_ms,
     }
+    FRONTEND_EVALUATION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _frontend_log_lock, FRONTEND_EVALUATION_LOG_PATH.open("a", encoding="utf-8") as log_file:
+        log_file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def get_media_size(file_path: str, media_type: str) -> str:
+def _load_model(model_id: str, checkpoint_path: Path) -> None:
+    model, config = load_checkpoint(checkpoint_path, device=DEVICE)
+    mos_min, mos_max = _mos_range(config)
+    model_cache[model_id] = {
+        "model": model,
+        "config": config,
+        "mos_min": mos_min,
+        "mos_max": mos_max,
+        "dataset": _dataset_name(config),
+        "model_name": config.model.name,
+        "backbone": config.model.backbone,
+        "media_type": "image" if model_id == "iqa" else "video",
+        "checkpoint": str(checkpoint_path),
+    }
+    logger.info(
+        "<green>Loaded {} model: {} | backbone={} | MOS=[{}, {}]</green>",
+        model_id,
+        config.model.name,
+        config.model.backbone,
+        mos_min,
+        mos_max,
+    )
+
+
+def load_all_models() -> None:
+    logger.info("Loading serving models on device: {}", DEVICE)
+    model_cache.clear()
+    for model_id, checkpoint_path in MODEL_PATHS.items():
+        if checkpoint_path.exists():
+            try:
+                _load_model(model_id, checkpoint_path)
+            except Exception as exc:
+                logger.exception("Failed to load {} checkpoint: {}", model_id, exc)
+        else:
+            logger.warning("Checkpoint not found for {}: {}", model_id, checkpoint_path)
+    if not model_cache:
+        raise RuntimeError("No serving model checkpoints are available")
+
+
+def save_openapi_schema(application: FastAPI) -> None:
+    """Persist the generated OpenAPI document for offline inspection."""
+    OPENAPI_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    OPENAPI_OUTPUT_PATH.write_text(
+        json.dumps(application.openapi(), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    logger.info("OpenAPI schema saved: {}", OPENAPI_OUTPUT_PATH)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    ensure_runtime_dirs()
+    save_openapi_schema(app)
+    load_all_models()
+    yield
+
+
+app = FastAPI(
+    title="Deep-VQA Quality Assessment API",
+    description="REST API for image and video quality assessment inference.",
+    version="5.0.0",
+    openapi_url="/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan,
+)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
+    detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=ErrorResponse(error=detail).model_dump(),
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=ErrorResponse(error="Request validation failed", detail=str(exc.errors())).model_dump(),
+    )
+
+cors_origins = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if origin.strip()]
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"]
+    )
+
+
+def _model_summary(model_id: str, cached: dict[str, Any]) -> ModelSummary:
+    return ModelSummary(
+        model_id=model_id,
+        task_type=str(cached["config"].task_type),
+        model_name=cached["model_name"],
+        backbone=cached["backbone"],
+        dataset=cached["dataset"],
+        media_type=cached["media_type"],
+        mos_min=cached["mos_min"],
+        mos_max=cached["mos_max"],
+        checkpoint=cached["checkpoint"],
+    )
+
+
+def _media_size(file_path: str, media_type: str) -> str:
     try:
         if media_type == "video":
-            cap = cv2.VideoCapture(file_path)
-            if cap.isOpened():
-                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                cap.release()
-                return f"{w}x{h}"
-        else:
-            img = cv2.imread(file_path)
-            if img is not None:
-                h, w = img.shape[:2]
-                return f"{w}x{h}"
+            capture = cv2.VideoCapture(file_path)
+            if capture.isOpened():
+                width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                capture.release()
+                return f"{width}x{height}"
+        image = cv2.imread(file_path)
+        if image is not None:
+            height, width = image.shape[:2]
+            return f"{width}x{height}"
     except Exception:
-        pass
+        logger.debug("Unable to read media dimensions: {}", file_path)
     return "unknown"
 
 
-@app.post("/evaluate")
-async def evaluate(
-    file: UploadFile = File(...),
-    media_type: str = Form(...),
-    task_type: str = Form(...),
-    model: str = Form(...),
-    model_name: str = Form(""),
-    backbone: str = Form(""),
-    requested_models: str = Form(""),
-):
-    logger.info(f"[INFO] Evaluate: model={model}, file={file.filename}")
+@app.get(
+    f"{API_PREFIX}/health",
+    response_model=HealthResponse,
+    tags=["system"],
+    summary="Check service health",
+)
+async def health() -> HealthResponse:
+    return HealthResponse(status="ok", loaded_models=sorted(model_cache), device=DEVICE)
 
-    if model not in model_cache:
-        raise HTTPException(status_code=400, detail=f"Model not loaded: {model}")
 
-    cached = model_cache[model]
-    dl_model = cached["model"]
-    dl_config = cached["config"]
-    mos_min = cached["mos_min"]
-    mos_max = cached["mos_max"]
-    dataset = cached.get("dataset", "unknown")
+@app.get(
+    f"{API_PREFIX}/models",
+    response_model=ModelCollectionResponse,
+    tags=["models"],
+    summary="List loaded quality assessment models",
+)
+async def list_models() -> ModelCollectionResponse:
+    items = [_model_summary(model_id, cached) for model_id, cached in sorted(model_cache.items())]
+    return ModelCollectionResponse(items=items, count=len(items))
 
-    suffix = Path(file.filename).suffix if file.filename else ".tmp"
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
 
-    try:
-        with open(tmp_fd, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+@app.get(
+    f"{API_PREFIX}/models/{{model_id}}",
+    response_model=ModelSummary,
+    responses={404: {"model": ErrorResponse}},
+    tags=["models"],
+    summary="Get one loaded model",
+)
+async def get_model(model_id: str) -> ModelSummary:
+    cached = model_cache.get(model_id.lower())
+    if cached is None:
+        raise HTTPException(status_code=404, detail=f"Model '{model_id}' is not loaded")
+    return _model_summary(model_id.lower(), cached)
 
-        media_size = get_media_size(tmp_path, media_type)
-        t_start = time.time()
 
-        if model == "iqa":
-            if media_type != "image":
-                raise HTTPException(status_code=422, detail="iqa accepts image media only")
-            result = predict_single(dl_model, tmp_path, dl_config, DEVICE, mos_min, mos_max)
-        elif model == "vqa":
-            if media_type != "video":
-                raise HTTPException(status_code=422, detail="vqa accepts video media only")
-            result = predict_single(dl_model, tmp_path, dl_config, DEVICE, mos_min, mos_max)
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown model: {model}")
+@app.post(
+    f"{API_PREFIX}/evaluations",
+    response_model=EvaluationResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+    tags=["evaluations"],
+    summary="Evaluate one uploaded image or video",
+)
+async def create_evaluation(
+    request: Request,
+    file: UploadFile = File(..., description="Image or video file to evaluate"),
+    model_id: str = Query("iqa", description="Serving model role: iqa or vqa"),
+) -> EvaluationResponse:
+    model_id = model_id.lower()
+    cached = model_cache.get(model_id)
+    if cached is None:
+        raise HTTPException(status_code=404, detail=f"Model '{model_id}' is not loaded")
+    if not file.filename:
+        raise HTTPException(status_code=422, detail="Uploaded file must have a filename")
 
-        elapsed_ms = (time.time() - t_start) * 1000
-
-        raw_score = result.get("raw_score")
-        dataset_mos = result.get("mos_score")
-        response = {
-            "file": file.filename,
-            "media_type": media_type,
-            "task_type": result.get("task_type", task_type),
-            "model": model,
-            "model_name": cached["model_name"],
-            "backbone": cached["backbone"],
-            "dataset": dataset,
-            "mos": dataset_mos,
-            "mos_score": dataset_mos,
-            "raw_score": raw_score,
-            "normalized_score": raw_score,
-            "score": raw_score,
-            "overall": dataset_mos,
-            "dataset_mos": dataset_mos,
-            "mos_min": mos_min,
-            "mos_max": mos_max,
-            "inference_ms": round(elapsed_ms, 2),
-            "latency_ms": round(elapsed_ms, 2),
-            "elapsed_ms": round(elapsed_ms, 2),
-            "media_size": media_size,
-            "metrics": {"plcc": None, "srocc": None, "rmse": None},
-            "_debug_raw_score": raw_score,
-            "_debug_dataset_mos": dataset_mos,
-        }
-
-        logger.info(
-            f"[OK] Inference: raw={raw_score}, dataset_mos={dataset_mos}, "
-            f"range=[{mos_min}, {mos_max}]"
+    suffix = Path(file.filename).suffix.lower()
+    expected_exts = cfg.image_exts if cached["media_type"] == "image" else cfg.video_exts
+    if suffix not in expected_exts:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Model '{model_id}' accepts {cached['media_type']} files, received '{suffix or 'unknown'}'",
         )
-        return response
 
-    except ValueError as ve:
-        raise HTTPException(status_code=422, detail=str(ve))
-    except Exception as e:
-        logger.exception(f"[ERROR] Inference failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Inference failed: {str(e)}")
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+    started = time.perf_counter()
+    try:
+        with open(tmp_fd, "wb") as target:
+            shutil.copyfileobj(file.file, target)
+
+        result = predict_single(
+            cached["model"],
+            Path(tmp_path),
+            cached["config"],
+            DEVICE,
+            cached["mos_min"],
+            cached["mos_max"],
+        )
+        latency_ms = round((time.perf_counter() - started) * 1000, 2)
+        response = EvaluationResponse(
+            evaluation_id=f"eval-{time.time_ns()}",
+            filename=file.filename,
+            model_id=model_id,
+            media_type=cached["media_type"],
+            task_type=str(cached["config"].task_type),
+            model_name=cached["model_name"],
+            backbone=cached["backbone"],
+            dataset=cached["dataset"],
+            score=float(result["raw_score"]),
+            mos_score=result.get("mos_score"),
+            mos_min=cached["mos_min"],
+            mos_max=cached["mos_max"],
+            media_size=_media_size(tmp_path, cached["media_type"]),
+            latency_ms=latency_ms,
+        )
+        if request.headers.get("X-Deep-VQA-Client") == "frontend":
+            _append_frontend_evaluation_log(response, Path(tmp_path))
+        return response
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Evaluation failed for {}: {}", file.filename, exc)
+        raise HTTPException(status_code=500, detail="Inference failed") from exc
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+        await file.close()
+
+
+@app.post(
+    f"{API_PREFIX}/visualizations",
+    response_model=VisualizationResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["visualizations"],
+    summary="Generate feature maps and Grad-CAM for an image",
+)
+async def create_visualization(
+    file: UploadFile = File(..., description="Image file to visualize"),
+    model_id: str = Query("iqa", description="Loaded image model role"),
+) -> VisualizationResponse:
+    model_id = model_id.lower()
+    cached = model_cache.get(model_id)
+    if cached is None:
+        raise HTTPException(status_code=404, detail=f"Model '{model_id}' is not loaded")
+    if cached["media_type"] != "image":
+        raise HTTPException(status_code=422, detail="Feature visualization currently supports image models only")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in cfg.image_exts:
+        raise HTTPException(status_code=422, detail="Visualization requires a supported image file")
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+    visualization_id = f"viz-{time.time_ns()}"
+    output_dir = cfg.resolve(Path("results/diagnostics")) / visualization_id
+    try:
+        with open(tmp_fd, "wb") as target:
+            shutil.copyfileobj(file.file, target)
+        image = load_image_tensor(Path(tmp_path), int(cached["config"].model.input_size))
+        visualizer = FeatureVisualizer(cached["model"], DEVICE)
+        layers = visualizer.default_image_layers()
+        result = visualizer.run_image(image, layers=layers, cam_layer="image_backbone")
+        feature_maps: dict[str, str] = {}
+        for name, activation in result.activations.items():
+            path = output_dir / f"{name.replace('.', '_')}.png"
+            visualizer.save_feature_grid(activation, path)
+            feature_maps[name] = str(path)
+        gradcam_path = output_dir / "gradcam.png"
+        if result.cam is None:
+            raise ValueError("The selected image backbone did not produce a differentiable spatial CAM")
+        visualizer.save_cam_overlay(image, result.cam, gradcam_path)
+        return VisualizationResponse(
+            visualization_id=visualization_id,
+            model_id=model_id,
+            filename=file.filename or "image",
+            score=result.score,
+            layers=layers,
+            feature_maps=feature_maps,
+            gradcam=str(gradcam_path),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Visualization failed for {}: {}", file.filename, exc)
+        raise HTTPException(status_code=500, detail="Visualization failed") from exc
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+        await file.close()
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "deploy.api:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=False,
-        log_level="info",
-    )
+
+    uvicorn.run("deploy.api:app", host="0.0.0.0", port=8000, reload=False, log_level="info")
