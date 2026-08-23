@@ -45,7 +45,7 @@ while [[ $# -gt 0 ]]; do
 Usage: ./setup_env.sh [OPTIONS]
 
 Options:
-  --dev         Install development tools (ruff, mypy, black, isort)
+  --dev         Install development tools (pytest, ruff, mypy, black, isort)
   --security    Install security tools (pip-audit, cyclonedx-bom, safety)
   --all         Install all optional tools
   --mirror      Use TUNA mirror for pip (China users)
@@ -92,7 +92,7 @@ fi
 # ============================================================
 # Package lists
 # ============================================================
-UV_DEV_PACKAGES=(ruff mypy black isort)
+UV_DEV_PACKAGES=(pytest ruff mypy black isort)
 UV_SECURITY_PACKAGES=(pip-audit cyclonedx-bom safety)
 
 
@@ -271,8 +271,13 @@ fi
 if [ "$INSTALL_DEV" = true ]; then
     log_info "Installing development tools..."
     uv add --optional dev "${UV_DEV_PACKAGES[@]}" 2>/dev/null || true
+    if ! uv run pytest --version >/dev/null 2>&1; then
+        log_error "pytest installation failed. Run 'make setup SETUP_ARGS=\"--dev\"' again."
+        exit 1
+    fi
     log_ok "Development tools installed:"
     echo "  • ruff (code linting & formatting)"
+    echo "  • pytest (test runner, verified)"
     echo "  • mypy (type checking)"
     echo "  • black (code formatter)"
     echo "  • isort (import sorting)"
