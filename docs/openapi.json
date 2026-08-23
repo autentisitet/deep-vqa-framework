@@ -3,7 +3,7 @@
   "info": {
     "title": "Deep-VQA Quality Assessment API",
     "description": "REST API for image and video quality assessment inference.",
-    "version": "5.0.0"
+    "version": "0.9.0"
   },
   "paths": {
     "/v1/health": {
@@ -20,6 +20,89 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/status": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Auth Status",
+        "operationId": "auth_status_v1_auth_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Auth Login",
+        "operationId": "auth_login_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Auth Logout",
+        "operationId": "auth_logout_v1_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStatusResponse"
                 }
               }
             }
@@ -96,6 +179,121 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/frontend-evaluations": {
+      "get": {
+        "tags": [
+          "frontend"
+        ],
+        "summary": "List recent frontend evaluation log records",
+        "operationId": "list_frontend_evaluations_v1_frontend_evaluations_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Maximum number of newest SQLite records to return",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Maximum number of newest SQLite records to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrontendEvaluationLogResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/subjective-assessments": {
+      "post": {
+        "tags": [
+          "frontend"
+        ],
+        "summary": "Describe image or video quality with Ollama and calculate a Bayesian assessment",
+        "description": "Run an ephemeral Ollama assessment; this route never writes SQLite or JSONL records.",
+        "operationId": "create_subjective_assessment_v1_subjective_assessments_post",
+        "parameters": [
+          {
+            "name": "video_frames",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 8,
+              "minimum": 1,
+              "description": "Evenly sampled frames for video assessment",
+              "default": 4,
+              "title": "Video Frames"
+            },
+            "description": "Evenly sampled frames for video assessment"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_subjective_assessment_v1_subjective_assessments_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectiveAssessmentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         }
       }
@@ -233,6 +431,24 @@
   },
   "components": {
     "schemas": {
+      "AuthStatusResponse": {
+        "properties": {
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "authenticated": {
+            "type": "boolean",
+            "title": "Authenticated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "required",
+          "authenticated"
+        ],
+        "title": "AuthStatusResponse"
+      },
       "Body_create_evaluation_v1_evaluations_post": {
         "properties": {
           "file": {
@@ -247,6 +463,21 @@
           "file"
         ],
         "title": "Body_create_evaluation_v1_evaluations_post"
+      },
+      "Body_create_subjective_assessment_v1_subjective_assessments_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "Image or video file to assess without persistence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_create_subjective_assessment_v1_subjective_assessments_post"
       },
       "Body_create_visualization_v1_visualizations_post": {
         "properties": {
@@ -377,6 +608,29 @@
         ],
         "title": "EvaluationResponse"
       },
+      "FrontendEvaluationLogResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "count"
+        ],
+        "title": "FrontendEvaluationLogResponse",
+        "description": "Frontend evaluation records read from the SQLite evaluation store."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -415,6 +669,19 @@
           "device"
         ],
         "title": "HealthResponse"
+      },
+      "LoginRequest": {
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "title": "Api Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "api_key"
+        ],
+        "title": "LoginRequest"
       },
       "ModelCollectionResponse": {
         "properties": {
@@ -490,6 +757,63 @@
           "checkpoint"
         ],
         "title": "ModelSummary"
+      },
+      "SubjectiveAssessmentResponse": {
+        "properties": {
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "llm_score": {
+            "type": "integer",
+            "title": "Llm Score",
+            "description": "Ollama subjective visual-quality score in [0, 100]"
+          },
+          "bayesian_score": {
+            "type": "number",
+            "title": "Bayesian Score",
+            "description": "Beta-prior posterior mean in [0, 100]"
+          },
+          "credible_interval": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Credible Interval",
+            "description": "Approximate 95% Bayesian credible interval"
+          },
+          "model_used": {
+            "type": "string",
+            "title": "Model Used"
+          },
+          "frames_sampled": {
+            "type": "integer",
+            "title": "Frames Sampled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "media_type",
+          "description",
+          "llm_score",
+          "bayesian_score",
+          "credible_interval",
+          "model_used",
+          "frames_sampled"
+        ],
+        "title": "SubjectiveAssessmentResponse",
+        "description": "Ephemeral Ollama-based quality description and Bayesian assessment."
       },
       "ValidationError": {
         "properties": {
