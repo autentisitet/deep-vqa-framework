@@ -61,11 +61,12 @@ EVALUATION_STORE_BACKEND = cfg.deployment.evaluation_store.backend
 AUTH_MODE = cfg.deployment.auth.mode
 API_KEY = os.getenv("DEEP_VQA_API_KEY", "")
 AUTH_COOKIE = "deep_vqa_auth"
-AUTH_TOKEN = hmac.new(
-    (os.getenv("DEEP_VQA_AUTH_SECRET", "").encode() or secrets.token_bytes(32)),
+AUTH_TOKEN = hashlib.pbkdf2_hmac(
+    "sha256",
     API_KEY.encode(),
-    hashlib.sha256,
-).hexdigest()
+    (os.getenv("DEEP_VQA_AUTH_SECRET", "").encode() or secrets.token_bytes(32)),
+    310000,
+).hex()
 FRONTEND_SESSION_HEADER = "X-Deep-VQA-Session"
 LEGACY_SESSION_ID = "legacy"
 _frontend_log_lock = threading.Lock()
