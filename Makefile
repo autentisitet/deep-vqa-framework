@@ -307,6 +307,21 @@ git-log:
 # Testing
 # ============================================================
 
+define require_tool
+	@uv pip show --python "$(PYTHON)" $(1) >/dev/null 2>&1 || { \
+		echo "$(RED)[ERROR]$(RESET) $(1) not installed."; \
+		echo "Run: make setup $(shell echo $(2) | tr a-z A-Z)=1 MIRROR=1"; \
+		exit 1; \
+	}
+endef
+
+pytest:
+	@echo "$(BLUE)[INFO]$(RESET) Running tests/ with pytest..."
+	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
+	$(call require_tool,pytest,dev)
+	@set -o pipefail; cd $(ROOT_DIR) && PYTHONPATH="$(ROOT_DIR)" uv run --no-sync pytest -q 2>&1 | sed 's/^/  /'
+	@echo "$(GREEN)[OK]$(RESET) Pytest suite passed."
+
 test-images:
 	@echo "[INFO] Testing images..."
 	@uv run python -m deploy.cli -i examples/images/
@@ -330,10 +345,11 @@ test-all: test-images test-videos
 # ------------------------------------------------------------
 # Code Quality
 # ------------------------------------------------------------
+
 check-code:
 	@echo "$(YELLOW)[INFO]$(RESET) Running code quality checks..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
-	@uv run pip show ruff >/dev/null 2>&1 || (echo "$(RED)[ERROR]$(RESET) ruff not installed. Run 'make setup SETUP_ARGS=\"--mirror --dev\"'." && exit 1)
+	$(call require_tool,ruff,dev)
 	@cd $(ROOT_DIR) && uv run ruff format --check . 2>&1 | sed 's/^/  /'
 	@cd $(ROOT_DIR) && uv run ruff check . 2>&1 | sed 's/^/  /'
 	@echo "$(GREEN)[OK]$(RESET) All checks passed."
@@ -341,7 +357,7 @@ check-code:
 fmt:
 	@echo "$(YELLOW)[INFO]$(RESET) Formatting code with ruff..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
-	@uv run pip show ruff >/dev/null 2>&1 || (echo "$(RED)[ERROR]$(RESET) ruff not installed. Run 'make setup SETUP_ARGS=\"--mirror --dev\"'." && exit 1)
+	$(call require_tool,ruff,dev)
 	@cd $(ROOT_DIR) && uv run ruff format . 2>&1 | sed 's/^/  /'
 	@cd $(ROOT_DIR) && uv run ruff check . --fix 2>&1 | sed 's/^/  /'
 	@echo "$(GREEN)[OK]$(RESET) Formatting complete."
@@ -349,14 +365,14 @@ fmt:
 black:
 	@echo "$(YELLOW)[INFO]$(RESET) Formatting with black..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
-	@uv run pip show black >/dev/null 2>&1 || (echo "$(RED)[ERROR]$(RESET) black not installed. Run 'make setup SETUP_ARGS=\"--mirror --dev\"'." && exit 1)
+	$(call require_tool,black,dev)
 	@cd $(ROOT_DIR) && uv run black src/ 2>&1 | sed 's/^/  /'
 	@echo "$(GREEN)[OK]$(RESET) black complete."
 
 isort:
 	@echo "$(YELLOW)[INFO]$(RESET) Sorting imports with isort..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
-	@uv run pip show isort >/dev/null 2>&1 || (echo "$(RED)[ERROR]$(RESET) isort not installed. Run 'make setup SETUP_ARGS=\"--mirror --dev\"'." && exit 1)
+	$(call require_tool,isort,dev)
 	@cd $(ROOT_DIR) && uv run isort src/ 2>&1 | sed 's/^/  /'
 	@echo "$(GREEN)[OK]$(RESET) isort complete."
 
@@ -366,7 +382,7 @@ format-all: black isort fmt
 typecheck:
 	@echo "$(YELLOW)[INFO]$(RESET) Running mypy type checks..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
-	@uv run pip show mypy >/dev/null 2>&1 || (echo "$(RED)[ERROR]$(RESET) mypy not installed. Run 'make setup SETUP_ARGS=\"--mirror --dev\"'." && exit 1)
+	$(call require_tool,mypy,dev)
 	@cd $(ROOT_DIR) && uv run mypy src/ --ignore-missing-imports 2>&1 | sed 's/^/  /'
 	@echo "$(GREEN)[OK]$(RESET) Type checks complete."
 
@@ -379,7 +395,7 @@ typecheck:
 vuln-audit:
 	@echo "$(RED)[INFO]$(RESET) Auditing dependencies for vulnerabilities..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
-	@uv run pip show pip-audit >/dev/null 2>&1 || (echo "$(RED)[ERROR]$(RESET) pip-audit not installed. Run 'make setup SETUP_ARGS=\"--mirror --security\"'." && exit 1)
+	$(call require_tool,pip-audit,security)
 	@cd $(ROOT_DIR) && uv pip freeze > $(ROOT_DIR)/requirements.txt
 	@cd $(ROOT_DIR) && uv run pip-audit \
 		--requirement $(ROOT_DIR)/requirements.txt \
@@ -395,7 +411,7 @@ vuln-audit:
 sbom:
 	@echo "$(BLUE)[INFO]$(RESET) Generating SBOM (CycloneDX)..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
-	@uv run pip show cyclonedx-bom >/dev/null 2>&1 || (echo "$(RED)[ERROR]$(RESET) cyclonedx-bom not installed. Run 'make setup SETUP_ARGS=\"--mirror --security\"'." && exit 1)
+	$(call require_tool,cyclonedx-bom,security)
 	@cd $(ROOT_DIR) && uv run cyclonedx-py environment \
 		--output-format json \
 		--output-file $(SECURITY_DIR)/sbom-cyclonedx.json 2>&1 | sed 's/^/  /'
@@ -409,7 +425,7 @@ sbom:
 safety:
 	@echo "$(YELLOW)[INFO]$(RESET) Running safety scan..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
-	@uv run pip show safety >/dev/null 2>&1 || (echo "$(RED)[ERROR]$(RESET) safety not installed. Run 'make setup SETUP_ARGS=\"--mirror --security\"'." && exit 1)
+	$(call require_tool,safety,security)
 	@cd $(ROOT_DIR) && uv pip freeze > $(ROOT_DIR)/requirements.txt
 	@cd $(ROOT_DIR) && uv run safety scan --full-report 2>&1 | tee $(SECURITY_DIR)/safety-report.txt || true
 	@echo "$(GREEN)[OK]$(RESET) Safety scan complete. Report: $(CYAN)$(SECURITY_DIR)/safety-report.txt$(RESET)"
@@ -597,6 +613,83 @@ define check_runtime
 		echo "        Ubuntu: sudo apt install docker-compose"; \
 		exit 1; \
 	fi
+endef
+
+define ensure_env_file
+	@if [ ! -f "$(ROOT_DIR)/.env" ]; then \
+		if [ ! -f "$(ROOT_DIR)/.env.example" ]; then \
+			echo "ERROR: .env.example is missing."; exit 1; \
+		fi; \
+		cp "$(ROOT_DIR)/.env.example" "$(ROOT_DIR)/.env"; \
+		echo "[INFO] Created .env from .env.example."; \
+		echo "[INFO] Internal profile still requires DEEP_VQA_API_KEY and DEEP_VQA_AUTH_SECRET."; \
+	fi
+endef
+
+define show_deployment_context
+	@echo "$(CYAN)[INFO]$(RESET) Deployment mode: $(1)"
+	@echo "$(CYAN)[INFO]$(RESET) Profile: $(2)"
+	@echo "$(CYAN)[INFO]$(RESET) Auth: $(3)"
+	@echo "$(CYAN)[INFO]$(RESET) Evaluation store: $(4)"
+	@echo "$(CYAN)[INFO]$(RESET) Ollama endpoint (when enabled): $(OLLAMA_BASE_URL)"
+endef
+
+
+define check_deploy_auth
+	@if grep -Eq '^[[:space:]]*mode:[[:space:]]*api_key([[:space:]]|$$)' $(DEPLOYMENT_CONFIG); then \
+		api_key="$${DEEP_VQA_API_KEY:-}"; auth_secret="$${DEEP_VQA_AUTH_SECRET:-}"; \
+		if [ -f .env ]; then \
+			[ -n "$$api_key" ] || api_key=$$(sed -n 's/^DEEP_VQA_API_KEY=//p' .env | tail -n 1); \
+			[ -n "$$auth_secret" ] || auth_secret=$$(sed -n 's/^DEEP_VQA_AUTH_SECRET=//p' .env | tail -n 1); \
+		fi; \
+		if [ -z "$$api_key" ] || [ -z "$$auth_secret" ]; then \
+			echo "ERROR: auth.mode=api_key requires DEEP_VQA_API_KEY and DEEP_VQA_AUTH_SECRET."; \
+			echo "Create local config first: cp .env.example .env"; \
+			echo "Generate values with: openssl rand -hex 32"; \
+			exit 1; \
+		fi; \
+	fi
+endef
+
+# Wait only while a container can still become ready. Exited/dead/unhealthy
+# states fail immediately instead of consuming the entire timeout budget.
+define wait_container_http
+	@attempts=$(3); unconfigured_attempts=0; \
+	for i in $$(seq 1 $$attempts); do \
+		state=$$($(RUNTIME) inspect --format '{{.State.Status}}' $(1) \
+			2>/dev/null || echo missing); \
+		health=$$($(RUNTIME) inspect \
+			--format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unconfigured{{end}}' \
+			$(1) 2>/dev/null || echo missing); \
+		case "$$state/$$health" in \
+			missing/*) \
+				echo "$(RED)[ERROR]$(RESET) $(1) is not present."; \
+				exit 1 ;; \
+			exited/*|dead/*|removing/*|*/unhealthy) \
+				echo "$(RED)[ERROR]$(RESET) $(1) cannot become ready: state=$$state health=$$health"; \
+				exit 1 ;; \
+			running/healthy) \
+				curl --noproxy '*' -fsS --max-time 5 "$(2)" >/dev/null 2>&1 \
+					&& { echo "$(GREEN)[OK]$(RESET) $(1) is healthy."; exit 0; }; \
+				echo "$(RED)[ERROR]$(RESET) $(1) health endpoint failed."; \
+				exit 1 ;; \
+			running/unconfigured) \
+				unconfigured_attempts=$$((unconfigured_attempts + 1)) ;; \
+			created/*|running/starting) ;; \
+			*) unconfigured_attempts=$$((unconfigured_attempts + 1)) ;; \
+		esac; \
+		if curl --noproxy '*' -fsS --max-time 5 "$(2)" >/dev/null 2>&1; then \
+			echo "$(GREEN)[OK]$(RESET) $(1) is healthy."; \
+			exit 0; \
+		fi; \
+		if [ "$$unconfigured_attempts" -ge 2 ]; then \
+			echo "$(RED)[ERROR]$(RESET) $(1) endpoint failed after two probes."; \
+			exit 1; \
+		fi; \
+		[ "$$i" -lt "$$attempts" ] && sleep 2; \
+	done; \
+	echo "$(RED)[ERROR]$(RESET) $(1) did not become healthy."; \
+	exit 1
 endef
 
 
