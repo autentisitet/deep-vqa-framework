@@ -1,0 +1,32 @@
+# Podman-only runtime capabilities for v0.9.0 and SELinux mount labels.
+services:
+  vqa-dev:
+    security_opt:
+      - label=disable
+    devices:
+      - nvidia.com/gpu=all
+
+  vqa-train:
+    security_opt:
+      - label=disable
+    devices:
+      - nvidia.com/gpu=all
+
+  vqa-infer:
+    security_opt:
+      - label=disable
+    devices:
+      - nvidia.com/gpu=all
+
+  vqa-nginx:
+    # Fedora/RHEL Podman with SELinux requires relabeling bind mounts.
+    # This override keeps the generic Docker compose file portable.
+    volumes:
+      - ../../frontend:/usr/share/nginx/html:ro,Z
+      - ../nginx/default.conf:/etc/nginx/conf.d/default.conf:ro,Z
+
+  vqa-ollama:
+    security_opt:
+      - label=disable
+    devices:
+      - nvidia.com/gpu=all

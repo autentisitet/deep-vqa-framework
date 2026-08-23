@@ -24,6 +24,7 @@ COPY scripts/ ./scripts/
 
 ARG BOOTSTRAP_ARGS="--mirror"
 ARG SETUP_ARGS="--mirror"
+ARG INSTALL_DEV=false
 ARG USE_BUILD_PROXY=false
 
 # Install system and Python dependencies
@@ -31,35 +32,48 @@ RUN if [ "$USE_BUILD_PROXY" != "true" ]; then \
         unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY; \
     fi && \
     bash scripts/bootstrap.sh ${BOOTSTRAP_ARGS} && \
-    bash scripts/setup_env.sh ${SETUP_ARGS} && \
+    setup_args="${SETUP_ARGS}" && \
+    if [ "$INSTALL_DEV" = "true" ]; then setup_args="$setup_args --dev"; fi && \
+    bash scripts/setup_env.sh $setup_args && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 
 
 # ==============================================
-# Phase 2: Training Environment
+# Phase 2: Development Environment
+# ==============================================
+FROM base AS dev
+
+COPY src/ ./src/
+COPY train-config/ ./train-config/
+
+CMD ["/bin/bash"]
+
+
+# ==============================================
+# Phase 3: Training Environment
 # ==============================================
 FROM base AS train
 
 COPY src/ ./src/
-COPY config/ ./config/
+COPY train-config/ ./train-config/
 
 CMD ["/bin/bash"]
 
 
 
 # ============================================
-# Phase 3: Production Environment (Runtime Only)
+# Phase 4: Production Environment (Runtime Only)
 # ============================================
 FROM base AS prod
 
-COPY src/config/ ./src/config/
-COPY src/data/ ./src/data/
-COPY src/models/ ./src/models/
-COPY src/utils/ ./src/utils/
-COPY src/visualization/ ./src/visualization/
-COPY config/dataset_config.yaml ./config/dataset_config.yaml
+ENV XDG_CACHE_HOME=/app/.cache \
+    TORCH_HOME=/app/.cache/torch
+
+COPY src/ ./src/
+COPY train-config/ ./train-config/
+COPY deploy-config/ ./deploy-config/
 
 COPY deploy/core/ ./deploy/core/
 COPY deploy/api.py ./deploy/api.py

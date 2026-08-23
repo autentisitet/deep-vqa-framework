@@ -22,7 +22,10 @@ $(shell mkdir -p $(LOG_DIR) $(SECURITY_DIR))
 # Python Detection (cross-platform)
 # ============================================================
 ifeq ($(OS),Windows_NT)
-    PYTHON_CMD := $(shell if [ -f "$(ROOT_DIR)/.venv/Scripts/python.exe" ]; then echo "$(ROOT_DIR)/.venv/Scripts/python.exe"; else echo "python"; fi)
+    PYTHON_CMD := $(shell \
+        if [ -f "$(ROOT_DIR)/.venv/Scripts/python.exe" ]; then \
+            echo "$(ROOT_DIR)/.venv/Scripts/python.exe"; \
+        else echo "python"; fi)
 else
     PYTHON_CMD := $(shell if [ -f "$(ROOT_DIR)/.venv/bin/python" ]; then echo "$(ROOT_DIR)/.venv/bin/python"; else echo "python3"; fi)
 endif
@@ -34,15 +37,19 @@ UV_RUN := uv run
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: help help-% bootstrap setup install data info cache_clean archive results-clean git-log
+.PHONY: help help-% bootstrap setup install env-secrets data info cache_clean archive results-clean
 
-.PHONY: test-images test-videos test-all
+.PHONY: git-log version-sync version-check
+
+.PHONY: pytest test-images test-videos test-all
 
 .PHONY: check-code fmt black isort format-all typecheck
 .PHONY: vuln-audit sbom safety security-all
 
-.PHONY: docker-dev docker-train docker-api docker-infer docker-stop docker-manage
+.PHONY: docker-dev docker-train docker-stop docker-manage
 .PHONY: docker-purge-all
+.PHONY: docker-infer docker-infer-internal docker-infer-public
+.PHONY: docker-infer-internal-ollama docker-infer-public-ollama docker-deploy-check
 
 
 
@@ -58,9 +65,10 @@ help:
 	@echo ''
 	@echo '$(GREEN)Environment:$(RESET)'
 
-	@echo '  make bootstrap [BOOTSTRAP_ARGS="..."]      Install system dependencies (apt)'
-	@echo '  make setup [SETUP_ARGS="..."]              Install Python dependencies (uv)'
-	@echo '  make install [INSTALL_ARGS="..."]          Bootstrap + Setup (full installation)'
+	@echo '  make bootstrap [MIRROR=1]                   Install system dependencies (apt)'
+	@echo '  make setup [DEV=1 SECURITY=1 MIRROR=1]      Install Python dependencies (uv)'
+	@echo '  make install [DEV=1 SECURITY=1 MIRROR=1]    Bootstrap + Setup (full installation)'
+	@echo '  make env-secrets                            Create .env and generate API/cookie secrets'
 	@echo '  make data                                  Download and prepare datasets'
 
 	@echo ''
@@ -68,6 +76,7 @@ help:
 	@echo '  make check-code     Run ruff linter'
 	@echo '  make format-all     Format code (black + isort + ruff)'
 	@echo '  make typecheck      Run mypy type checker'
+	@echo '  make version-check  Verify README/runtime version markers match pyproject.toml'
 	@echo ''
 	@echo '$(RED)Security:$(RESET)'
 	@echo '  make vuln-audit     Scan dependencies for CVEs'
@@ -76,18 +85,22 @@ help:
 	@echo ''
 	@echo '$(CYAN)Docker:$(RESET)'
 
-	@echo '  make docker-dev [BUILD_ARGS="..."]         Enter development container'
-	@echo '  make docker-train [BUILD_ARGS="..."]       Run training in background'
-	@echo '  make docker-api                           API-only mode; direct host port 8001'
-	@echo '  make docker-infer [BUILD_ARGS="..."]       Full API + Nginx + frontend; waits and verifies'
-	@echo '  make docker-stop                           Stop all containers'
-	@echo '  make docker-manage                         Check container environment'
+	@echo '  make docker-dev [BUILD_ARGS="..."]         Open a dev shell (dev tools included)'
+	@echo '  make docker-train [DEV=1 BUILD_ARGS="..."] Run the configured training jobs'
+	@echo '  make docker-stop                           Stop project containers, including Ollama if running'
+	@echo '  make docker-manage                         Inspect runtime and project resources'
 	@echo '  make docker-purge-all                      Remove all project containers/images'
+	@echo '  make docker-infer [DEPLOYMENT_MODE=public] Default inference stack'
+	@echo '  make docker-infer-internal-ollama          Internal profile + Ollama'
+	@echo '  make docker-infer-public-ollama            Public profile + Ollama'
+	@echo '  make docker-deploy-check                   Check API and optional Nginx/Ollama services'
+	@echo '  Note: inference commands create .env from .env.example when missing; internal mode still needs keys.'
 	@echo ''
 	@echo '$(BLUE)Inference:$(RESET)'
 	@echo '  make test-images     Batch inference on examples/images/'
 	@echo '  make test-videos     Batch inference on examples/videos/'
 	@echo '  make test-all        Batch inference on all examples/'
+	@echo '  make pytest          Run the tests/ pytest suite'
 
 	@echo ''
 	@echo '$(BLUE)Maintenance:$(RESET)'
@@ -101,17 +114,25 @@ help:
 	@echo ''
 
 	@echo '$(BOLD)Parameters:$(RESET)'
-	@echo '  BOOTSTRAP_ARGS="--mirror"    Pass args to bootstrap.sh'
-	@echo '  SETUP_ARGS="--mirror --all"  Pass args to setup_env.sh'
-	@echo '  INSTALL_ARGS="..."           Pass args to install (bootstrap + setup)'
-	@echo '  ARCHIVE_ARGS="--all"         Pass args to archive_results.sh'
-	@echo '  GIT_LOG_FILE="git_log.txt"  Git history output path'
-	@echo '  BUILD_ARGS="--no-cache"      Pass args to docker build'
+	@echo '  DEV=1                       Include development tools'
+	@echo '  SECURITY=1                  Include security tools'
+	@echo '  MIRROR=1                    Use the TUNA package mirror'
+	@echo '  DEPLOYMENT_MODE=internal|public  Select inference profile (default: internal)'
+	@echo '  BUILD_ARGS="..."             Advanced Docker build flags'
+	@echo '  ARCHIVE_ARGS="..."           Advanced archive script arguments'
+	@echo '  GIT_LOG_FILE="..."            Git history output path'
+	@echo '  BOOTSTRAP_ARGS/SETUP_ARGS    Advanced raw script arguments (optional)'
 	@echo ''
 	@echo '$(BOLD)Examples:$(RESET)'
-	@echo '  make bootstrap BOOTSTRAP_ARGS="--mirror"'
-	@echo '  make setup SETUP_ARGS="--mirror --all"'
-	@echo '  make install INSTALL_ARGS="--mirror --all"'
+	@echo '  make bootstrap MIRROR=1'
+	@echo '  make setup DEV=1 MIRROR=1'
+	@echo '  make install DEV=1 SECURITY=1 MIRROR=1'
+	@echo '  make env-secrets'
+	@echo '  make docker-infer'
+	@echo '  make docker-infer DEPLOYMENT_MODE=public'
+	@echo '  make docker-infer-internal-ollama'
+	@echo '  make docker-train DEV=1'
+	@echo '  make docker-train BUILD_ARGS="--build-arg USE_BUILD_PROXY=true"'
 	@echo '  make archive ARCHIVE_ARGS="--results"'
 	@echo '  make git-log GIT_LOG_FILE="results/git_log.txt"'
 	@echo '  make test-all'
@@ -119,26 +140,64 @@ help:
 	@echo '  uv run python -m src.main --dataset konvid-1k --model swin_vqa'
 	@echo ''
 	@echo '  Detailed help: make help-TARGET (for example: make help-docker-infer)'
-	@echo '  Full deployment guide: deploy/GUIDE.md'
+	@echo '  Knowledge base: knowledge/README.md'
 
 help-%:
 	@case "$*" in \
-		setup) echo 'make setup SETUP_ARGS="--mirror --dev"'; echo '  Install project dependencies with uv.' ;; \
-		data) echo 'make data'; echo '  Download/prepare datasets according to the configured dataset scripts.' ;; \
-		docker-infer) echo 'make docker-infer BUILD_ARGS="..."'; echo '  Full demo/deployment mode: API + Nginx + frontend, with automatic health verification.' ;; \
-		docker-api) echo 'make docker-api BUILD_ARGS="..."'; echo '  Build and start FastAPI only; direct API is exposed on port 8001.' ;; \
-		docker-train) echo 'make docker-train BUILD_ARGS="..."'; echo '  Build the training image and run the configured training workflow.' ;; \
-		docker-stop) echo 'make docker-stop'; echo '  Stop project containers without failing when a container is absent.' ;; \
-		docker-purge-all) echo 'make docker-purge-all'; echo '  Remove project containers, dangling images, volumes, and networks.' ;; \
+		setup) \
+			echo 'COMMAND: make setup DEV=1 MIRROR=1'; \
+			echo 'PURPOSE: Install Python/runtime dependencies with uv.' ;; \
+		env-secrets) \
+			echo 'COMMAND: make env-secrets'; \
+			echo 'PURPOSE: Create .env and generate only missing deployment secrets.'; \
+			echo 'NOTE: Existing DEEP_VQA_API_KEY and DEEP_VQA_AUTH_SECRET values are preserved.' ;; \
+		data) \
+			echo 'COMMAND: make data'; \
+			echo 'PURPOSE: Prepare datasets through the data workflow.' ;; \
+		 docker-dev) \
+			echo 'COMMAND: make docker-dev [BUILD_ARGS="..."]'; \
+			echo 'PURPOSE: Open an interactive container with development tools.'; \
+			echo 'NOTE: tests/, source, configs, and caches are mounted from the host.' ;; \
+		docker-train) \
+			echo 'COMMAND: make docker-train [DEV=1] [BUILD_ARGS="..."]'; \
+			echo 'PURPOSE: Run the configured training workflows.'; \
+			echo 'NOTE: DEV=1 adds pytest/ruff/mypy/black/isort to the image.' ;; \
+		docker-infer) \
+			echo 'COMMAND: make docker-infer [DEPLOYMENT_MODE=internal|public]'; \
+			echo 'PURPOSE: Start vqa-infer and vqa-nginx; default profile is internal.'; \
+			echo 'NOTE: use make docker-infer-internal-ollama for subjective quality.' ;; \
+		docker-infer-internal-ollama|docker-infer-public-ollama) \
+			echo 'COMMAND: make '$*; \
+			echo 'PURPOSE: Start vqa-ollama, initialize the model, then start inference.'; \
+			echo 'NOTE: internal mode requires DEEP_VQA_API_KEY and DEEP_VQA_AUTH_SECRET.' ;; \
+		docker-stop) \
+			echo 'COMMAND: make docker-stop'; \
+			echo 'PURPOSE: Stop project services without deleting data.' ;; \
+		docker-purge-all) \
+			echo 'COMMAND: make docker-purge-all'; \
+			echo 'PURPOSE: Remove project containers, images, and volumes.' ;; \
+		docker-deploy-check) \
+			echo 'COMMAND: make docker-deploy-check'; \
+			echo 'PURPOSE: Check API and optional Nginx/Ollama services.' ;; \
 		test-images|test-videos|test-all) echo 'make $*'; echo '  Run deployment batch inference against the example media set.' ;; \
+		pytest) echo 'make pytest'; echo '  Run the tests/ pytest suite.' ;; \
 		*) echo "No detailed help is available for '$*'. Run 'make help' to list targets."; exit 1 ;; \
-	esac
+		esac
+
+version-sync:
+	@$(PYTHON) scripts/sync_version.py
+
+version-check:
+	@$(PYTHON) scripts/sync_version.py --check
 
 
 
+DEV ?= 0
+SECURITY ?= 0
+MIRROR ?= 0
 INSTALL_ARGS ?=
-BOOTSTRAP_ARGS ?= $(filter --mirror, $(INSTALL_ARGS))
-SETUP_ARGS ?= $(INSTALL_ARGS)
+BOOTSTRAP_ARGS ?= $(if $(filter 1 true yes,$(MIRROR)),--mirror) $(filter --mirror,$(INSTALL_ARGS))
+SETUP_ARGS ?= $(if $(filter 1 true yes,$(MIRROR)),--mirror) $(if $(filter 1 true yes,$(DEV)),--dev) $(if $(filter 1 true yes,$(SECURITY)),--security) $(INSTALL_ARGS)
 ARCHIVE_ARGS ?= --all
 GIT_LOG_FILE ?= $(ROOT_DIR)/git_log.txt
 bootstrap:
@@ -152,6 +211,11 @@ setup:
 	@chmod +x $(ROOT_DIR)/scripts/*.sh
 	@cd $(ROOT_DIR)/scripts && bash setup_env.sh $(SETUP_ARGS) 2>&1 | tee $(LOG_DIR)/setup_env.log
 	@echo "$(GREEN)[OK]$(RESET) Setup complete. Run 'make info' to verify."
+
+
+env-secrets:
+	@chmod +x $(ROOT_DIR)/scripts/init_env_secrets.sh
+	@bash $(ROOT_DIR)/scripts/init_env_secrets.sh
 
 
 
@@ -255,7 +319,9 @@ test-videos:
 
 test-all: test-images test-videos
 	@echo "[OK] All tests completed"
-	@jq -s '.[] | .[] | {file: .file, mos: .mos_score}' reports/iqa-test/*.json reports/vqa-test/*.json 2>/dev/null || echo "[WARN] jq not installed, check JSON files manually"
+	@jq -s '.[] | .[] | {file: .file, mos: .mos_score}' \
+		reports/iqa-test/*.json reports/vqa-test/*.json 2>/dev/null \
+		|| echo "[WARN] jq not installed, check JSON files manually"
 
 
 
@@ -407,7 +473,9 @@ info:
 		echo -n "  PyTorch:     "; \
 		cd $(ROOT_DIR) && uv run python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "$(YELLOW)not installed$(RESET)"; \
 		echo -n "  CUDA:        "; \
-		cd $(ROOT_DIR) && uv run python -c "import torch; print('$(GREEN)available$(RESET)' if torch.cuda.is_available() else '$(YELLOW)not available$(RESET)')" 2>/dev/null || echo "$(YELLOW)unknown$(RESET)"; \
+		cd $(ROOT_DIR) && uv run python -c \
+			"import torch; print('$(GREEN)available$(RESET)' if torch.cuda.is_available() else '$(YELLOW)not available$(RESET)')" \
+			2>/dev/null || echo "$(YELLOW)unknown$(RESET)"; \
 		echo -n "  OpenCV:      "; \
 		cd $(ROOT_DIR) && uv run python -c "import cv2; print(cv2.__version__)" 2>/dev/null || echo "$(YELLOW)not installed$(RESET)"; \
 		echo -n "  NumPy:       "; \
@@ -425,9 +493,11 @@ info:
 		echo ""; \
 		echo "$(BOLD)Security Tools:$(RESET)"; \
 		echo -n "  pip-audit:   "; \
-		cd $(ROOT_DIR) && uv run pip show pip-audit >/dev/null 2>&1 && echo "$(GREEN)installed$(RESET)" || echo "$(YELLOW)not installed$(RESET)"; \
+		cd $(ROOT_DIR) && uv run pip show pip-audit >/dev/null 2>&1 \
+			&& echo "$(GREEN)installed$(RESET)" || echo "$(YELLOW)not installed$(RESET)"; \
 		echo -n "  cyclonedx:   "; \
-		cd $(ROOT_DIR) && uv run pip show cyclonedx-bom >/dev/null 2>&1 && echo "$(GREEN)installed$(RESET)" || echo "$(YELLOW)not installed$(RESET)"; \
+		cd $(ROOT_DIR) && uv run pip show cyclonedx-bom >/dev/null 2>&1 \
+			&& echo "$(GREEN)installed$(RESET)" || echo "$(YELLOW)not installed$(RESET)"; \
 		echo -n "  safety:      "; \
 		cd $(ROOT_DIR) && uv run pip show safety >/dev/null 2>&1 && echo "$(GREEN)installed$(RESET)" || echo "$(YELLOW)not installed$(RESET)"; \
 	else \
@@ -500,13 +570,18 @@ RUNTIME := $(shell \
 	else echo ""; fi)
 
 
-COMPOSE_FILES := -f docker/docker-compose.yaml
+COMPOSE_FILES := -f deploy-config/compose/docker-compose.yaml
 ifeq ($(RUNTIME),podman)
-    COMPOSE_FILES += -f docker/docker-compose.podman.yaml
+    COMPOSE_FILES += -f deploy-config/compose/docker-compose.podman.yaml
 endif
 ifeq ($(RUNTIME),docker)
-    COMPOSE_FILES += -f docker/docker-compose.docker.yaml
+    COMPOSE_FILES += -f deploy-config/compose/docker-compose.docker.yaml
 endif
+
+# This must be expanded after all runtime-specific compose overrides.
+OLLAMA_COMPOSE_FILES := $(COMPOSE_FILES) -f deploy-config/ollama/docker-compose.yaml
+COMPOSE_ENV = DEEP_VQA_DEPLOYMENT_CONFIG="$(DEPLOYMENT_CONFIG)"
+OLLAMA_COMPOSE_ENV = $(COMPOSE_ENV) OLLAMA_BASE_URL="$(OLLAMA_BASE_URL)" OLLAMA_MODELFILE_PATH="$(ROOT_DIR)/deploy-config/ollama/Modelfile"
 
 
 define check_runtime
@@ -526,17 +601,23 @@ endef
 
 
 BUILD_ARGS ?=
+DEPLOYMENT_MODE ?= internal
+DEPLOYMENT_CONFIG ?= deploy-config/profiles/infer_deploy.$(DEPLOYMENT_MODE).yaml
+OLLAMA_BASE_URL ?= http://vqa-ollama:11434
+API_HEALTH_URL = http://127.0.0.1:$${API_PORT:-8001}/v1/health
+WEB_HEALTH_URL = http://127.0.0.1:$${WEB_PORT:-8000}/api/v1/health
+OLLAMA_HEALTH_URL = http://127.0.0.1:$${OLLAMA_PORT:-11434}/api/tags
 
 
 docker-dev:
 	$(call check_runtime)
-	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-train
-	$(COMPOSE) $(COMPOSE_FILES) run --rm --name vqa-train vqa-train
+	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) --build-arg INSTALL_DEV=true vqa-dev
+	$(COMPOSE) $(COMPOSE_FILES) run --rm --name vqa-dev vqa-dev
 
 
 docker-train:
 	$(call check_runtime)
-	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-train
+	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) --build-arg INSTALL_DEV=$(if $(filter 1 true yes,$(DEV)),true,false) vqa-train
 	$(COMPOSE) $(COMPOSE_FILES) run --rm --name vqa-train vqa-train bash -c "\
 		set -o pipefail && \
 		make data && \
@@ -606,7 +687,7 @@ docker-manage:
 	@$(RUNTIME) network ls 2>/dev/null || echo "  (none)"
 	@echo ""
 	@echo "--- Compose Services ---"
-	@$(COMPOSE) $(COMPOSE_FILES) ps 2>/dev/null || echo "  (none)"
+	@$(OLLAMA_COMPOSE_ENV) $(COMPOSE) $(OLLAMA_COMPOSE_FILES) ps 2>/dev/null || echo "  (none)"
 
 
 
