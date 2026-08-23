@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 import tempfile
@@ -42,6 +43,7 @@ from src.visualization.feature_visualizer import FeatureVisualizer, load_image_t
 
 API_PREFIX = "/v1"
 DEVICE = cfg.default_device
+SAFE_ARTIFACT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 MODEL_PATHS = {
     "iqa": cfg.resolve(cfg.iqa_model_path),
     "vqa": cfg.resolve(cfg.vqa_model_path),
@@ -754,6 +756,14 @@ async def get_artifact(artifact_path: str, request: Request) -> FileResponse:
         or normalized_artifact_path.startswith("\\")
         or relative.is_absolute()
         or ".." in relative.parts
+    ):
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    if any(
+        not segment
+        or segment in {".", ".."}
+        or not SAFE_ARTIFACT_SEGMENT_RE.fullmatch(segment)
+        for segment in relative.parts
     ):
         raise HTTPException(status_code=404, detail="Artifact not found")
 
