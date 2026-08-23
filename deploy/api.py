@@ -745,8 +745,16 @@ async def get_artifact(artifact_path: str, request: Request) -> FileResponse:
     _require_auth(request)
     if EVALUATION_STORE_BACKEND == "none":
         raise HTTPException(status_code=404, detail="Artifacts are disabled in stateless mode")
-    relative = Path(artifact_path)
-    if relative.is_absolute() or ".." in relative.parts:
+    normalized_artifact_path = Path(artifact_path).as_posix()
+    relative = Path(normalized_artifact_path)
+    if (
+        not normalized_artifact_path
+        or normalized_artifact_path == "."
+        or normalized_artifact_path.startswith("/")
+        or normalized_artifact_path.startswith("\\")
+        or relative.is_absolute()
+        or ".." in relative.parts
+    ):
         raise HTTPException(status_code=404, detail="Artifact not found")
 
     root = cfg.resolve(cfg.reports_dir / "iqa-test").resolve()
