@@ -719,34 +719,164 @@ docker-train:
 	"
 
 
-docker-api:
+_docker-api:
 	$(call check_runtime)
-	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-infer
-	$(COMPOSE) $(COMPOSE_FILES) up -d vqa-infer
-	@echo "[INFO] Waiting for FastAPI health at http://127.0.0.1:$${API_PORT:-8001}/v1/health..."
-	@for i in $$(seq 1 40); do \
-		if curl --noproxy '*' -fsS --max-time 5 "http://127.0.0.1:$${API_PORT:-8001}/v1/health" >/dev/null 2>&1; then \
-			echo "$(GREEN)[OK]$(RESET) FastAPI is healthy."; exit 0; \
-		fi; sleep 3; \
-	done; echo "$(RED)[ERROR]$(RESET) FastAPI did not become healthy."; $(COMPOSE) $(COMPOSE_FILES) logs --tail=80 vqa-infer; exit 1
+	$(call ensure_env_file)
+	$(call check_deploy_auth)
+	$(COMPOSE_ENV) $(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-infer
+	@$(RUNTIME) rm -f vqa-infer 2>/dev/null || true
+	$(COMPOSE_ENV) $(COMPOSE) $(COMPOSE_FILES) up -d vqa-infer
+	@echo "[INFO] Waiting for FastAPI health at $(API_HEALTH_URL)..."
+	$(call wait_container_http,vqa-infer,$(API_HEALTH_URL),60)
 
 
-docker-infer: docker-api
-	$(COMPOSE) $(COMPOSE_FILES) up -d nginx
-	@echo "[INFO] Verifying proxied API..."
-	@curl --noproxy '*' -fsS --max-time 10 "http://127.0.0.1:$${WEB_PORT:-8000}/api/v1/health" || \
-		(echo "$(RED)[ERROR]$(RESET) Nginx/API health check failed."; exit 1)
+_docker-infer: _docker-api
+	@$(RUNTIME) rm -f vqa-nginx 2>/dev/null || true
+	$(COMPOSE) $(COMPOSE_FILES) up -d vqa-nginx
+	@echo "[INFO] Waiting for Nginx and proxied API..."
+	$(call wait_container_http,vqa-nginx,$(WEB_HEALTH_URL),30)
 	@echo "$(GREEN)[OK]$(RESET) Inference stack is ready: http://127.0.0.1:$${WEB_PORT:-8000}/"
+
+# Unified user-facing entry point. Keep the explicit targets below as
+# compatibility aliases and for scripts that want an unambiguous profile.
+docker-infer:
+	@if [ "$(DEPLOYMENT_MODE)" = "internal" ]; then \
+		$(MAKE) docker-infer-internal; \
+	elif [ "$(DEPLOYMENT_MODE)" = "public" ]; then \
+		$(MAKE) docker-infer-public; \
+	else \
+		echo "ERROR: DEPLOYMENT_MODE must be internal or public"; exit 2; \
+	fi
+
+# Explicit profile entry points. They validate repository policy before
+# delegating to the common stack target; the template keeps the two profiles
+# mechanically aligned without merging their security policies.
+define run_infer_profile
+	$(call show_deployment_context,$(3),$(1),$(2),$(4))
+	@if [ "$(3)" = "internal" ]; then \
+		echo "$(YELLOW)[INFO]$(RESET) Internal mode requires deployment secrets."; \
+		echo "$(YELLOW)[INFO]$(RESET) Run 'make env-secrets' to create or fill missing secrets."; \
+	fi
+	@if ! grep -Eq '^[[:space:]]*mode:[[:space:]]*$(2)([[:space:]]|$$)' $(1); then \
+		echo "ERROR: $(3) profile requires auth.mode=$(2)"; exit 1; \
+	fi
+	@if ! grep -Eq '^[[:space:]]*backend:[[:space:]]*$(4)([[:space:]]|$$)' $(1); then \
+		echo "ERROR: $(3) profile requires evaluation_store.backend=$(4)"; exit 1; \
+	fi
+	$(MAKE) _docker-infer DEPLOYMENT_CONFIG=$(1)
+endef
+
+docker-infer-internal:
+	$(call run_infer_profile,deploy-config/profiles/infer_deploy.internal.yaml,api_key,internal,sqlite)
+
+docker-infer-public:
+	$(call run_infer_profile,deploy-config/profiles/infer_deploy.public.yaml,none,public,none)
 
 
 
 docker-stop:
 	$(call check_runtime)
 	@echo "[INFO] Stopping containers..."
+	@$(RUNTIME) stop vqa-dev 2>/dev/null || true
 	@$(RUNTIME) stop vqa-infer 2>/dev/null || true
 	@$(RUNTIME) stop vqa-nginx 2>/dev/null || true
 	@$(RUNTIME) stop vqa-train 2>/dev/null || true
+	@$(OLLAMA_COMPOSE_ENV) $(COMPOSE) $(OLLAMA_COMPOSE_FILES) stop vqa-ollama 2>/dev/null || true
 	@echo "$(GREEN)[OK]$(RESET) Containers stopped."
+
+
+_docker-ollama-up:
+	$(call check_runtime)
+	$(call ensure_env_file)
+	@# Recreate the named service so containers created before the deploy-config
+	@# layout change cannot retain the obsolete ollama/Modelfile bind mount.
+	@$(RUNTIME) rm -f vqa-ollama 2>/dev/null || true
+	$(OLLAMA_COMPOSE_ENV) $(COMPOSE) $(OLLAMA_COMPOSE_FILES) up -d vqa-ollama
+	$(call wait_container_http,vqa-ollama,$(OLLAMA_HEALTH_URL),60)
+
+
+_docker-deploy-ollama: _docker-ollama-up
+	@echo "[INFO] Deploying Ollama model; configure OLLAMA_HTTP_PROXY/OLLAMA_HTTPS_PROXY only when needed."
+	$(OLLAMA_COMPOSE_ENV) $(COMPOSE) $(OLLAMA_COMPOSE_FILES) run --rm --no-deps -T \
+		--entrypoint /bin/sh vqa-ollama \
+		-c 'set -eu; export OLLAMA_HOST=http://vqa-ollama:11434; ollama pull qwen2.5vl:3b; ollama create deep-vqa-subjective -f /opt/deep-vqa/Modelfile'
+	@echo "$(GREEN)[OK]$(RESET) deep-vqa-subjective is ready."
+
+
+_docker-ollama-check:
+	@curl --noproxy '*' -fsS --max-time 10 "$(OLLAMA_HEALTH_URL)" >/dev/null \
+		&& echo "$(GREEN)[OK]$(RESET) Ollama endpoint is reachable." \
+		|| (echo "$(RED)[ERROR]$(RESET) Ollama endpoint is not reachable at http://127.0.0.1:11434."; exit 1)
+
+docker-deploy-check:
+	@failed=0; logs_needed=0; \
+	check_http() { \
+		name="$$1"; \
+		url="$$2"; \
+		optional="$$3"; \
+		max_attempts="$$4"; \
+		if ! $(RUNTIME) container inspect "$$name" >/dev/null 2>&1; then \
+			if [ "$$optional" = yes ]; then \
+				echo "[INFO] $$name (optional): not present"; \
+				return 0; \
+			fi; \
+			echo "$(RED)[ERROR]$(RESET) $$name is not present."; \
+			return 1; \
+		fi; \
+		state=$$($(RUNTIME) inspect --format '{{.State.Status}}' "$$name"); \
+		health=$$($(RUNTIME) inspect \
+			--format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unconfigured{{end}}' \
+			"$$name"); \
+		[ -n "$$health" ] || health=unconfigured; \
+		echo "[INFO] $$name: state=$$state health=$$health"; \
+		case "$$state/$$health" in \
+			exited/*|dead/*|removing/*|*/unhealthy) \
+				echo "$(RED)[ERROR]$(RESET) $$name cannot become ready."; \
+				logs_needed=1; \
+				return 1 ;; \
+			running/healthy) attempts=1 ;; \
+			running/unconfigured) attempts=2 ;; \
+			created/*|running/starting) attempts="$$max_attempts" ;; \
+			*) attempts=2 ;; \
+		esac; \
+		if [ "$$attempts" -gt 2 ]; then \
+			wait_seconds=$$((attempts * 2)); \
+			echo "[INFO] Waiting up to $$wait_seconds seconds for $$name..."; \
+		fi; \
+		for i in $$(seq 1 $$attempts); do \
+			if curl --noproxy '*' -fsS --max-time 5 "$$url" >/dev/null 2>&1; then \
+				echo "$(GREEN)[OK]$(RESET) $$name endpoint is healthy."; \
+				return 0; \
+			fi; \
+			[ "$$i" -lt "$$attempts" ] && sleep 2; \
+		done; \
+		echo "$(RED)[ERROR]$(RESET) $$name endpoint failed."; \
+		logs_needed=1; \
+		return 1; \
+	}; \
+	check_http vqa-infer "$(API_HEALTH_URL)" no 60 || failed=1; \
+	check_http vqa-nginx "$(WEB_HEALTH_URL)" yes 30 || failed=1; \
+	check_http vqa-ollama "$(OLLAMA_HEALTH_URL)" yes 60 || failed=1; \
+	if [ "$$failed" -ne 0 ]; then \
+		if [ "$$logs_needed" -ne 0 ]; then \
+			echo "$(YELLOW)[INFO]$(RESET) Recent deployment logs:"; \
+			for name in vqa-infer vqa-nginx vqa-ollama; do \
+				echo "--- $$name ---"; \
+				$(RUNTIME) logs --tail=60 "$$name" 2>/dev/null || true; \
+			done; \
+		fi; \
+		exit 1; \
+	fi; \
+	echo "$(GREEN)[OK]$(RESET) Deployment checks passed."
+
+
+docker-infer-internal-ollama:
+	$(MAKE) _docker-deploy-ollama
+	$(MAKE) docker-infer-internal OLLAMA_BASE_URL=http://vqa-ollama:11434
+
+docker-infer-public-ollama:
+	$(MAKE) _docker-deploy-ollama
+	$(MAKE) docker-infer-public OLLAMA_BASE_URL=http://vqa-ollama:11434
 
 
 
@@ -788,9 +918,12 @@ docker-purge-all:
 	$(call check_runtime)
 	@echo "[INFO] Stopping and removing containers..."
 	@$(COMPOSE) $(COMPOSE_FILES) down --remove-orphans 2>/dev/null || true
+	@$(OLLAMA_COMPOSE_ENV) $(COMPOSE) $(OLLAMA_COMPOSE_FILES) down --remove-orphans --volumes 2>/dev/null || true
 	@$(RUNTIME) ps -a --filter "name=vqa-train" -q | xargs -r $(RUNTIME) rm -f
+	@$(RUNTIME) ps -a --filter "name=vqa-dev" -q | xargs -r $(RUNTIME) rm -f
 	@$(RUNTIME) ps -a --filter "name=vqa-infer" -q | xargs -r $(RUNTIME) rm -f
 	@$(RUNTIME) ps -a --filter "name=vqa-nginx" -q | xargs -r $(RUNTIME) rm -f
+	@$(RUNTIME) ps -a --filter "name=vqa-ollama" -q | xargs -r $(RUNTIME) rm -f
 
 	@echo "[INFO] Removing dangling images..."
 	@$(RUNTIME) images --filter "dangling=true" -q | xargs -r $(RUNTIME) rmi -f

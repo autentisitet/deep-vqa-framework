@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.12+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.7.5-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -14,7 +14,34 @@
 
 Deep-VQA-Framework 提供从带质量标签的媒体数据到可用 IQA/VQA 模型的完整工程路径：数据检查与完整性审计、防止泄漏的分组划分、可复现训练与评估、实验产物管理、checkpoint 选择、批量推理以及容器化 API 部署。它的定位是一个可以持续扩展数据集和模型变体的图像/视频质量评估平台，而不是单一模型实现。
 
+### 产品边界
+
+核心产品是无参考图像/视频质量评估框架及其推理 API，能力分为四层：
+
+- **核心能力：** 数据集流程、IQA/VQA 训练、评估、checkpoint 管理和推理。
+- **部署能力：** FastAPI、Docker/Podman，以及单实例内网工作台或受保护的无状态 API。
+- **前端能力：** 统一的浏览器工作台，支持上传、评分、历史记录和模型解释。
+- **可选扩展：** 基于 Ollama 的技术质量描述和辅助主观评分，用于开发和快速验证。
+
+内网部署定位为单实例工作台，不是多租户 SaaS 账号系统。API Key 是部署级访问控制，不是用户身份或角色管理系统。公网部署应使用无状态存储后端，并在 API 网关或反向代理层增加保护。Ollama 是可选组件，不替代框架自身的 IQA/VQA 模型。
+
+多租户账号管理、通用媒体存储和托管式 SaaS 控制平面不在当前范围内。详见英文[知识库](knowledge/README.md)。
+
+### 部署边界
+
+当前支持的基线是单实例服务，通常拆分为两台主机：一台运行边缘 Nginx 和
+静态前端，另一台运行 FastAPI 与模型。启用 SQLite 时，数据库必须放在
+FastAPI 主机的本地磁盘；SQLite 不是网络数据库，不能由多台 API 主机共享。
+Ollama 可以单独放在受保护的内网主机上。
+
+企业级 TLS/WAF/API Gateway、身份提供商、多租户授权以及服务端数据库明确
+不属于本项目的实现范围，也不是 Deep-VQA-Framework 计划实现的功能。组织
+如果有需要，可以在服务外围提供这些基础设施。文档中的 API Key 只是可信
+单实例部署的服务级访问令牌，不是用户身份系统。
+
 当前默认模型使用 Swin-T 提取图像和视频逐帧空间特征；视频分支进一步使用位置编码和 Transformer 进行时序融合。训练完成后，选定的 checkpoint 可以交付到 `deploy/`，用于批量推理或 API 服务。
+
+媒体后缀由统一注册表分类。JPG/PNG/WEBP 以及常见的 MP4/MOV/MKV 是默认训练和服务格式；HEIC、AVIF、GIF 以及专业视频容器只标记为实验格式。后缀名不被视为文件身份，OpenCV/Decord 必须实际成功解码文件内容，因此伪造后缀的文件会在处理阶段被拒绝。
 
 ---
 
@@ -25,7 +52,10 @@ Deep-VQA-Framework 提供从带质量标签的媒体数据到可用 IQA/VQA 模�
 - [训练流程](#training-pipeline)
 - [评估与指标](#evaluation-metrics)
 - [部署与推理 API](#deployment-api)
-- [部署指南](deploy/GUIDE_zh.md)
+- [开发者知识库（英文）](knowledge/README.md)
+- [部署指南（英文）](knowledge/deployment.md)
+- [前端指南（英文）](knowledge/frontend.md)
+- [Ollama 指南（英文）](knowledge/ollama.md)
 - [前端](frontend/index.html)
 - [项目主要结构](#project-main-structure)
 - [Docker / Podman 支持](#docker-support)
@@ -101,7 +131,7 @@ flowchart LR
 | 图像 | `[B, 3, H, W]` | 配置指定的 ImageNet 主干（默认 Swin-T，也支持 ResNet50） | RGB、bicubic resize 232、center crop 224、ImageNet mean/std |
 | 视频 | `[B, F, 3, H, W]` | Swin-T ImageNet backbone (`LayerNorm`) + Transformer 时序融合 | RGB 帧、bicubic resize 232、center crop 224、`[0, 1]`、ImageNet mean/std |
 
-当前模型不再保留旧 Swin 兼容 shim。检查点应由当前 `IQAVQANet` 实现生成。
+当前代码库要求检查点由现行 `IQAVQANet` 实现生成。本仓库没有 `v0.7.3` tag，因此这里不对无法核验的历史版本差异作断言。
 
 ### 损失函数：任务感知混合损失
 
@@ -129,7 +159,7 @@ flowchart LR
 
 ```bash
 # 初始化环境并安装依赖
-make install
+make install DEV=1
 
 # 检查环境状态
 make info
@@ -164,10 +194,10 @@ uv run python -m src.main --model swin_vqa --dataset t2vqa-db
 *注意：默认情况下，`make` 命令使用 `DEBUG=0`。如有需要，可通过追加 `DEBUG=1` 来覆盖此设置。*
 
 > [!NOTE]
-> 默认 IQA 配置是 `swin_iqa`（图像/Swin-T）；`resnet_iqa` 保留为可选的 ResNet50 回退配置，`swin_vqa` 使用 Swin-T 加 Transformer 时序融合。模型配置按 `config/models/*.yaml` 的文件名加载。
+> 默认 IQA 配置是 `swin_iqa`（图像/Swin-T）；`resnet_iqa` 保留为可选的 ResNet50 回退配置，`swin_vqa` 使用 Swin-T 加 Transformer 时序融合。模型配置按 `train-config/models/*.yaml` 的文件名加载。
 
 > [!NOTE]
-> `scripts/setup_env.sh` 现在会安装并验证 `hatchling`，因此 `deploy/` 可以直接通过 `pyproject.toml` 完成构建，无需额外手动配置。
+> `scripts/setup_env.sh` 会安装并验证 `hatchling`，因此 `deploy/` 可以直接通过 `pyproject.toml` 完成构建，无需额外手动配置。
 
 > [!WARNING]
 > `--skip_integrity` 只建议用于快速调试。正常训练应保留完整性检查，避免缺失或损坏样本进入交叉验证。
@@ -197,8 +227,28 @@ uv run python -m src.main --model swin_vqa --dataset t2vqa-db
 - **Fold 汇总与比较**：每折 PLCC/SROCC/RMSE/R² 汇总、稳定性视图与对比柱状图
 - **样本级误差报告**：完整预测 manifest，以及自动导出的 top-k 高误差样本
 - **特征可解释性**：图像输入的 backbone 特征图网格与回归 Grad-CAM 热力图
+- **主观质量评估**：可选的 Ollama 视觉小模型，为当前前端请求生成质量描述、评分和贝叶斯后验
 
 浏览器前端聚焦于媒体上传、无参考 IQA/VQA 推理、模型输出和可解释性。对于训练集分布分析，建议采用离线特征产物流程：先对训练集全部样本提取特征，在训练划分上一次性拟合 PCA，保存投影和归一化参数；出现问题样本时，将它投影到同一个特征空间中进行对比。
+
+可选的主观评估使用 Ollama 和 `deploy-config/ollama/Modelfile`。服务会对当前图像或少量视频帧请求技术质量描述及 0–100 分，再使用中性 Beta 先验计算贝叶斯后验分数和近似 95% 区间。该结果仅返回给当前请求，不写入 SQLite 或 JSONL 历史记录。
+
+```bash
+make env-secrets
+make docker-infer-internal-ollama
+# 统一健康检查：
+make docker-deploy-check
+make docker-stop
+```
+
+`make docker-infer` 是默认 internal 模式，不会启动 Ollama。
+`make docker-infer-internal-ollama` 会启动可选的 Ollama 容器，并初始化
+`qwen2.5vl:3b` 模型。
+
+Ollama Compose 会挂载 `Modelfile`，并使用 `vqa-ollama` 镜像临时执行模型初始化来下载
+`qwen2.5vl:3b` 和创建 `deep-vqa-subjective`；仅挂载 Modelfile 不会自动创建模型。
+
+详细配置见英文 [Ollama 指南](knowledge/ollama.md)。
 
 这样既保持训练好的无参考 IQA/VQA 模型作为核心能力，也能让数据集覆盖范围和异常样本分析可复现。保存的特征产物应包含特征提取器/checkpoint 标识、数据集划分、样本 ID、特征归一化参数、PCA 均值与主成分以及二维坐标。
 
@@ -228,6 +278,8 @@ uv run python -m src.data.eda.feature_distribution project \
 
 ## 部署与推理 API <a id="deployment-api"></a>
 
+完整的部署矩阵、认证配置、存储模式、Ollama 变体、API 路由、批量 CLI 和排障说明请参阅英文[部署指南](knowledge/deployment.md)。本节只保留项目级入口和简要说明。
+
 训练完成后，选定的 checkpoint 会发布到对应任务目录：
 
 ```text
@@ -242,7 +294,7 @@ checkpoint 的使用和发布限制请参阅 [DISCLAIMER_zh.md](DISCLAIMER_zh.md
 ### FastAPI 服务
 
 主机直运行、Docker/Podman 启动、API 路由、批量 CLI、代理、SELinux 挂载和排障
-请参阅专门的[中文部署指南](deploy/GUIDE_zh.md)，也可查看[英文版](deploy/GUIDE.md)。
+请参阅英文[部署指南](knowledge/deployment.md)。
 
 ```bash
 uv run python -m uvicorn deploy.api:app --host 127.0.0.1 --port 8000
@@ -262,7 +314,9 @@ OpenAPI:    http://localhost:8000/api/openapi.json
 ```
 
 主要 REST 资源包括 `GET /api/v1/health`、`GET /api/v1/models`、
-`GET /api/v1/models/{model_id}` 和 `POST /api/v1/evaluations?model_id=iqa`。
+`GET /api/v1/models/{model_id}`、`GET /api/v1/frontend-evaluations`、
+`POST /api/v1/evaluations?model_id=iqa`，以及不写入历史的
+`POST /api/v1/subjective-assessments`。
 评估接口接收一个 multipart `file`，并返回带类型约束的评估资源。
 
 服务启动时还会把动态生成的接口 schema 保存到 `docs/openapi.json`，
@@ -286,10 +340,13 @@ uv run python -m deploy.cli -i examples/
 uv run python -m deploy.cli -i examples/images/sample.jpg --visualize
 ```
 
+可视化产物会持久化到 `reports/iqa-test/`。前端会将缩略原图与特征图、
+Grad-CAM 并列显示；双击任意对比图片即可打开大图预览。
+
 CLI 会选择对应任务的 checkpoint，自动识别图像和视频文件，并将 JSON 结果写入
 `reports/iqa-test/` 或 `reports/vqa-test/`。`test-images`、`test-videos` 和
 `test-all` 这些 Make 目标都会调用这个 CLI。MOS 范围会根据 checkpoint 中的数据集
-标识，从 `config/dataset_config.yaml` 读取。
+标识，从 `train-config/dataset_config.yaml` 读取。
 
 ---
 
@@ -302,10 +359,10 @@ deep-vqa-framework/
 ├── DISCLAIMER.md           # 法律责任与资源使用政策
 ├── pyproject.toml          # 依赖、环境与构建管理 (uv + hatchling)
 │
-├── config/                 # YAML 配置文件（用户可编辑）
-│   ├── basic.yaml            # 系统与训练的全局默认设置
+├── train-config/           # 训练默认值、数据集元数据和模型 YAML 配置
+│   ├── basic.yaml            # 系统与训练默认设置
 │   ├── dataset_config.yaml   # 数据集特定元数据
-│   └── models/                 # 模型架构参数
+│   └── models/               # 模型架构参数
 │
 ├── datasets/                 # 数据存储与符号链接路由
 │   ├── KoNViD-1k/               # 视频质量数据集
@@ -313,13 +370,13 @@ deep-vqa-framework/
 │   └── TID2013/                  # 图像质量数据集
 │
 ├── docs/                     # 交互式架构图与使用手册
-│   ├── pipeline.html            # 系统执行流程与模块流转
-│   └── Cloud_Platform_Rental_Guide.md
+│   └── openapi.json             # 生成的 API schema
 |
-├── reports/                  # pip-audit、SBOM、safety 的安全报告
+├── reports/                  # 推理产物、特征图、Grad-CAM 与安全报告
+│   ├── iqa-test/                # IQA JSON 与特征图/Grad-CAM 报告
+│   └── vqa-test/                # VQA 批量推理 JSON 报告
 |
 ├── results/
-│   ├── diagnostics/             # 特征图与 Grad-CAM 输出
 |   ├── {dataset}/
 │   │   ├── train_logs/           # 训练历史记录、CSV 日志
 │   │   ├── plots/                # 损失曲线、残差图
@@ -330,10 +387,11 @@ deep-vqa-framework/
 │   │   └── corrupted/            # 隔离的损坏媒体文件与被拒绝标签备份
 │   └── scripts_logs/             # Shell 脚本日志 (setup, data, etc.)
 |
-├── docker/                   # 容器配置
-│   ├── docker-compose.yaml      # 主 compose 配置
-│   ├── docker-compose.docker.yaml # Docker GPU 支持
-│   └── docker-compose.podman.yaml # Podman GPU 支持
+├── deploy-config/            # 部署 profile、Compose、Nginx、Ollama
+│   ├── profiles/               # internal/public 部署策略
+│   ├── compose/                # 基础 Compose 与 Docker/Podman 覆盖
+│   ├── nginx/                  # 反向代理配置
+│   └── ollama/                 # 可选 Ollama Compose 与 Modelfile
 │
 ├── .github/workflows/        # CI/CD 流水线
 │   └── ci.yaml                 # 持续集成
@@ -355,7 +413,6 @@ deep-vqa-framework/
 │
 ├── frontend/                # 面向模型推理的静态浏览器界面
 │   ├── index.html                 # 上传、推理和可解释性界面
-│   └── index.html                 # 上传、推理和可解释性界面
 │
 └── src/                       # 核心框架逻辑
     ├── main.py                   # 全局执行入口
@@ -372,7 +429,7 @@ deep-vqa-framework/
 
 ## Docker / Podman 支持 <a id="docker-support"></a>
 
-完整部署流程请参阅[中文部署指南](deploy/GUIDE_zh.md)，也可查看[英文部署指南](deploy/GUIDE.md)。
+完整部署流程和内网/公网模式矩阵请参阅英文[部署指南](knowledge/deployment.md)。前端登录、历史记录、无状态模式和无障碍说明见英文[前端指南](knowledge/frontend.md)。
 
 该框架支持使用 Docker 和 Podman 进行容器化开发与部署。
 
@@ -384,6 +441,9 @@ make docker-dev
 
 # 在容器内运行训练
 make docker-train
+
+# 创建 internal 模式所需密钥（可重复执行）
+make env-secrets
 
 # 启动推理 API 服务
 make docker-infer
@@ -411,10 +471,37 @@ make docker-manage
 
 | 组件 | 描述 |
 | :--- | :--- |
-| `Dockerfile` | 多阶段构建：`base`（共享依赖）、`train`（训练）、`prod`（推理） |
-| `docker-compose.yaml` | 主 Compose 配置文件，包含 API 健康检查、`json-file` 日志轮转、模型/报告/缓存挂载以及持久化 OpenAPI 输出 |
-| `docker-compose.docker.yaml` | Docker 专用 GPU 支持，并为构建阶段启用 host 网络 |
-| `docker-compose.podman.yaml` | Podman 专用 GPU 支持，并为构建阶段启用 host 网络 |
+| `Dockerfile` | 多阶段构建：`base`（共享依赖）、`dev`（挂载式开发 shell）、`train`（训练）、`prod`（推理） |
+| `deploy-config/compose/docker-compose.yaml` | 基础服务、bridge 网络、端口、挂载和健康检查 |
+| `deploy-config/compose/docker-compose.docker.yaml` | Docker 专用 NVIDIA runtime 配置 |
+| `deploy-config/compose/docker-compose.podman.yaml` | Podman GPU device、SELinux 选项和挂载标签 |
+
+### 镜像、服务、容器与网络的关系
+
+这几个概念不是同义词：镜像是构建或下载得到的模板；Compose service
+是镜像、挂载、环境变量、端口、健康检查和网络的声明；容器是该 service
+创建出的运行实例。项目中的自定义镜像来自 `Dockerfile` 的 `dev`、`train`
+和 `prod` 阶段，Nginx 与 Ollama 使用官方镜像。
+
+默认推理链路如下：
+
+```text
+浏览器 :8000 -> vqa-nginx:80 -> vqa-infer:8000 -> IQA/VQA checkpoint
+                                      └-> vqa-ollama:11434（启用主观评估时）
+```
+
+`backend` 是 Compose 创建的单机 bridge 网络。容器之间使用 service 名称
+通信（例如 `vqa-infer:8000`），宿主机访问则使用发布端口：Nginx `8000`、
+FastAPI `8001`，Ollama 可选 `11434`。这些端口默认只绑定到
+`127.0.0.1`，不能把宿主机端口和容器内部端口混为一谈。
+
+启动顺序是：先构建/拉取镜像；`vqa-infer` 加载模型并通过健康检查后，
+`vqa-nginx` 才启动。Ollama 是可选且独立的，`*-ollama` 命令会先启动它、
+初始化模型，再让 FastAPI 使用 `http://vqa-ollama:11434`。模型初始化是
+同一 Ollama 镜像执行的一次性任务，不是长期运行的独立 service。
+
+因此这是一组小型单机服务组合，不是 Kubernetes 微服务平台；Docker/Podman
+Compose 文件只负责运行时差异（GPU、SELinux 挂载标签），不会改变应用拓扑。
 
 Makefile 会自动识别 Docker 或 Podman。Podman 用户直接运行 `make docker-*` 即可，不需要设置 `alias docker=podman`；只有手动运行容器命令时才可能需要 alias。
 
@@ -423,21 +510,27 @@ Makefile 会自动识别 Docker 或 Podman。Podman 用户直接运行 `make doc
 可根据开发场景选择启动模式：
 
 ```bash
-make docker-api       # API-only 开发模式，直接访问 http://127.0.0.1:8001
-make docker-infer     # 完整 API + Nginx + 前端模式，自动等待并验证健康状态
+make docker-infer              # 完整 API + Nginx + 前端，默认使用 internal 策略
+# 无状态公网策略：
+make docker-infer DEPLOYMENT_MODE=public
 ```
 
 如果主机已经准备好 Python 环境和模型检查点，也可以不使用容器，直接运行 API：
 
 ```bash
-uv run python -m uvicorn deploy.api:app --host 0.0.0.0 --port 8000
+uv run python -m uvicorn deploy.api:app --host 127.0.0.1 --port 8000
 ```
 
-主机直运行时访问 `http://127.0.0.1:8000/v1/health` 和 `http://127.0.0.1:8000/docs`；使用 Nginx 时使用带 `/api` 前缀的路径，例如 `/api/v1/health`。
+主机直运行时使用 `--host 127.0.0.1`；容器镜像使用 `0.0.0.0` 是为了
+让端口映射能够访问容器内监听器。主机直运行时访问
+`http://127.0.0.1:8000/v1/health` 和 `http://127.0.0.1:8000/docs`；使用
+Nginx 时使用带 `/api` 前缀的路径，例如 `/api/v1/health`。
 
-前端的响应式与无障碍检查说明见 [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md)。页面支持键盘操作和减少动画模式；正式声明符合 WCAG 仍需要运行 Lighthouse/axe 检查，并进行人工辅助技术测试。
+前端行为、登录流程、存储模式相关能力和主机直运行预览见英文[前端指南](knowledge/frontend.md)。
 
-前端评估记录会以每行一个 JSON 对象的 JSONL 格式追加到 `reports/frontend-evaluations.jsonl`。每条记录包含 `timestamp`、`file_name`、`file_hash`（SHA-256）、`task_type`、`model_used`、`mos_score`、`mos_interval` 和 `inference_time_ms`。
+前端评估历史可通过 deployment profiles 插拔：内网单实例部署使用 `evaluation_store.backend: sqlite`，公网无状态部署使用 `none`。启用 SQLite 时，每条记录包含浏览器会话范围，以及 `timestamp`、`file_name`、`file_hash`（SHA-256）、`task_type`、`model_used`、`mos_score`、`mos_interval` 和 `inference_time_ms`；前端只读取当前会话的记录，并可将已选或全部记录导出为 JSONL。会话范围只是隔离便利，不是用户身份认证。
+
+上传和 SQLite 安全限制统一定义在 deployment profiles：上传默认上限为 100 MiB、读取超时为 30 秒；前端 SQLite 数据库默认上限为 256 MiB、忙等待超时为 5 秒。修改该文件即可调整共享部署策略。主机相关的服务地址、端口、代理和可选 SQLite 路径仍放在 `.env` 中。
 
 数据集脚本会检测 `http_proxy`/`HTTP_PROXY`。在 AutoDL 云 GPU 实例上，下载数据集前可以先启用平台代理：
 
@@ -445,23 +538,26 @@ uv run python -m uvicorn deploy.api:app --host 0.0.0.0 --port 8000
 source /etc/network_turbo
 ```
 
-Compose 会将宿主机可选的大小写代理变量传入容器，同时自动在 `NO_PROXY`/`no_proxy` 中追加 localhost、Compose 服务名和容器名。因此，无论宿主机是否启用代理，健康检查及 API 与 Nginx 之间的容器通信都不会绕行代理。
+Compose 只会将代理变量传入需要下载依赖或模型的服务。Nginx 不需要代理配置；推理和 Ollama 服务会在 `NO_PROXY`/`no_proxy` 中保留内部服务名。
 
 通用 Docker Compose 文件使用可移植的普通 bind mount；在启用 SELinux 的 Fedora/RHEL 主机上，Podman overlay 会为 Nginx 的前端目录和 `default.conf` 自动追加 `:Z` 并重新标记文件。若容器是在加入该选项前创建的，请先执行 `podman-compose down`，再重新 `up -d` 创建容器。
 
-容器内的 torch/uv 缓存挂载到 `/app/.cache`。运行服务会设置 `XDG_CACHE_HOME=/app/.cache`、`TORCH_HOME=/app/.cache/torch` 和 `UV_CACHE_DIR=/app/.cache/uv`，因此已下载的 torchvision backbone 可以复用。
+宿主机 `.cache` 目录会挂载到容器的 `/app/.cache`。生产镜像定义了
+`XDG_CACHE_HOME=/app/.cache` 和 `TORCH_HOME=/app/.cache/torch`，因此已下载
+的 torchvision/PyTorch 模型可以复用。`UV_CACHE_DIR` 不放入生产镜像，因为
+uv 只用于构建和开发，不是服务运行时依赖。
 
-如果宿主机代理绑定在 `127.0.0.1`，需要区分运行阶段和构建阶段：服务的 `network_mode: host` 只作用于运行容器，Dockerfile 的 `RUN` 步骤需要 build network。compose overlay 已设置 `build.network: host`；若要将代理变量传入 Dockerfile 构建，运行：
+如果宿主机代理绑定在 `127.0.0.1`，Dockerfile 构建步骤需要能够访问宿主机代理。若要将代理变量传入 Dockerfile 构建，运行：
 
 ```bash
-make docker-train BUILD_ARGS='--build-arg USE_BUILD_PROXY=true'
+make docker-train BUILD_ARGS='--build-arg USE_BUILD_PROXY=true' DEV=1
 ```
 
 ---
 
 ## 系统概览 <a id="system-overview"></a>
 
-交互式流水线图见 [docs/pipeline.html](docs/pipeline.html)。
+交互式流水线图见英文[知识库架构图](knowledge/architecture.html)。
 
 ---
 
@@ -536,6 +632,9 @@ make archive ARCHIVE_ARGS="--datasets"
 
 ## 依赖项安全 <a id="dependency-security"></a>
 
+安全问题请通过
+[SECURITY.md](SECURITY.md) 中的私下报告流程提交，不要公开利用步骤或敏感信息。
+
 该框架包含用于审计依赖项的安全工具：
 
 | 命令 | 用途 |
@@ -554,7 +653,7 @@ make archive ARCHIVE_ARGS="--datasets"
 
 - **框架**: [MIT](LICENSE)
 - **作者**: [@autentisitet](https://github.com/autentisitet)
-- **版本**: 0.7.5
+- **版本**: 0.9.0
 
 ---
 

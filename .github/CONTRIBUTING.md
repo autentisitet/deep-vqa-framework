@@ -10,7 +10,7 @@ We use `uv` for dependency management. Run `make install` to install dependencie
 
 ```bash
 # Install core + dev + security tools (recommended for contributors)
-make install INSTALL_ARGS="--dev --security"
+make install DEV=1 SECURITY=1
 
 # Verify environment
 make info
@@ -20,7 +20,7 @@ make info
 > If you're in China, add `--mirror` to use TUNA mirror for faster downloads:
 
 ```bash
-make install INSTALL_ARGS="--mirror --dev --security" 
+make install MIRROR=1 DEV=1 SECURITY=1
 make info
 ```
 
@@ -29,13 +29,13 @@ make info
 If you're not using a Debian/Ubuntu system or prefer isolated environments, use Docker or Podman:
 
 ```bash
-# Enter development container (interactive shell)
+# Enter development container (interactive shell; source and tests are mounted)
 make docker-dev
 
 # Run training in container
 make docker-train
 
-# Start inference API service
+# Start the default internal inference API and Nginx stack
 make docker-infer
 
 # Stop all containers
@@ -48,6 +48,30 @@ make docker-manage
 > [!NOTE]
 > The Makefile auto-detects your container runtime (Docker or Podman).
 > No manual configuration needed.
+
+### Optional Ollama workflow
+
+The normal contributor workflow is `make docker-infer`; it defaults to the
+internal profile and does not require
+Ollama. To develop or test the subjective-quality endpoint, run these commands
+from the repository root:
+
+```bash
+# Create the local configuration and required internal-mode secrets.
+make env-secrets
+
+# Start Ollama, initialize deep-vqa-subjective, and start the browser-facing stack.
+make docker-infer-internal-ollama
+```
+
+Use `make docker-infer DEPLOYMENT_MODE=public` for the stateless public profile.
+Deployment policy files are under `deploy-config/profiles/`; training and model
+YAML files are under `train-config/`.
+
+Ollama is called by FastAPI and is not exposed through Nginx. On Podman, a
+host-loopback proxy must be made container-reachable, for example
+`OLLAMA_HTTP_PROXY=http://host.containers.internal:7897`; see
+[knowledge/ollama.md](../knowledge/ollama.md) for proxy and SELinux details.
 
 ---
 
@@ -93,8 +117,8 @@ Dependencies are managed via `pyproject.toml` with three categories:
 | Category | Group | Description | Install with |
 | :--- | :--- | :--- | :--- |
 | **Core** | `[project.dependencies]` | Runtime dependencies (PyTorch, FastAPI, OpenCV, etc.) | `make setup` |
-| **Dev** | `[project.optional-dependencies]` | Development tools (ruff, mypy, black, isort) | `make setup SETUP_ARGS="--mirror --dev"` |
-| **Security** | `[project.optional-dependencies]` | Security scanners (pip-audit, cyclonedx-bom, safety) | `make setup SETUP_ARGS="--mirror --security"` |
+| **Dev** | `[project.optional-dependencies]` | Development tools (pytest, ruff, mypy, black, isort) | `make setup DEV=1 MIRROR=1` |
+| **Security** | `[project.optional-dependencies]` | Security scanners (pip-audit, cyclonedx-bom, safety) | `make setup SECURITY=1 MIRROR=1` |
 
 ---
 
@@ -125,7 +149,7 @@ When reporting a bug, please include:
 
 ---
 
-## 7. Pull Request Checklist
+## 7. Contribution Checklist
 
 Before submitting a PR, ensure:
 
@@ -135,6 +159,6 @@ Before submitting a PR, ensure:
 - [ ] Smoke test passes
 - [ ] Commit messages follow Conventional Commits
 - [ ] Documentation has been updated if needed
-- [ ] PR has a clear description of changes
+- [ ] Change description and validation steps are clear
 
 Thank you for contributing! 🎉
