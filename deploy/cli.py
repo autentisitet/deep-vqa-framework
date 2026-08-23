@@ -51,12 +51,21 @@ from src.visualization.feature_visualizer import FeatureVisualizer, load_image_t
 
 REPORTS_DIR = cfg.resolve(cfg.reports_dir)
 SUPPORTED_EXTS = {ext.lower() for ext in (cfg.image_exts | cfg.video_exts)}
+<<<<<<< HEAD
 DATASET_CONFIG_PATH = cfg.resolve(Path("train-config/dataset_config.yaml"))
 VISUALIZATION_OUTPUT_DIR = cfg.resolve(cfg.reports_dir / "iqa-test" / "visualizations")
 
 
 def load_dataset_mos_range(config: object) -> tuple[float, float]:
     """Load MOS bounds from train-config/dataset_config.yaml for the checkpoint dataset."""
+=======
+DATASET_CONFIG_PATH = cfg.resolve(Path("config/dataset_config.yaml"))
+VISUALIZATION_OUTPUT_DIR = cfg.resolve(Path("results/diagnostics"))
+
+
+def load_dataset_mos_range(config: object) -> tuple[float, float]:
+    """Load MOS bounds from config/dataset_config.yaml for the checkpoint dataset."""
+>>>>>>> origin/main
     if not DATASET_CONFIG_PATH.exists():
         raise FileNotFoundError(f"Dataset configuration not found: {DATASET_CONFIG_PATH}")
 

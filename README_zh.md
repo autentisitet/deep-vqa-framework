@@ -4,7 +4,11 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.12+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+<<<<<<< HEAD
 [![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+=======
+[![Version](https://img.shields.io/badge/version-0.7.5-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+>>>>>>> origin/main
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -52,10 +56,14 @@ Ollama 可以单独放在受保护的内网主机上。
 - [训练流程](#training-pipeline)
 - [评估与指标](#evaluation-metrics)
 - [部署与推理 API](#deployment-api)
+<<<<<<< HEAD
 - [开发者知识库（英文）](knowledge/README.md)
 - [部署指南（英文）](knowledge/deployment.md)
 - [前端指南（英文）](knowledge/frontend.md)
 - [Ollama 指南（英文）](knowledge/ollama.md)
+=======
+- [部署指南](deploy/GUIDE_zh.md)
+>>>>>>> origin/main
 - [前端](frontend/index.html)
 - [项目主要结构](#project-main-structure)
 - [Docker / Podman 支持](#docker-support)
@@ -227,6 +235,7 @@ uv run python -m src.main --model swin_vqa --dataset t2vqa-db
 - **Fold 汇总与比较**：每折 PLCC/SROCC/RMSE/R² 汇总、稳定性视图与对比柱状图
 - **样本级误差报告**：完整预测 manifest，以及自动导出的 top-k 高误差样本
 - **特征可解释性**：图像输入的 backbone 特征图网格与回归 Grad-CAM 热力图
+<<<<<<< HEAD
 - **主观质量评估**：可选的 Ollama 视觉小模型，为当前前端请求生成质量描述、评分和贝叶斯后验
 
 浏览器前端聚焦于媒体上传、无参考 IQA/VQA 推理、模型输出和可解释性。对于训练集分布分析，建议采用离线特征产物流程：先对训练集全部样本提取特征，在训练划分上一次性拟合 PCA，保存投影和归一化参数；出现问题样本时，将它投影到同一个特征空间中进行对比。
@@ -260,6 +269,21 @@ uv run python -m src.data.eda.feature_distribution build \
   --checkpoint deploy/vqa-models/konvid-1k_best.pt \
   --dataset konvid-1k
 
+=======
+
+浏览器前端聚焦于媒体上传、无参考 IQA/VQA 推理、模型输出和可解释性。对于训练集分布分析，建议采用离线特征产物流程：先对训练集全部样本提取特征，在训练划分上一次性拟合 PCA，保存投影和归一化参数；出现问题样本时，将它投影到同一个特征空间中进行对比。
+
+这样既保持训练好的无参考 IQA/VQA 模型作为核心能力，也能让数据集覆盖范围和异常样本分析可复现。保存的特征产物应包含特征提取器/checkpoint 标识、数据集划分、样本 ID、特征归一化参数、PCA 均值与主成分以及二维坐标。
+
+该流程已在 `src/data/eda/feature_distribution.py` 中实现：
+
+```bash
+# 只使用 train 划分拟合训练集分布
+uv run python -m src.data.eda.feature_distribution build \
+  --checkpoint deploy/vqa-models/konvid-1k_best.pt \
+  --dataset konvid-1k
+
+>>>>>>> origin/main
 # 将问题样本投影到已保存的同一空间
 uv run python -m src.data.eda.feature_distribution project \
   --artifact results/konvid-1k/eda/feature_distribution/train_pca.npz \
@@ -294,7 +318,11 @@ checkpoint 的使用和发布限制请参阅 [DISCLAIMER_zh.md](DISCLAIMER_zh.md
 ### FastAPI 服务
 
 主机直运行、Docker/Podman 启动、API 路由、批量 CLI、代理、SELinux 挂载和排障
+<<<<<<< HEAD
 请参阅英文[部署指南](knowledge/deployment.md)。
+=======
+请参阅专门的[中文部署指南](deploy/GUIDE_zh.md)，也可查看[英文版](deploy/GUIDE.md)。
+>>>>>>> origin/main
 
 ```bash
 uv run python -m uvicorn deploy.api:app --host 127.0.0.1 --port 8000
@@ -314,9 +342,13 @@ OpenAPI:    http://localhost:8000/api/openapi.json
 ```
 
 主要 REST 资源包括 `GET /api/v1/health`、`GET /api/v1/models`、
+<<<<<<< HEAD
 `GET /api/v1/models/{model_id}`、`GET /api/v1/frontend-evaluations`、
 `POST /api/v1/evaluations?model_id=iqa`，以及不写入历史的
 `POST /api/v1/subjective-assessments`。
+=======
+`GET /api/v1/models/{model_id}` 和 `POST /api/v1/evaluations?model_id=iqa`。
+>>>>>>> origin/main
 评估接口接收一个 multipart `file`，并返回带类型约束的评估资源。
 
 服务启动时还会把动态生成的接口 schema 保存到 `docs/openapi.json`，
@@ -346,7 +378,11 @@ Grad-CAM 并列显示；双击任意对比图片即可打开大图预览。
 CLI 会选择对应任务的 checkpoint，自动识别图像和视频文件，并将 JSON 结果写入
 `reports/iqa-test/` 或 `reports/vqa-test/`。`test-images`、`test-videos` 和
 `test-all` 这些 Make 目标都会调用这个 CLI。MOS 范围会根据 checkpoint 中的数据集
+<<<<<<< HEAD
 标识，从 `train-config/dataset_config.yaml` 读取。
+=======
+标识，从 `config/dataset_config.yaml` 读取。
+>>>>>>> origin/main
 
 ---
 
@@ -377,6 +413,7 @@ deep-vqa-framework/
 │   └── vqa-test/                # VQA 批量推理 JSON 报告
 |
 ├── results/
+│   ├── diagnostics/             # 特征图与 Grad-CAM 输出
 |   ├── {dataset}/
 │   │   ├── train_logs/           # 训练历史记录、CSV 日志
 │   │   ├── plots/                # 损失曲线、残差图
@@ -413,6 +450,10 @@ deep-vqa-framework/
 │
 ├── frontend/                # 面向模型推理的静态浏览器界面
 │   ├── index.html                 # 上传、推理和可解释性界面
+<<<<<<< HEAD
+=======
+│   └── index.html                 # 上传、推理和可解释性界面
+>>>>>>> origin/main
 │
 └── src/                       # 核心框架逻辑
     ├── main.py                   # 全局执行入口
@@ -429,7 +470,11 @@ deep-vqa-framework/
 
 ## Docker / Podman 支持 <a id="docker-support"></a>
 
+<<<<<<< HEAD
 完整部署流程和内网/公网模式矩阵请参阅英文[部署指南](knowledge/deployment.md)。前端登录、历史记录、无状态模式和无障碍说明见英文[前端指南](knowledge/frontend.md)。
+=======
+完整部署流程请参阅[中文部署指南](deploy/GUIDE_zh.md)，也可查看[英文部署指南](deploy/GUIDE.md)。
+>>>>>>> origin/main
 
 该框架支持使用 Docker 和 Podman 进行容器化开发与部署。
 
@@ -471,6 +516,7 @@ make docker-manage
 
 | 组件 | 描述 |
 | :--- | :--- |
+<<<<<<< HEAD
 | `Dockerfile` | 多阶段构建：`base`（共享依赖）、`dev`（挂载式开发 shell）、`train`（训练）、`prod`（推理） |
 | `deploy-config/compose/docker-compose.yaml` | 基础服务、bridge 网络、端口、挂载和健康检查 |
 | `deploy-config/compose/docker-compose.docker.yaml` | Docker 专用 NVIDIA runtime 配置 |
@@ -502,6 +548,12 @@ FastAPI `8001`，Ollama 可选 `11434`。这些端口默认只绑定到
 
 因此这是一组小型单机服务组合，不是 Kubernetes 微服务平台；Docker/Podman
 Compose 文件只负责运行时差异（GPU、SELinux 挂载标签），不会改变应用拓扑。
+=======
+| `Dockerfile` | 多阶段构建：`base`（共享依赖）、`train`（训练）、`prod`（推理） |
+| `docker-compose.yaml` | 主 Compose 配置文件，包含 API 健康检查、`json-file` 日志轮转、模型/报告/缓存挂载以及持久化 OpenAPI 输出 |
+| `docker-compose.docker.yaml` | Docker 专用 GPU 支持，并为构建阶段启用 host 网络 |
+| `docker-compose.podman.yaml` | Podman 专用 GPU 支持，并为构建阶段启用 host 网络 |
+>>>>>>> origin/main
 
 Makefile 会自动识别 Docker 或 Podman。Podman 用户直接运行 `make docker-*` 即可，不需要设置 `alias docker=podman`；只有手动运行容器命令时才可能需要 alias。
 
@@ -510,14 +562,20 @@ Makefile 会自动识别 Docker 或 Podman。Podman 用户直接运行 `make doc
 可根据开发场景选择启动模式：
 
 ```bash
+<<<<<<< HEAD
 make docker-infer              # 完整 API + Nginx + 前端，默认使用 internal 策略
 # 无状态公网策略：
 make docker-infer DEPLOYMENT_MODE=public
+=======
+make docker-api       # API-only 开发模式，直接访问 http://127.0.0.1:8001
+make docker-infer     # 完整 API + Nginx + 前端模式，自动等待并验证健康状态
+>>>>>>> origin/main
 ```
 
 如果主机已经准备好 Python 环境和模型检查点，也可以不使用容器，直接运行 API：
 
 ```bash
+<<<<<<< HEAD
 uv run python -m uvicorn deploy.api:app --host 127.0.0.1 --port 8000
 ```
 
@@ -531,6 +589,16 @@ Nginx 时使用带 `/api` 前缀的路径，例如 `/api/v1/health`。
 前端评估历史可通过 deployment profiles 插拔：内网单实例部署使用 `evaluation_store.backend: sqlite`，公网无状态部署使用 `none`。启用 SQLite 时，每条记录包含浏览器会话范围，以及 `timestamp`、`file_name`、`file_hash`（SHA-256）、`task_type`、`model_used`、`mos_score`、`mos_interval` 和 `inference_time_ms`；前端只读取当前会话的记录，并可将已选或全部记录导出为 JSONL。会话范围只是隔离便利，不是用户身份认证。
 
 上传和 SQLite 安全限制统一定义在 deployment profiles：上传默认上限为 100 MiB、读取超时为 30 秒；前端 SQLite 数据库默认上限为 256 MiB、忙等待超时为 5 秒。修改该文件即可调整共享部署策略。主机相关的服务地址、端口、代理和可选 SQLite 路径仍放在 `.env` 中。
+=======
+uv run python -m uvicorn deploy.api:app --host 0.0.0.0 --port 8000
+```
+
+主机直运行时访问 `http://127.0.0.1:8000/v1/health` 和 `http://127.0.0.1:8000/docs`；使用 Nginx 时使用带 `/api` 前缀的路径，例如 `/api/v1/health`。
+
+前端的响应式与无障碍检查说明见 [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md)。页面支持键盘操作和减少动画模式；正式声明符合 WCAG 仍需要运行 Lighthouse/axe 检查，并进行人工辅助技术测试。
+
+前端评估记录会以每行一个 JSON 对象的 JSONL 格式追加到 `reports/frontend-evaluations.jsonl`。每条记录包含 `timestamp`、`file_name`、`file_hash`（SHA-256）、`task_type`、`model_used`、`mos_score`、`mos_interval` 和 `inference_time_ms`。
+>>>>>>> origin/main
 
 数据集脚本会检测 `http_proxy`/`HTTP_PROXY`。在 AutoDL 云 GPU 实例上，下载数据集前可以先启用平台代理：
 
@@ -538,7 +606,15 @@ Nginx 时使用带 `/api` 前缀的路径，例如 `/api/v1/health`。
 source /etc/network_turbo
 ```
 
+<<<<<<< HEAD
 Compose 只会将代理变量传入需要下载依赖或模型的服务。Nginx 不需要代理配置；推理和 Ollama 服务会在 `NO_PROXY`/`no_proxy` 中保留内部服务名。
+=======
+Compose 会将宿主机可选的大小写代理变量传入容器，同时自动在 `NO_PROXY`/`no_proxy` 中追加 localhost、Compose 服务名和容器名。因此，无论宿主机是否启用代理，健康检查及 API 与 Nginx 之间的容器通信都不会绕行代理。
+
+通用 Docker Compose 文件使用可移植的普通 bind mount；在启用 SELinux 的 Fedora/RHEL 主机上，Podman overlay 会为 Nginx 的前端目录和 `default.conf` 自动追加 `:Z` 并重新标记文件。若容器是在加入该选项前创建的，请先执行 `podman-compose down`，再重新 `up -d` 创建容器。
+
+容器内的 torch/uv 缓存挂载到 `/app/.cache`。运行服务会设置 `XDG_CACHE_HOME=/app/.cache`、`TORCH_HOME=/app/.cache/torch` 和 `UV_CACHE_DIR=/app/.cache/uv`，因此已下载的 torchvision backbone 可以复用。
+>>>>>>> origin/main
 
 通用 Docker Compose 文件使用可移植的普通 bind mount；在启用 SELinux 的 Fedora/RHEL 主机上，Podman overlay 会为 Nginx 的前端目录和 `default.conf` 自动追加 `:Z` 并重新标记文件。若容器是在加入该选项前创建的，请先执行 `podman-compose down`，再重新 `up -d` 创建容器。
 
@@ -653,7 +729,11 @@ make archive ARCHIVE_ARGS="--datasets"
 
 - **框架**: [MIT](LICENSE)
 - **作者**: [@autentisitet](https://github.com/autentisitet)
+<<<<<<< HEAD
 - **版本**: 0.9.0
+=======
+- **版本**: 0.7.5
+>>>>>>> origin/main
 
 ---
 

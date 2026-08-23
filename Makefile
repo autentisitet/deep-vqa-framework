@@ -37,6 +37,7 @@ UV_RUN := uv run
 # ============================================================
 # Targets
 # ============================================================
+
 .PHONY: help help-% bootstrap setup install env-secrets data info cache_clean archive results-clean
 
 .PHONY: git-log version-sync version-check
@@ -46,7 +47,8 @@ UV_RUN := uv run
 .PHONY: check-code fmt black isort format-all typecheck
 .PHONY: vuln-audit sbom safety security-all
 
-.PHONY: docker-dev docker-train docker-stop docker-manage
+.PHONY: docker-dev docker-train docker-api docker-infer docker-stop docker-manage
+
 .PHONY: docker-purge-all
 .PHONY: docker-infer docker-infer-internal docker-infer-public
 .PHONY: docker-infer-internal-ollama docker-infer-public-ollama docker-deploy-check
@@ -95,6 +97,7 @@ help:
 	@echo '  make docker-infer-public-ollama            Public profile + Ollama'
 	@echo '  make docker-deploy-check                   Check API and optional Nginx/Ollama services'
 	@echo '  Note: inference commands create .env from .env.example when missing; internal mode still needs keys.'
+
 	@echo ''
 	@echo '$(BLUE)Inference:$(RESET)'
 	@echo '  make test-images     Batch inference on examples/images/'
@@ -189,6 +192,7 @@ version-sync:
 
 version-check:
 	@$(PYTHON) scripts/sync_version.py --check
+
 
 
 
@@ -774,10 +778,12 @@ docker-infer-public:
 
 
 
+
 docker-stop:
 	$(call check_runtime)
 	@echo "[INFO] Stopping containers..."
 	@$(RUNTIME) stop vqa-dev 2>/dev/null || true
+
 	@$(RUNTIME) stop vqa-infer 2>/dev/null || true
 	@$(RUNTIME) stop vqa-nginx 2>/dev/null || true
 	@$(RUNTIME) stop vqa-train 2>/dev/null || true
@@ -920,7 +926,9 @@ docker-purge-all:
 	@$(COMPOSE) $(COMPOSE_FILES) down --remove-orphans 2>/dev/null || true
 	@$(OLLAMA_COMPOSE_ENV) $(COMPOSE) $(OLLAMA_COMPOSE_FILES) down --remove-orphans --volumes 2>/dev/null || true
 	@$(RUNTIME) ps -a --filter "name=vqa-train" -q | xargs -r $(RUNTIME) rm -f
+
 	@$(RUNTIME) ps -a --filter "name=vqa-dev" -q | xargs -r $(RUNTIME) rm -f
+
 	@$(RUNTIME) ps -a --filter "name=vqa-infer" -q | xargs -r $(RUNTIME) rm -f
 	@$(RUNTIME) ps -a --filter "name=vqa-nginx" -q | xargs -r $(RUNTIME) rm -f
 	@$(RUNTIME) ps -a --filter "name=vqa-ollama" -q | xargs -r $(RUNTIME) rm -f

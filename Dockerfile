@@ -68,12 +68,12 @@ CMD ["/bin/bash"]
 # ============================================
 FROM base AS prod
 
-ENV XDG_CACHE_HOME=/app/.cache \
-    TORCH_HOME=/app/.cache/torch
-
-COPY src/ ./src/
-COPY train-config/ ./train-config/
-COPY deploy-config/ ./deploy-config/
+COPY src/config/ ./src/config/
+COPY src/data/ ./src/data/
+COPY src/models/ ./src/models/
+COPY src/utils/ ./src/utils/
+COPY src/visualization/ ./src/visualization/
+COPY config/dataset_config.yaml ./config/dataset_config.yaml
 
 COPY deploy/core/ ./deploy/core/
 COPY deploy/api.py ./deploy/api.py
