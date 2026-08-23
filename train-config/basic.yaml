@@ -1,0 +1,40 @@
+# Shared training defaults for release v0.9.0. Dataset metadata lives in
+# train-config/dataset_config.yaml; deployment policy lives in
+# deploy-config/profiles/*.yaml.
+system:
+  # Enable mixed precision when the selected accelerator supports it.
+  amp: true
+  # Keep host-to-device transfers asynchronous on CUDA workloads.
+  pin_memory: true
+
+preprocessing:
+  # Number of cross-validation folds used by training/evaluation commands.
+  k_fold: 5
+
+logging:
+  # Emit training metrics every N optimizer steps/batches.
+  log_interval: 10
+
+train:
+  # Stable optimizer policy shared by the standard training entry points.
+  optimizer: "adamw"
+  scheduler: "cosine"
+  gradient_accumulation_steps: 4
+
+  manifest:
+    enabled: true
+    # Absolute MOS error thresholds: moderate, high, critical.
+    thresholds: [0.1, 0.25, 0.5]
+
+  early_stop:
+    enabled: true
+    patience: 10
+    monitor: "val_srocc"
+    mode: "max"             # 监控 SROCC，模式为 "max"
+
+  checkpoint:
+    monitor: "val_srocc"
+    # Only used to break ties when two checkpoints have the same primary score.
+    secondary_monitor: "val_plcc"
+    mode: "max"
+    save_top_k: 2

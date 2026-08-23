@@ -17,9 +17,11 @@ nohup.out
 venv/
 env/
 .env/
+.env
 .ruff_cache/
 .uv_cache/
 .mypy_cache/
+.pytest_cache/
 .cache/
 __pycache__/
 *.py[cod]
@@ -48,6 +50,7 @@ temp/
 .cline/
 .continue/
 .windsurf/
+.trae/
 .codeium/
 .roo/
 .devin/

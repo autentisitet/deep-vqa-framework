@@ -1,9 +1,9 @@
-# config/models/resnet_iqa.yaml
+# train-config/models/swin_iqa.yaml | schema release: v0.9.0
 task_type: "iqa"
 
 model:
   name: "IQAVQANet"
-  backbone: "resnet50"
+  backbone: "swin_t"
   freeze_backbone: false
   pretrained: true
   dropout: 0.3
