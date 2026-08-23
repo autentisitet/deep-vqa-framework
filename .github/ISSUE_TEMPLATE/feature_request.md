@@ -5,6 +5,9 @@ title: "[FEAT] "
 labels: enhancement
 ---
 
+> This is a suggested template, not a mandatory reporting format. Use the
+> sections that help communicate the idea; a clear free-form request is welcome.
+
 ## Requirement description
 <!-- What functionality would you like to add? -->
 

@@ -17,7 +17,7 @@ from loguru import logger
 from src.core.evaluator import Evaluator
 from src.core.trainer import TrainerExecutionPipeline
 from src.data.data_eda import DataEDA
-from src.data.eda.metrics_plotter import MetricsPlotter
+from src.visualization import MetricsPlotter
 from src.config import load_config
 from src.data.dataset_loaders import MetadataLoaderFactory
 from src.utils.file_loader import CaseInsensitiveAssetResolver
@@ -99,19 +99,24 @@ def _plot_training_outputs(
         if history_path.exists():
             fold_key = f"{plotter.model_name}_Fold{fold_idx}"
             version = f"fold{fold_idx}"
-            model_metrics[fold_key] = {"version": version, "csv_path": history_path}
-            plotter.plot_training_history(csv_path=history_path, version=version)
+            model_metrics[fold_key] = {
+                "version": version,
+                "fold_label": f"Fold{fold_idx:02d}",
+                "csv_path": history_path,
+            }
+            plotter.render_registered("training_history", csv_path=history_path, version=version)
         else:
             logger.warning(f"History file missing for fold {fold_idx}: {history_path}")
 
         if manifest_path.exists():
-            plotter.plot_residuals(csv_path=manifest_path, version=f"fold{fold_idx}")
+            plotter.render_registered("residuals", csv_path=manifest_path, version=f"fold{fold_idx}")
+            plotter.render_registered("error_by_mos_bin", csv_path=manifest_path, version=f"fold{fold_idx}")
         else:
             logger.warning(f"Manifest file missing for fold {fold_idx}: {manifest_path}")
 
     if model_metrics:
-        plotter.plot_comparison(metrics_csv_dict=model_metrics, dataset_name=dataset_name)
-        plotter.plot_fold_summary(metrics_csv_dict=model_metrics, dataset_name=dataset_name)
+        plotter.render_registered("comparison", metrics_csv_dict=model_metrics, dataset_name=dataset_name)
+        plotter.render_registered("fold_summary", metrics_csv_dict=model_metrics, dataset_name=dataset_name)
         logger.info("Training visualizations generated successfully.")
     else:
         logger.warning(f"No valid training history found in {train_logs_dir}.")
@@ -136,7 +141,7 @@ def main() -> dict[str, Any] | bool:
     model_name = args.model.lower()
 
     cfg = load_config(
-        config_dir=Path("config"),
+        config_dir=Path("train-config"),
         model_name=model_name,
         dataset_name=dataset_name,
     )

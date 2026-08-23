@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.12+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.7.5-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -14,7 +14,48 @@
 
 Deep-VQA-Framework provides the engineering path from quality-labeled media to a usable IQA/VQA model: dataset inspection and integrity checks, leakage-aware splitting, reproducible training and evaluation, experiment artifacts, checkpoint selection, batch inference, and containerized API deployment. It is designed as an extensible platform for developing and operating image/video quality assessment models, rather than as a single model implementation.
 
+### Product scope
+
+The core product is a no-reference image/video quality assessment framework and
+inference API. Its capabilities are layered:
+
+- **Core:** dataset workflows, IQA/VQA training, evaluation, checkpoints, and inference.
+- **Deployment:** FastAPI, Docker/Podman, and a single-instance internal workbench or protected stateless API.
+- **Frontend:** one shared browser workspace for upload, scoring, history, and model interpretation.
+- **Optional extension:** Ollama-based technical quality descriptions and auxiliary subjective scores for development and rapid validation.
+
+The internal deployment is a single-instance workbench, not a multi-tenant SaaS
+account system. The API key is deployment-level access control, not a user
+identity or role-management system. Public deployments should use the stateless
+store backend and an API gateway or equivalent protection. Ollama is optional
+and does not replace the framework's IQA/VQA models.
+
+Out of scope are multi-tenant account management, general-purpose media
+storage, and a hosted SaaS control plane. See the [deployment knowledge](knowledge/deployment.md)
+and [frontend knowledge](knowledge/frontend.md) for supported operating modes.
+
+### Deployment boundary
+
+The supported baseline is a single-instance service, typically split across
+two hosts: an edge Nginx/static-frontend host and a FastAPI/model host. SQLite,
+when enabled, stays on the FastAPI host's local disk; it is not a network
+database and must not be shared by multiple API hosts. Ollama may run on a
+separate private host.
+
+Enterprise TLS/WAF/API gateways, identity providers, multi-tenant authorization,
+and server databases are intentionally outside this project's implementation
+scope. They may surround the service when an organization requires them, but
+are not planned features of Deep-VQA-Framework. The documented API key is a
+bootstrap/service token for trusted single-instance deployments, not a user
+identity system.
+
 The current default model uses a Swin-T backbone for image and per-frame spatial features. Video assessment adds positional encoding and Transformer-based temporal fusion. After training, selected checkpoints can be handed off to `deploy/` for batch or API inference.
+
+Media extensions are classified centrally. JPG/PNG/WEBP and common MP4/MOV/MKV
+formats are the default training/serving contract; HEIC, AVIF, GIF and
+professional video containers are recognized as experimental only. Extensions
+are not trusted as file identity: OpenCV/Decord must successfully decode the
+content, so a file with a forged suffix is rejected during processing.
 
 ---
 
@@ -25,7 +66,10 @@ The current default model uses a Swin-T backbone for image and per-frame spatial
 - [Training Pipeline](#training-pipeline)
 - [Evaluation & Metrics](#evaluation-metrics)
 - [Deployment & Inference API](#deployment-api)
-- [Deployment Guide](deploy/GUIDE.md)
+- [Developer Knowledge Base](knowledge/README.md)
+- [Deployment Guide](knowledge/deployment.md)
+- [Frontend Guide](knowledge/frontend.md)
+- [Ollama Guide](knowledge/ollama.md#ollama-integration-guide)
 - [Frontend](frontend/index.html)
 - [Project Main Structure](#project-main-structure)
 - [Docker / Podman Support](#docker-support)
@@ -101,7 +145,7 @@ flowchart LR
 | Image | `[B, 3, H, W]` | Configured ImageNet backbone (Swin-T default; ResNet50 supported) | RGB, bicubic resize 232, center crop 224, ImageNet mean/std |
 | Video | `[B, F, 3, H, W]` | Swin-T ImageNet backbone (`LayerNorm`) + Transformer temporal fusion | RGB frames, bicubic resize 232, center crop 224, `[0, 1]`, ImageNet mean/std |
 
-The model no longer keeps legacy Swin compatibility shims. Checkpoints should be produced by the current `IQAVQANet` implementation.
+The current codebase expects checkpoints produced by the current `IQAVQANet` implementation. This repository does not contain a `v0.7.3` tag, so historical claims against that version are intentionally not made here.
 
 ### Loss Function: Task-Aware Hybrid Loss
 
@@ -129,7 +173,7 @@ Total Loss = w_huber × SmoothL1 + w_rank × PairwiseLogisticRank
 
 ```bash
 # Initialize environment and install dependencies
-make install
+make install DEV=1
 
 # Check environment status
 make info
@@ -164,7 +208,7 @@ integrity check -> EDA/statistics -> group-aware train/val/test split -> group-a
 *Note: By default, DEBUG=0 is applied in make commands. You can override it by appending DEBUG=1 if needed.*
 
 > [!NOTE]
-> The default IQA configuration is `swin_iqa` (image/Swin-T). `resnet_iqa` remains an optional ResNet50 fallback, while `swin_vqa` uses Swin-T plus Transformer temporal fusion. Model configs are loaded from `config/models/*.yaml` by file name.
+> The default IQA configuration is `swin_iqa` (image/Swin-T). `resnet_iqa` remains an optional ResNet50 fallback, while `swin_vqa` uses Swin-T plus Transformer temporal fusion. Model configs are loaded from `train-config/models/*.yaml` by file name.
 
 > [!NOTE]
 > `scripts/setup_env.sh` also installs and verifies `hatchling`, so `deploy/` can be built from `pyproject.toml` without extra manual setup.
@@ -197,8 +241,35 @@ The framework automatically generates:
 - **Fold Summary/Comparison**: Per-fold PLCC/SROCC/RMSE/R² summaries, stability views and comparison bars
 - **Sample-level Error Reports**: Complete prediction manifests and automatically exported top-k error samples
 - **Feature Interpretability**: Backbone feature grids and regression Grad-CAM overlays for image inputs
+- **Subjective Quality Assessment**: Optional Ollama vision-model description, score, and Bayesian posterior for the current frontend request
 
 The browser frontend is intentionally focused on media upload, no-reference IQA/VQA inference, model output, and interpretability. For distribution analysis, use an offline feature-artifact workflow: extract embeddings for every training sample, fit PCA once on the training split, save the projection and normalization parameters, then project a problem sample into that same space for comparison.
+
+The optional subjective assessment uses Ollama and `deploy-config/ollama/Modelfile`. It samples
+one image or a small number of video frames, requests a technical quality
+description and a 0–100 score from the local vision model, then applies a neutral
+Beta prior to produce a Bayesian posterior score and approximate 95% interval.
+These results are ephemeral and are not written to SQLite or JSONL history.
+
+```bash
+make env-secrets
+make docker-infer-internal-ollama  # internal profile with optional Ollama
+# Unified health check:
+make docker-deploy-check
+make docker-stop
+```
+
+`make docker-infer` selects the deployment profile through `DEPLOYMENT_MODE`
+(`internal` by default) and does not start Ollama. The corresponding `*-ollama` targets start
+the optional Ollama container and initialize
+the `qwen2.5vl:3b` model.
+
+The Ollama Compose file mounts `Modelfile`. The `*-ollama` Make target runs a
+short-lived task from the `vqa-ollama` image that pulls `qwen2.5vl:3b` and
+creates `deep-vqa-subjective`; mounting the file by itself does not create a
+model or a second long-lived service.
+
+See the [Ollama guide](knowledge/ollama.md) for host and container configuration.
 
 This keeps the trained no-reference IQA/VQA models as the core capability while making dataset coverage and outlier analysis reproducible. The saved artifact should include the feature extractor/checkpoint identifier, dataset split, sample IDs, feature normalization parameters, PCA components/mean, and 2-D coordinates.
 
@@ -230,6 +301,8 @@ See the Project Structure section below for the complete artifact and directory 
 
 ## Deployment & Inference API <a id="deployment-api"></a>
 
+For the complete deployment matrix, authentication, storage modes, Ollama variants, API routes, batch CLI, and troubleshooting, see the [Deployment Guide](knowledge/deployment.md). This section keeps only project-level entry points.
+
 Training publishes the selected checkpoint to one of these task-specific locations:
 
 ```text
@@ -245,7 +318,7 @@ Checkpoint usage and release restrictions are covered by the project disclaimer;
 
 ### FastAPI Service
 
-See the dedicated [deployment guide](deploy/GUIDE.md) for host mode, Docker/Podman
+See the dedicated [deployment guide](knowledge/deployment.md) for host mode, Docker/Podman
 startup, API routes, batch CLI, proxy handling, SELinux mounts, and troubleshooting.
 
 ```bash
@@ -266,7 +339,9 @@ OpenAPI:    http://localhost:8000/api/openapi.json
 ```
 
 The main REST resources are `GET /api/v1/health`, `GET /api/v1/models`,
-`GET /api/v1/models/{model_id}`, and `POST /api/v1/evaluations?model_id=iqa`.
+`GET /api/v1/models/{model_id}`, `GET /api/v1/frontend-evaluations`,
+`POST /api/v1/evaluations?model_id=iqa`, and the ephemeral
+`POST /api/v1/subjective-assessments`.
 The evaluation endpoint accepts one multipart `file` and returns a typed
 evaluation resource.
 
@@ -292,10 +367,14 @@ uv run python -m deploy.cli -i examples/
 uv run python -m deploy.cli -i examples/images/sample.jpg --visualize
 ```
 
+Visualization artifacts remain durable under `reports/iqa-test/`. The browser
+shows a reduced source thumbnail beside the generated feature maps and
+Grad-CAM; double-click any comparison image to open the large preview.
+
 The CLI selects the task-specific checkpoint, detects image/video files, and
 writes JSON reports to `reports/iqa-test/` or `reports/vqa-test/`. The Make
 targets `test-images`, `test-videos`, and `test-all` call this CLI. MOS bounds
-are loaded from `config/dataset_config.yaml` using the dataset stored in the
+are loaded from `train-config/dataset_config.yaml` using the dataset stored in the
 checkpoint configuration.
 
 ---
@@ -309,10 +388,10 @@ deep-vqa-framework/
 ├── DISCLAIMER.md           # Legal liability & resource usage policy
 ├── pyproject.toml          # Dependency, environment & build management (uv + hatchling)
 │
-├── config/                 # YAML configuration files (user-editable)
-│   ├── basic.yaml            # System & training global defaults
+├── train-config/           # Training defaults, dataset metadata, model YAML
+│   ├── basic.yaml            # System and training defaults
 │   ├── dataset_config.yaml   # Dataset-specific metadata
-│   └── models/                 # Model architecture parameters
+│   └── models/               # Model architecture parameters
 │
 ├── datasets/                 # Data storage & symlink routing
 │   ├── KoNViD-1k/               # Video quality dataset
@@ -320,13 +399,13 @@ deep-vqa-framework/
 │   └── TID2013/                  # Image quality dataset
 │
 ├── docs/                     # Interactive architecture & manuals
-│   ├── pipeline.html            # System execution & module flow
-│   └── Cloud_Platform_Rental_Guide.md
+│   └── openapi.json             # Generated API schema
 |
-├── reports/                  # Security reports from pip-audit, SBOM, and safety
+├── reports/                  # Inference artifacts plus security reports
+│   ├── iqa-test/                # IQA JSON and feature-map/Grad-CAM reports
+│   └── vqa-test/                # VQA batch-inference JSON reports
 |
 ├── results/
-│   ├── diagnostics/             # Feature maps and Grad-CAM outputs
 |   ├── {dataset}/
 │   │   ├── train_logs/           # Training history, CSV logs
 │   │   ├── plots/                # Loss curves, residual plots
@@ -337,10 +416,11 @@ deep-vqa-framework/
 │   │   └── corrupted/            # Quarantined corrupt media + rejected label backups
 │   └── scripts_logs/             # Shell script logs (setup, data, etc.)
 |
-├── docker/                   # Container configuration
-│   ├── docker-compose.yaml      # Main compose config
-│   ├── docker-compose.docker.yaml # Docker GPU support
-│   └── docker-compose.podman.yaml # Podman GPU support
+├── deploy-config/            # Deployment profiles, Compose, Nginx, Ollama
+│   ├── profiles/               # Internal/public serving policy
+│   ├── compose/                # Base + Docker/Podman overlays
+│   ├── nginx/                  # Reverse-proxy configuration
+│   └── ollama/                 # Optional Ollama compose + Modelfile
 │
 ├── .github/workflows/        # CI/CD pipelines
 │   └── ci.yaml                 # Continuous Integration
@@ -362,7 +442,6 @@ deep-vqa-framework/
 │
 ├── frontend/                # Static browser UI for model inference
 │   ├── index.html                 # Upload, inference and interpretation UI
-│   └── index.html                 # Upload, inference and interpretation UI
 │
 └── src/                       # Core framework logic
     ├── main.py                   # Global execution entry point
@@ -379,7 +458,7 @@ deep-vqa-framework/
 
 ## Docker / Podman Support <a id="docker-support"></a>
 
-For the complete deployment workflow, see [deploy/GUIDE.md](deploy/GUIDE.md).
+For the complete deployment workflow and internal/public mode matrix, see the [Deployment Guide](knowledge/deployment.md). Frontend login, history, stateless behavior, and accessibility notes are in the [Frontend Guide](knowledge/frontend.md).
 
 The framework supports containerized development and deployment with both Docker and Podman.
 
@@ -391,6 +470,9 @@ make docker-dev
 
 # Run training in container
 make docker-train
+
+# Create internal-mode secrets once (safe to rerun)
+make env-secrets
 
 # Start inference API service
 make docker-infer
@@ -418,10 +500,10 @@ make docker-manage
 
 | Component | Description |
 | :--- | :--- |
-| `Dockerfile` | Multi-stage builds: `base` (shared deps), `train` (training), `prod` (inference) |
-| `docker-compose.yaml` | Main compose configuration with API health checks, json-file log rotation, model/report/cache mounts, and persistent OpenAPI output |
-| `docker-compose.docker.yaml` | Docker-specific GPU support plus host-network builds |
-| `docker-compose.podman.yaml` | Podman-specific GPU support plus host-network builds |
+| `Dockerfile` | Multi-stage builds: `base` (shared deps), `dev` (mounted development shell), `train` (training), `prod` (inference) |
+| `deploy-config/compose/docker-compose.yaml` | Base services, bridge network, ports, mounts, and health checks |
+| `deploy-config/compose/docker-compose.docker.yaml` | Docker-specific NVIDIA runtime settings |
+| `deploy-config/compose/docker-compose.podman.yaml` | Podman GPU devices, SELinux options, and mount labels |
 
 The Makefile auto-detects Docker vs Podman. For Podman users, `make docker-*` does not require `alias docker=podman`; aliases are only useful if you run container commands manually.
 
@@ -430,21 +512,29 @@ Use `make help` for the command index and `make help-TARGET` for focused guidanc
 Choose the runtime mode that fits the workflow:
 
 ```bash
-make docker-api       # API-only development mode on http://127.0.0.1:8001
-make docker-infer     # Full API + Nginx + frontend mode with automatic verification
+make docker-infer              # Full API + Nginx + frontend; defaults to internal policy
+# For stateless/public policy:
+make docker-infer DEPLOYMENT_MODE=public
 ```
 
 The API can also run directly on the host when the Python environment and checkpoints are available:
 
 ```bash
-uv run python -m uvicorn deploy.api:app --host 0.0.0.0 --port 8000
+uv run python -m uvicorn deploy.api:app --host 127.0.0.1 --port 8000
 ```
 
-Use `http://127.0.0.1:8000/v1/health` and `http://127.0.0.1:8000/docs` in host mode. In the Nginx mode, use the `/api` prefix (`/api/v1/health`).
+For host-only development, use `--host 127.0.0.1`; the container image uses
+`0.0.0.0` so its listener is reachable through the container port mapping. Use
+`http://127.0.0.1:8000/v1/health` and `http://127.0.0.1:8000/docs` in host mode.
+In the Nginx mode, use the `/api` prefix (`/api/v1/health`).
 
-The frontend's responsive and accessibility checks are documented in [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md). It is designed for keyboard and reduced-motion use; formal WCAG conformance still requires Lighthouse/axe scans and human assistive-technology testing.
+Frontend behavior, login flow, storage-dependent capabilities, direct-host preview,
+and accessibility notes are documented in the [Frontend Guide](knowledge/frontend.md),
+with the frontend and deployment guidance in `knowledge/frontend.md`.
 
-Frontend evaluations are appended to `reports/frontend-evaluations.jsonl` as one JSON object per line. Each record contains `timestamp`, `file_name`, `file_hash` (SHA-256), `task_type`, `model_used`, `mos_score`, `mos_interval`, and `inference_time_ms`.
+Frontend evaluation history is pluggable through deployment profiles: use `evaluation_store.backend: sqlite` for an internal single-instance deployment, or `none` for a stateless/public deployment. With SQLite enabled, each record contains a browser session scope plus `timestamp`, `file_name`, `file_hash` (SHA-256), `task_type`, `model_used`, `mos_score`, `mos_interval`, and `inference_time_ms`; the frontend only reads records for its own session and can export selected or all of them as JSONL. This session scope is an isolation convenience, not user authentication.
+
+Upload and SQLite safety limits are defined centrally in deployment profiles: uploads default to a 100 MiB limit and 30-second read timeout; the frontend SQLite database defaults to a 256 MiB cap and 5-second busy timeout. Edit that file to change the shared deployment policy. Host-specific endpoints, ports, proxies, and the optional SQLite path remain in `.env`.
 
 Dataset scripts detect `http_proxy`/`HTTP_PROXY`. On AutoDL cloud GPU instances, enable the platform proxy before downloading datasets:
 
@@ -452,23 +542,31 @@ Dataset scripts detect `http_proxy`/`HTTP_PROXY`. On AutoDL cloud GPU instances,
 source /etc/network_turbo
 ```
 
-Compose forwards optional upper- and lowercase proxy variables to the containers. It also extends `NO_PROXY`/`no_proxy` with localhost and the Compose service/container names, so health checks and API-to-Nginx traffic remain direct even when the host uses a proxy.
+Compose forwards optional upper- and lowercase proxy variables only to services
+that may download packages or models. Nginx does not need proxy settings; the
+inference and Ollama services keep internal service names in `NO_PROXY`/`no_proxy`.
 
 The generic Docker Compose file uses portable bind mounts. On SELinux-enforcing Fedora/RHEL hosts, the Podman overlay adds `:Z` so Podman can relabel the frontend and `default.conf` for the container. If an older container was created before this option was added, recreate it with `podman-compose down` followed by `podman-compose up -d`.
 
-Torch/uv caches are mounted at `/app/.cache` in containers. Runtime services set `XDG_CACHE_HOME=/app/.cache`, `TORCH_HOME=/app/.cache/torch`, and `UV_CACHE_DIR=/app/.cache/uv`, so previously downloaded torchvision backbones can be reused.
+The host `.cache` directory is mounted at `/app/.cache` in containers. The
+production image defines `XDG_CACHE_HOME=/app/.cache` and
+`TORCH_HOME=/app/.cache/torch` so torchvision/PyTorch model downloads can be
+reused. `UV_CACHE_DIR` is intentionally not part of the production image:
+uv is a build/setup tool here, not a serving-time dependency.
 
-If your host proxy is bound to `127.0.0.1`, remember that service `network_mode: host` applies to running containers, while image build steps need build networking. The compose overlays set `build.network: host`; to pass proxy variables into the Dockerfile build, run:
+If your host proxy is bound to `127.0.0.1`, image build steps need build
+networking that can reach the host proxy. To pass proxy variables into the
+Dockerfile build, run:
 
 ```bash
-make docker-train BUILD_ARGS='--build-arg USE_BUILD_PROXY=true'
+make docker-train BUILD_ARGS='--build-arg USE_BUILD_PROXY=true' DEV=1
 ```
 
 ---
 
 ## System Overview <a id="system-overview"></a>
 
-The interactive pipeline map is available at [docs/pipeline.html](docs/pipeline.html).
+The interactive pipeline map is available in the [knowledge base](knowledge/architecture.html).
 
 ---
 
@@ -543,6 +641,11 @@ make archive ARCHIVE_ARGS="--datasets"
 
 ## Dependency Security <a id="dependency-security"></a>
 
+Security notes describe the current working tree and verified dependency
+history only. They do not claim a complete comparison with an unpublished or
+unavailable `v0.7.3` revision. Use the private vulnerability-reporting process
+in [SECURITY.md](SECURITY.md); avoid publishing exploit instructions or secrets.
+
 The framework includes security tools to audit dependencies:
 
 | Command | Purpose |
@@ -561,7 +664,7 @@ The framework includes security tools to audit dependencies:
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.7.5
+- **Version**: 0.9.0
 
 ---
 

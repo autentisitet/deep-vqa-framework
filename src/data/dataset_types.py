@@ -3,17 +3,20 @@ from enum import Enum
 from typing import Set, Union
 
 # 放在类外部，避免被 Enum 捕获
-_VIDEO_EXTS: Set[str] = {
-    ".mp4", ".avi", ".mov", ".mkv", ".webm",
-    ".wmv", ".flv", ".3gp", ".m4v", ".ts",
-    ".mpeg", ".mpg", ".m2ts", ".mxf",
-}
+_VIDEO_EXTS: Set[str] = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".wmv", ".flv", ".3gp", ".m4v", ".ts", ".mpeg", ".mpg", ".m2ts", ".mxf"}
 
 _IMAGE_EXTS: Set[str] = {
     ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp",
     ".gif", ".ico", ".heic", ".heif", ".avif",
     ".ppm", ".pgm", ".pbm", ".pnm",
 }
+
+# These formats are recognized for reporting/diagnostics, but are not part of
+# the default training and serving contract because decoder availability varies.
+_EXPERIMENTAL_IMAGE_EXTS: Set[str] = {".gif", ".ico", ".heic", ".heif", ".avif", ".ppm", ".pgm", ".pbm", ".pnm"}
+_EXPERIMENTAL_VIDEO_EXTS: Set[str] = {".flv", ".3gp", ".m4v", ".ts", ".mpeg", ".mpg", ".m2ts", ".mxf"}
+_STABLE_IMAGE_EXTS: Set[str] = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
+_STABLE_VIDEO_EXTS: Set[str] = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".wmv"}
 
 
 class DatasetType(Enum):
@@ -33,6 +36,13 @@ class DatasetType(Enum):
         raise ValueError(f"Unknown extension: {ext}")
 
     @classmethod
+    def from_path(cls, path: str) -> "DatasetType":
+        """Classify by suffix only; callers must still decode file content."""
+        from pathlib import Path
+
+        return cls.detect(Path(path).suffix)
+
+    @classmethod
     def parse(cls, value: str) -> "DatasetType":
         value = value.lower().strip()
         if value == "video":
@@ -44,6 +54,19 @@ class DatasetType(Enum):
     @classmethod
     def all_extensions(cls) -> Set[str]:
         return _VIDEO_EXTS | _IMAGE_EXTS
+
+    @classmethod
+    def stable_extensions(cls) -> Set[str]:
+        """Extensions enabled by default for training and serving."""
+        return _STABLE_IMAGE_EXTS | _STABLE_VIDEO_EXTS
+
+    @classmethod
+    def experimental_extensions(cls) -> Set[str]:
+        return _EXPERIMENTAL_IMAGE_EXTS | _EXPERIMENTAL_VIDEO_EXTS
+
+    @classmethod
+    def is_experimental(cls, ext: str) -> bool:
+        return ext.lower().strip() in cls.experimental_extensions()
 
     @classmethod
     def extensions_for(cls, dataset_type: Union[str, "DatasetType"]) -> Set[str]:

@@ -31,7 +31,7 @@ class Preprocessor:
     def process_image(self, file_path: Path) -> torch.Tensor:
         img = cv2.imread(str(file_path))
         if img is None:
-            raise ValueError(f"Failed to decode: {file_path}")
+            raise ValueError(f"Failed to decode image content (extension is not trusted): {file_path}")
 
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return rgb_array_to_imagenet_tensor(img_rgb, input_size=self.input_size)
@@ -100,7 +100,7 @@ class Preprocessor:
         cap.release()
 
         if not frames:
-            raise ValueError(f"No frames: {file_path}")
+            raise ValueError(f"No decodable video frames (extension is not trusted): {file_path}")
 
         video_np = np.stack(frames)
         tensor = rgb_video_array_to_imagenet_tensor(video_np, input_size=self.input_size)

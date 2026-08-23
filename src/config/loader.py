@@ -1,7 +1,6 @@
 import yaml
 from pathlib import Path
 from .schemas import Config
-from src.data.dataset_loaders import MetadataLoaderFactory
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -17,10 +16,15 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def load_config(
-    config_dir: Path = Path("config"),
+    config_dir: Path = Path("train-config"),
     model_name: str = "swin_iqa",
     dataset_name: str = "tid2013",
 ) -> Config:
+    # Import lazily: dataset_loaders imports src.utils, whose package exports
+    # config symbols. Keeping this import at module scope creates a cycle
+    # during test/module discovery.
+    from src.data.dataset_loaders import MetadataLoaderFactory
+
     dataset_key = MetadataLoaderFactory.normalize_key(dataset_name)
 
     # 1. 加载所有 YAML

@@ -33,7 +33,10 @@ def load_checkpoint(
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
-    checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
+    # Checkpoints are untrusted input at deployment boundaries.  Restrict
+    # deserialization to tensors/primitive containers so pickle payloads
+    # cannot execute arbitrary Python code.
+    checkpoint = torch.load(ckpt_path, map_location=device, weights_only=True)
 
     if "config" not in checkpoint:
         raise KeyError(

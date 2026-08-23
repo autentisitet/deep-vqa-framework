@@ -1,0 +1,154 @@
+# Base Compose definition shared by Docker and Podman (release v0.9.0).
+# Deployment policy belongs in deploy-config/profiles/*.yaml; host-specific
+# values come from .env.
+services:
+  vqa-dev:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: dev
+    image: vqa-dev:latest
+    networks:
+      - backend
+    shm_size: 16gb
+    volumes:
+      - ../../src:/app/src
+      - ../../train-config:/app/train-config:ro
+      - ../../deploy:/app/deploy
+      - ../../deploy-config:/app/deploy-config:ro
+      - ../../tests:/app/tests:ro
+      - ../../scripts:/app/scripts:ro
+      # The deployment contract tests inspect the build recipe; keep this
+      # metadata file mounted instead of copying the whole repository.
+      - ../../Dockerfile:/app/Dockerfile:ro
+      - ../../datasets:/app/datasets
+      - ../../results:/app/results
+      - ../../reports:/app/reports
+      - ../../.cache:/app/.cache
+    environment:
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - http_proxy=${http_proxy:-}
+      - https_proxy=${https_proxy:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1}
+      - no_proxy=${no_proxy:-localhost,127.0.0.1}
+    stdin_open: true
+    tty: true
+    command: ["/bin/bash"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  vqa-train:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: train
+    image: vqa-train:latest
+    container_name: vqa-train
+    networks:
+      - backend
+    shm_size: 16gb
+    volumes:
+      - ../../datasets:/app/datasets
+      - ../../results:/app/results
+      - ../../reports:/app/reports
+      - ../../docs:/app/docs    # Save restful API docs for local reference
+      - ../../deploy/iqa-models:/app/deploy/iqa-models
+      - ../../deploy/vqa-models:/app/deploy/vqa-models
+      - ../../.cache:/app/.cache
+    environment:
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - http_proxy=${http_proxy:-}
+      - https_proxy=${https_proxy:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1}
+      - no_proxy=${no_proxy:-localhost,127.0.0.1}
+    stdin_open: true
+    tty: true
+    command: ["/bin/bash"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+
+  vqa-infer:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: prod
+    image: vqa-infer:latest
+    container_name: vqa-infer
+    networks:
+      - backend
+    shm_size: 8gb
+    expose:
+      - "8000"
+    ports:
+      - "${API_BIND_HOST:-127.0.0.1}:${API_PORT:-8001}:${API_INTERNAL_PORT:-8000}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "host.containers.internal:host-gateway"
+    volumes:
+      - ../../deploy/iqa-models:/app/deploy/iqa-models
+      - ../../deploy/vqa-models:/app/deploy/vqa-models
+      - ../../examples:/app/examples
+      - ../../reports:/app/reports
+      - ../../results:/app/results
+      - ../../docs:/app/docs    # Save restful API docs for local reference
+      - ../../.cache:/app/.cache
+    environment:
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - http_proxy=${http_proxy:-}
+      - https_proxy=${https_proxy:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1},vqa-infer,vqa-ollama,host.docker.internal,host.containers.internal
+      - no_proxy=${no_proxy:-localhost,127.0.0.1},vqa-infer,vqa-ollama,host.docker.internal,host.containers.internal
+
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - DEEP_VQA_API_KEY=${DEEP_VQA_API_KEY:-}
+      - DEEP_VQA_AUTH_SECRET=${DEEP_VQA_AUTH_SECRET:-}
+      - DEEP_VQA_SQLITE_PATH=${DEEP_VQA_SQLITE_PATH:-reports/frontend-evaluations.sqlite3}
+      - DEEP_VQA_DEPLOYMENT_CONFIG=${DEEP_VQA_DEPLOYMENT_CONFIG:-deploy-config/profiles/infer_deploy.internal.yaml}
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", ".venv/bin/python", "-c", "import urllib.request; opener=urllib.request.build_opener(urllib.request.ProxyHandler({})); opener.open('http://127.0.0.1:8000/v1/health', timeout=5)"]
+      start_period: 90s
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  vqa-nginx:
+    image: nginx:alpine
+    container_name: vqa-nginx
+    networks:
+      - backend
+    depends_on:
+      vqa-infer:
+        condition: service_healthy
+    ports:
+      - "${WEB_BIND_HOST:-127.0.0.1}:${WEB_PORT:-8000}:${WEB_INTERNAL_PORT:-80}"
+    volumes:
+      - ../../frontend:/usr/share/nginx/html:ro
+      - ../nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      # BusyBox wget's --spider uses HEAD; the API health route is GET-only.
+      # Fetch and discard the response so the probe exercises the real proxy path.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--output-document=/dev/null", "http://127.0.0.1/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  backend:
+    driver: bridge

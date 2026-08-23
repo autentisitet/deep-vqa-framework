@@ -131,7 +131,7 @@ class TrainerEngine:
             return 1
 
         logger.info(f"Loading checkpoint: {ckpt_file}")
-        checkpoint = torch.load(ckpt_file, map_location=self.device)
+        checkpoint = torch.load(ckpt_file, map_location=self.device, weights_only=True)
 
         self.model.load_state_dict(checkpoint["state_dict"])
         logger.info("  - Model weights loaded")

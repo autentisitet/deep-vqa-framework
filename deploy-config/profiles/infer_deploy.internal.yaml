@@ -1,0 +1,14 @@
+# Deep-VQA-Framework deployment policy metadata: release v0.9.0.
+ollama:
+  quality_model: "deep-vqa-subjective"
+  timeout_seconds: 120
+uploads:
+  max_bytes: 104857600
+  read_timeout_seconds: 30
+sqlite:
+  max_database_bytes: 268435456
+  busy_timeout_seconds: 5
+evaluation_store:
+  backend: sqlite
+auth:
+  mode: api_key

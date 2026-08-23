@@ -19,22 +19,29 @@
             }
         });
 
-        window.onload = async () => {
-            await mermaid.run();
-            const svgElement = document.querySelector('.mermaid svg');
-            svgElement.setAttribute('width', '100%');
-            svgElement.setAttribute('height', '100%');
-
-            // 彻底禁用控制图标 (controlIconsEnabled: false)
-            svgPanZoom(svgElement, {
-                zoomEnabled: true,
-                controlIconsEnabled: false,
-                fit: true,
-                center: true,
-                minZoom: 0.5,
-                maxZoom: 10
-            });
-        };
+        window.addEventListener('DOMContentLoaded', async () => {
+            const container = document.querySelector('.mermaid');
+            if (!container) return;
+            try {
+                await mermaid.run({ nodes: [container] });
+                const svgElement = container.querySelector('svg');
+                if (!svgElement) throw new Error('Mermaid did not produce an SVG');
+                svgElement.setAttribute('width', '100%');
+                svgElement.setAttribute('height', '100%');
+                svgPanZoom(svgElement, {
+                    zoomEnabled: true,
+                    controlIconsEnabled: false,
+                    fit: true,
+                    center: true,
+                    minZoom: 0.5,
+                    maxZoom: 10
+                });
+            } catch (error) {
+                container.textContent = `Architecture diagram unavailable: ${error.message}`;
+                container.style.padding = '96px 24px';
+                container.style.color = '#b91c1c';
+            }
+        });
     </script>
     <style>
         body, html {
@@ -81,15 +88,15 @@
 </head>
 <body>
     <div class="topbar">
-        <div class="title">Deep-VQA-Framework Platform v0.7.5</div>
-        <div class="subtitle">Dataset audit · reproducible IQA/VQA training · evaluation · checkpoint handoff · API deployment</div>
+        <div class="title">Deep-VQA-Framework Platform v0.9.0</div>
+        <div class="subtitle">Dataset audit · reproducible IQA/VQA training · evaluation · checkpoint handoff · API, Nginx, and optional Ollama deployment</div>
     </div>
     <div class="mermaid">
     graph TD
         classDef transitionLink stroke:#d32f2f,stroke-width:5px,stroke-dasharray:5;
         classDef warn fill:#ffebee,stroke:#c62828,stroke-width:2px,stroke-dasharray:3;
 
-        subgraph STAGE_1 [1. 基础设施 - 脚本层]
+        subgraph STAGE_1 [1. Infrastructure scripts]
             B[bootstrap.sh] --> S1[setup_env.sh]
             S1 --> S3[manage_data.sh]
             S1 --> A[archive_results.sh]
@@ -97,37 +104,37 @@
             S6[ci_test_extract.sh] -.CI.-> S3
         end
 
-        subgraph STAGE_2 [2. 配置驱动 - Pydantic 层]
-            C1[basic.yaml] --> CL[src/config/loader.py<br/>load_config]
+        subgraph STAGE_2 [2. Typed configuration]
+            C1[train-config/basic.yaml] --> CL[src/config/loader.py<br/>load_config]
             C3[models/*.yaml] --> CL
-            C2[dataset_config.yaml] --> CL
-            CL -->|"Pydantic 校验 + 类型安全"| M[main.py]
+            C2[train-config/dataset_config.yaml] --> CL
+            CL -->|"Pydantic validation and type safety"| M[main.py]
         end
 
-        subgraph STAGE_3 [3. 基础工具层]
+        subgraph STAGE_3 [3. Core utilities]
             M --> LG[logging_utils.py<br/>log_prepare + deploy decorator]
             M --> CF[src/config/schemas.py<br/>Config + PathsConfig]
             CF -->|"cfg.paths.xxx_dir()"| M
         end
 
-        subgraph STAGE_4 [4. 数据处理层]
+        subgraph STAGE_4 [4. Data processing]
             M --> DE[data_eda.py<br/>DataEDA]
             DE --> MF[dataset_loaders.py] --> ML[metadata_loaders.py<br/>Tid2013/Konvid/T2Vqa Loader]
-            DE --> INT[eda/integrity.py<br/>缺失·损坏·黑白帧·跳帧检测]
-            INT --> BAD[(results/{dataset}/corrupted/<br/>隔离坏文件 + 标签备份)]
-            DE --> STA[eda/statistics.py<br/>EDA + MOS统计]
+            DE --> INT[eda/integrity.py<br/>missing, corrupt, blank, and skipped-frame checks]
+            INT --> BAD[(results/dataset/corrupted/<br/>quarantine and label backup)]
+            DE --> STA[eda/statistics.py<br/>EDA and MOS statistics]
             DE --> PP[preprocessing.py<br/>RGB·bicubic 232·center crop 224<br/>ImageNet mean/std]
             DE --> SPL[eda/split.py<br/>Group train/val/test + Group K-fold]
             DE --> FL[utils/file_loader.py<br/>CaseInsensitiveAssetResolver]
             DE --> TY[dataset_types.py]
-            DE --> DF[(处理后的 DataFrame<br/>+ MOS归一化统计)]
+            DE --> DF[(processed DataFrame<br/>and MOS normalization statistics)]
         end
 
-        subgraph STAGE_5 [5. 核心执行 - 训练层]
+        subgraph STAGE_5 [5. Model training]
             DF --> TR[trainer.py]
             PP --> TR
-            TR -->|"注入 evaluator 实例"| E[engine.py<br/>TrainerEngine]
-            E --> N{iqavqa_model.py<br/>IQAVQANet<br/>按输入维度路由}
+            TR -->|"evaluator dependency"| E[engine.py<br/>TrainerEngine]
+            E --> N{iqavqa_model.py<br/>IQAVQANet<br/>tensor-rank routing}
             N -->|"4D tensor Bx3x224x224"| IQA[Image branch<br/>Swin-T IMAGENET1K_V1<br/>LayerNorm + AdaptiveAvgPool2d<br/>feature Bx768]
             N -->|"5D tensor BxFx3x224x224"| VQA[Video branch<br/>Swin-T IMAGENET1K_V1<br/>LayerNorm + spatial pooling<br/>frame feature BxFx768]
             VQA --> TF[Temporal fusion<br/>positional embedding<br/>TransformerEncoder + temporal average]
@@ -139,23 +146,45 @@
             EV --> MP[metrics_plotter.py]
         end
 
-        subgraph STAGE_6 [6. 成果归档 - 存储层]
-            TR --> F[(best checkpoints<br/>results/{dataset}/model_outputs/)]
-            MP --> PLOTS[(EDA + training + residual + fold diagnostics<br/>results/{dataset}/plots/)]
+        subgraph STAGE_6 [6. Artifact storage]
+            TR --> F[(best checkpoints<br/>results/dataset/model_outputs/)]
+            MP --> PLOTS[(EDA + training + residual + fold diagnostics<br/>results/dataset/plots/)]
             TR --> AR[archive_results.sh]
-            AR --> LOG[(Log + Config + Plots + Weights<br/>results/{dataset}/)]
+            AR --> LOG[(Log + Config + Plots + Weights<br/>results/dataset/)]
         end
 
-        subgraph STAGE_7 [7. 推理与服务 - 平台交付层]
-            F -->|"训练成功后自动复制<br/>{dataset}_best.pt"| BM[(deploy/iqa-models/<br/>deploy/vqa-models/)]
-            BM --> CORE[deploy/core/*.py<br/>Pydantic runtime config + preprocessing + loading + inference]
+        subgraph STAGE_7 [7. Inference delivery]
+            F -->|"publish successful checkpoint<br/>dataset_best.pt"| BM[(deploy/iqa-models/<br/>deploy/vqa-models/)]
+            BM --> CORE[deploy/core/*.py<br/>Pydantic endpoint config + preprocessing + loading + inference]
             CORE --> API[deploy/api.py<br/>FastAPI /v1/evaluations /v1/health]
             CORE --> CLI[deploy/cli.py<br/>Batch inference CLI]
-            API --> DIAG[(Feature maps + Grad-CAM<br/>results/diagnostics/)]
-            API --> NGINX[nginx<br/>静态前端 + /api/ 反向代理<br/>完整演示模式]
-            WEB[frontend/index.html<br/>浏览器前端] --> NGINX
-            API --> EXT[外部应用调用]
-            DEV[主机直运行 Uvicorn<br/>API-only 开发模式 :8000] --> EXT
+            API --> DIAG[(Feature maps + Grad-CAM<br/>reports/iqa-test/)]
+            API --> SQLITE[(SQLite evaluation history<br/>reports/frontend-evaluations.sqlite3)]
+            NGINX[nginx<br/>static frontend and /api/ proxy<br/>browser delivery mode] --> API
+            API --> OLLAMA[optional Ollama<br/>subjective assessment<br/>private service endpoint]
+            WEB[frontend/index.html<br/>browser frontend] --> NGINX
+            ENV[.env from .env.example<br/>ports · endpoints · local proxy] --> CORE
+            ENV --> OLLAMA
+            API --> EXT[external API clients]
+            DEV[host Uvicorn<br/>API-only development :8000] --> EXT
+        end
+
+        subgraph STAGE_8 [8. Container runtime topology]
+            BASE[Dockerfile base stage] --> DEVIMG[vqa-dev image]
+            BASE --> TRAINIMG[vqa-train image]
+            BASE --> INFERIMG[vqa-infer image]
+            NIMG[official nginx:alpine] --> NGINXSVC[Compose service vqa-nginx]
+            OIMG[official ollama/ollama:latest] --> OLLAMASVC[Compose service vqa-ollama]
+            INFERIMG --> INFERSVC[Compose service vqa-infer]
+            INFERSVC --> INFERCTR[vqa-infer container]
+            NGINXSVC --> NGINXCTR[vqa-nginx container]
+            OLLAMASVC --> OLLAMACTR[vqa-ollama container]
+            BACKEND[(backend bridge network)] --- INFERCTR
+            BACKEND --- NGINXCTR
+            BACKEND --- OLLAMACTR
+            INFERSVC -. healthcheck first .-> NGINXSVC
+            OLLAMASVC -. optional Make target starts first .-> INFERSVC
+            OLLAMASVC -. one-shot model setup task .-> MODELSETUP[temporary task; no init service]
         end
 
         STAGE_1 ==> STAGE_2

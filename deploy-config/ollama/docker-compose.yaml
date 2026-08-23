@@ -1,0 +1,35 @@
+# deploy-config/ollama/docker-compose.yaml | release v0.9.0
+
+services:
+  vqa-ollama:
+    image: ollama/ollama:latest
+    container_name: vqa-ollama
+    networks:
+      - backend
+    ports:
+      - "${OLLAMA_BIND_HOST:-127.0.0.1}:${OLLAMA_PORT:-11434}:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - HTTP_PROXY=${OLLAMA_HTTP_PROXY:-}
+      - HTTPS_PROXY=${OLLAMA_HTTPS_PROXY:-}
+      - http_proxy=${OLLAMA_HTTP_PROXY:-}
+      - https_proxy=${OLLAMA_HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,vqa-ollama}
+      - no_proxy=${no_proxy:-localhost,127.0.0.1,vqa-ollama}
+    volumes:
+      - ollama-models:/root/.ollama
+      - ${OLLAMA_MODELFILE_PATH:-../ollama/Modelfile}:/opt/deep-vqa/Modelfile:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  ollama-models:
+
+networks:
+  backend:
+    driver: bridge

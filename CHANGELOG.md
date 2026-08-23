@@ -5,6 +5,62 @@ All notable changes to Deep-VQA-Framework are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-08-23
+
+### Added
+
+- Added optional containerized Ollama subjective-quality assessment with
+  `qwen2.5vl:3b`, a project `Modelfile`, and Bayesian score reporting.
+- Added SQLite-backed frontend evaluation history with preview and JSONL export.
+- Added Pydantic runtime endpoint configuration shared with `.env` and Compose.
+- Added image and video enlarged preview support in the browser frontend.
+- Added stable and experimental media-extension classifications, with actual
+  OpenCV/Decord decoding required instead of trusting filename suffixes.
+- Added pytest coverage for runtime configuration, deployment contracts, media
+  extension contracts, SQLite storage, Ollama responses, and visualization.
+- Added Compose/Nginx deployment validation and version-consistency checks to CI.
+- Added bilingual Ollama guides and expanded command-specific `make help-*`
+  documentation.
+- Added explicit `train-config/` and `deploy-config/` ownership boundaries for
+  training YAML, deployment profiles, Compose, Nginx, and Ollama assets.
+- Added a unified `make docker-infer` entry point with `DEPLOYMENT_MODE`.
+- Added an explicit backend bridge network for inference and optional Ollama
+  services.
+
+### Changed
+
+- Promoted the project version to 0.9.0 and made `pyproject.toml` the source used
+  to synchronize runtime and README version markers.
+- Centralized API, web, Ollama, and SQLite settings while keeping host and
+  container ports distinct.
+- Updated Docker/Podman lifecycle commands so `docker-stop` includes Ollama and
+  `docker-purge-all` removes the optional Ollama model volume.
+- Hardened Docker/Podman networking, proxy handling, localhost-only default port
+  bindings, Nginx proxy health checks, and Podman SELinux mounts.
+- Renamed deployment services consistently to `vqa-nginx` and `vqa-ollama`.
+- Removed the separate Ollama initializer service; model setup now runs as a
+  temporary task from the `vqa-ollama` image.
+- Changed Ollama model initialization to an explicit non-interactive command for
+  Docker/Podman compatibility.
+- Updated the frontend, deployment, contributor, and repository-agent documentation
+  for the current 0.9.0 workflow.
+- Removed obsolete accessibility, cloud-rental, and legacy deployment guide
+  documents; the `knowledge/` documents are now the deployment documentation
+  entry point.
+
+### Security
+
+- Kept Ollama model-management endpoints outside the Nginx public surface;
+  browsers access subjective assessment only through FastAPI.
+- Added explicit container-reachable Ollama proxy variables instead of passing
+  host loopback proxy addresses into containers.
+- Added `.env` to Git and Docker ignore rules and documented safe local binding
+  defaults.
+- Rejected forged or misleading media suffixes when file content cannot be
+  decoded by the configured media decoder.
+
+---
+
 ## [0.7.5] - 2026-08-21
 
 ### Added
@@ -26,10 +82,10 @@ and releases use [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Reworked the browser frontend for image/video upload, automatic IQA/VQA
-  routing, model results, history export, and interpretability outputs.
-- Frontend evaluations are appended to
-  `reports/frontend-evaluations.jsonl` with timestamp, filename, SHA-256 file
-  hash, task type, model, MOS score, MOS interval, and inference latency.
+  routing, model results, JSONL history, and interpretability outputs.
+- Stored frontend evaluation history as append-only JSONL records containing
+  timestamp, filename, SHA-256 file hash, task type, model, MOS score, MOS
+  interval, and inference latency.
 - Improved dataset integrity checks for missing, corrupted, duplicate, and
   filename/label-mismatched samples.
 - Improved the Docker/Podman workflow with separate API-only and full-stack
@@ -51,30 +107,7 @@ and releases use [Semantic Versioning](https://semver.org/).
   need for authentication, authorization, rate limiting, malware scanning,
   and TLS before exposure to untrusted networks.
 
-## [0.7.3] - 2026-08-20
-
-### Added
-
-- Added image feature-map and Grad-CAM visualization API.
-- Expanded training diagnostics with residual-vs-true-MOS and MOS-bin reports.
-
-### Changed
-
-- Preserved complete per-sample error manifests for downstream analysis.
-
-## [0.7.1] - 2026-08-20
-
-### Added
-
-- Added RESTful FastAPI resources for health, model metadata, and media evaluations.
-- Added generated Swagger UI, ReDoc, and OpenAPI documentation.
-- Added feature-map and Grad-CAM visualization utilities.
-
-### Changed
-
-- Moved training plots into `src/visualization/`.
-- Improved dataset integrity auditing for missing, corrupted, duplicate, and
-  filename/label-mismatched samples.
+---
 
 ## [0.7.0] - 2026-08-16
 
@@ -184,8 +217,18 @@ quality-assessment views, MOS denormalization, dataset EDA and integrity checks,
 shell-script automation, CI validation, and the original YAML-based training flow.
 The complete implementation history is available in `git log`.
 
-[0.7.1]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.7.0...v0.7.1
-[0.7.0]: https://github.com/autentisitet/deep-vqa-framework
+### Historical version-label note
+
+Commit `1923cd4` from 2026-05-24 used the message `0.9.2-beta`. That label was an
+early, overly optimistic estimate of project maturity made before the current
+release process was established. There is no corresponding `v0.9.2-beta` tag,
+and it is not treated as a published release or as evidence that later 0.x
+versions are regressions. Tagged releases and this changelog are the authoritative
+version history.
+
+[0.9.0]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.7.5...v0.9.0
+[0.7.5]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.7.0...v0.7.5
+[0.7.0]: https://github.com/autentisitet/deep-vqa-framework/releases/tag/v0.7.0
 [0.6.4]: https://github.com/autentisitet/deep-vqa-framework/commit/a43df487bee241484d50f7ea3e526f662ba4ba72
 [0.6.2]: https://github.com/autentisitet/deep-vqa-framework/commit/dd1a191
 [0.6.0]: https://github.com/autentisitet/deep-vqa-framework/commit/77fd572

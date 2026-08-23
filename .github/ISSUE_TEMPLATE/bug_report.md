@@ -6,6 +6,9 @@ labels: bug
 assignees: ''
 ---
 
+> This is a suggested template, not a mandatory reporting format. Use only the
+> sections that help explain the issue; a clear free-form report is welcome.
+
 ## Reproduction command
 
 <!-- What command did you run? -->
