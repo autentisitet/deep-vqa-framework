@@ -746,9 +746,17 @@ async def get_artifact(artifact_path: str, request: Request) -> FileResponse:
     if EVALUATION_STORE_BACKEND == "none":
         raise HTTPException(status_code=404, detail="Artifacts are disabled in stateless mode")
     relative = Path(artifact_path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
     root = cfg.resolve(cfg.reports_dir / "iqa-test").resolve()
-    candidate = (root / relative).resolve()
-    if relative.is_absolute() or ".." in relative.parts or root not in candidate.parents or not candidate.is_file():
+    candidate = (root / relative).resolve(strict=False)
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Artifact not found") from None
+
+    if not candidate.is_file():
         raise HTTPException(status_code=404, detail="Artifact not found")
     return FileResponse(candidate)
 
