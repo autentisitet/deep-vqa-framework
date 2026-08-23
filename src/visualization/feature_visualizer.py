@@ -35,9 +35,10 @@ def to_spatial_feature_map(value: torch.Tensor) -> torch.Tensor:
         return value.permute(0, 2, 1).contiguous().view(batch, channels, side, side)
     if value.ndim != 4:
         raise ValueError(f"Expected a 4D spatial activation, got {tuple(value.shape)}")
-    # Swin emits [B,H,W,C], while ResNet emits [B,C,H,W]. In both cases the
-    # spatial dimensions are usually small relative to the channel count.
-    if value.shape[-1] > value.shape[1] and value.shape[-1] > value.shape[2]:
+    # Swin emits [B,H,W,C], while ResNet emits [B,C,H,W]. A channel-last
+    # tensor has a final dimension no larger than both spatial dimensions;
+    # channel-first activations have the opposite layout.
+    if value.shape[-1] <= value.shape[1] and value.shape[-1] <= value.shape[2]:
         return value.permute(0, 3, 1, 2).contiguous()
     return value
 
@@ -112,6 +113,10 @@ class FeatureVisualizer:
             score = self.model(image).reshape(-1)[0]
             cam = None
             if cam_layer:
+                # Forward hooks receive activations immediately, but their
+                # gradient hooks run only after backpropagation from the
+                # scalar quality score.
+                score.backward()
                 if cam_layer not in captured or cam_layer not in gradients:
                     raise ValueError(f"Layer '{cam_layer}' did not produce a differentiable spatial activation")
                 activation = to_spatial_feature_map(captured[cam_layer])[0:1]
