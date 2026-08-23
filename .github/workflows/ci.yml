@@ -66,6 +66,31 @@ jobs:
           docker images | grep vqa-infer
 
 
+  deployment-contract:
+    name: Deployment and Health Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Docker Compose configuration
+        run: |
+          docker compose -f deploy-config/compose/docker-compose.yaml -f deploy-config/compose/docker-compose.docker.yaml -f deploy-config/ollama/docker-compose.yaml config --quiet
+      - name: Validate Nginx configuration syntax
+        run: |
+          docker run --rm -v "$PWD/deploy-config/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
+      - name: Validate deployment profiles and image inputs
+        run: |
+          test -f deploy-config/profiles/infer_deploy.internal.yaml
+          test -f deploy-config/profiles/infer_deploy.public.yaml
+          grep -Eq '^auth:[[:space:]]*$' deploy-config/profiles/infer_deploy.internal.yaml
+          grep -Eq '^[[:space:]]+mode:[[:space:]]+api_key' deploy-config/profiles/infer_deploy.internal.yaml
+          grep -Eq '^[[:space:]]+backend:[[:space:]]+sqlite' deploy-config/profiles/infer_deploy.internal.yaml
+          grep -Eq '^[[:space:]]+mode:[[:space:]]+none' deploy-config/profiles/infer_deploy.public.yaml
+          grep -Eq '^[[:space:]]+backend:[[:space:]]+none' deploy-config/profiles/infer_deploy.public.yaml
+          grep -q 'COPY deploy-config/ ./deploy-config/' Dockerfile
+      - name: Compile runtime packages
+        run: python -m compileall -q deploy src scripts
+
+
 
   lock-check:
     name: Lock File Consistency
@@ -101,7 +126,7 @@ jobs:
 
       - name: Install project and development dependencies
         run: |
-          make install INSTALL_ARGS="--dev"
+          make install DEV=1
           export PATH="$HOME/.local/bin:$PATH"
           uv sync --extra dev --locked
 
@@ -110,3 +135,9 @@ jobs:
 
       - name: Run Makefile type checks
         run: make typecheck
+
+      - name: Run pytest suite
+        run: make pytest
+
+      - name: Verify synchronized project version
+        run: make version-check
