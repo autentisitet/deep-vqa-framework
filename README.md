@@ -4,11 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.12+-red.svg)](https://pytorch.org/)
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-<<<<<<< HEAD
 [![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
-=======
-[![Version](https://img.shields.io/badge/version-0.7.5-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
->>>>>>> origin/main
 [![Code Quality: ruff+black+isort+mypy](https://img.shields.io/badge/code%20quality-ruff%2Bblack%2Bisort%2Bmypy-4B8BBE.svg)](https://github.com/autentisitet/deep-vqa-framework)
 [![Security: pip-audit+sbom](https://img.shields.io/badge/security-pip--audit%2Bsbom-9cf.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
@@ -70,14 +66,10 @@ content, so a file with a forged suffix is rejected during processing.
 - [Training Pipeline](#training-pipeline)
 - [Evaluation & Metrics](#evaluation-metrics)
 - [Deployment & Inference API](#deployment-api)
-<<<<<<< HEAD
 - [Developer Knowledge Base](knowledge/README.md)
 - [Deployment Guide](knowledge/deployment.md)
 - [Frontend Guide](knowledge/frontend.md)
 - [Ollama Guide](knowledge/ollama.md#ollama-integration-guide)
-=======
-- [Deployment Guide](deploy/GUIDE.md)
->>>>>>> origin/main
 - [Frontend](frontend/index.html)
 - [Project Main Structure](#project-main-structure)
 - [Docker / Podman Support](#docker-support)
@@ -249,7 +241,6 @@ The framework automatically generates:
 - **Fold Summary/Comparison**: Per-fold PLCC/SROCC/RMSE/R² summaries, stability views and comparison bars
 - **Sample-level Error Reports**: Complete prediction manifests and automatically exported top-k error samples
 - **Feature Interpretability**: Backbone feature grids and regression Grad-CAM overlays for image inputs
-<<<<<<< HEAD
 - **Subjective Quality Assessment**: Optional Ollama vision-model description, score, and Bayesian posterior for the current frontend request
 
 The browser frontend is intentionally focused on media upload, no-reference IQA/VQA inference, model output, and interpretability. For distribution analysis, use an offline feature-artifact workflow: extract embeddings for every training sample, fit PCA once on the training split, save the projection and normalization parameters, then project a problem sample into that same space for comparison.
@@ -290,21 +281,6 @@ uv run python -m src.data.eda.feature_distribution build \
   --checkpoint deploy/vqa-models/konvid-1k_best.pt \
   --dataset konvid-1k
 
-=======
-
-The browser frontend is intentionally focused on media upload, no-reference IQA/VQA inference, model output, and interpretability. For distribution analysis, use an offline feature-artifact workflow: extract embeddings for every training sample, fit PCA once on the training split, save the projection and normalization parameters, then project a problem sample into that same space for comparison.
-
-This keeps the trained no-reference IQA/VQA models as the core capability while making dataset coverage and outlier analysis reproducible. The saved artifact should include the feature extractor/checkpoint identifier, dataset split, sample IDs, feature normalization parameters, PCA components/mean, and 2-D coordinates.
-
-The workflow is implemented in `src/data/eda/feature_distribution.py`:
-
-```bash
-# Fit the training distribution (use the train split only)
-uv run python -m src.data.eda.feature_distribution build \
-  --checkpoint deploy/vqa-models/konvid-1k_best.pt \
-  --dataset konvid-1k
-
->>>>>>> origin/main
 # Project new/problem samples into the saved space
 uv run python -m src.data.eda.feature_distribution project \
   --artifact results/konvid-1k/eda/feature_distribution/train_pca.npz \
@@ -342,11 +318,7 @@ Checkpoint usage and release restrictions are covered by the project disclaimer;
 
 ### FastAPI Service
 
-<<<<<<< HEAD
 See the dedicated [deployment guide](knowledge/deployment.md) for host mode, Docker/Podman
-=======
-See the dedicated [deployment guide](deploy/GUIDE.md) for host mode, Docker/Podman
->>>>>>> origin/main
 startup, API routes, batch CLI, proxy handling, SELinux mounts, and troubleshooting.
 
 ```bash
@@ -367,13 +339,9 @@ OpenAPI:    http://localhost:8000/api/openapi.json
 ```
 
 The main REST resources are `GET /api/v1/health`, `GET /api/v1/models`,
-<<<<<<< HEAD
 `GET /api/v1/models/{model_id}`, `GET /api/v1/frontend-evaluations`,
 `POST /api/v1/evaluations?model_id=iqa`, and the ephemeral
 `POST /api/v1/subjective-assessments`.
-=======
-`GET /api/v1/models/{model_id}`, and `POST /api/v1/evaluations?model_id=iqa`.
->>>>>>> origin/main
 The evaluation endpoint accepts one multipart `file` and returns a typed
 evaluation resource.
 
@@ -406,11 +374,7 @@ Grad-CAM; double-click any comparison image to open the large preview.
 The CLI selects the task-specific checkpoint, detects image/video files, and
 writes JSON reports to `reports/iqa-test/` or `reports/vqa-test/`. The Make
 targets `test-images`, `test-videos`, and `test-all` call this CLI. MOS bounds
-<<<<<<< HEAD
 are loaded from `train-config/dataset_config.yaml` using the dataset stored in the
-=======
-are loaded from `config/dataset_config.yaml` using the dataset stored in the
->>>>>>> origin/main
 checkpoint configuration.
 
 ---
@@ -442,7 +406,6 @@ deep-vqa-framework/
 │   └── vqa-test/                # VQA batch-inference JSON reports
 |
 ├── results/
-│   ├── diagnostics/             # Feature maps and Grad-CAM outputs
 |   ├── {dataset}/
 │   │   ├── train_logs/           # Training history, CSV logs
 │   │   ├── plots/                # Loss curves, residual plots
@@ -479,10 +442,6 @@ deep-vqa-framework/
 │
 ├── frontend/                # Static browser UI for model inference
 │   ├── index.html                 # Upload, inference and interpretation UI
-<<<<<<< HEAD
-=======
-│   └── index.html                 # Upload, inference and interpretation UI
->>>>>>> origin/main
 │
 └── src/                       # Core framework logic
     ├── main.py                   # Global execution entry point
@@ -499,11 +458,7 @@ deep-vqa-framework/
 
 ## Docker / Podman Support <a id="docker-support"></a>
 
-<<<<<<< HEAD
 For the complete deployment workflow and internal/public mode matrix, see the [Deployment Guide](knowledge/deployment.md). Frontend login, history, stateless behavior, and accessibility notes are in the [Frontend Guide](knowledge/frontend.md).
-=======
-For the complete deployment workflow, see [deploy/GUIDE.md](deploy/GUIDE.md).
->>>>>>> origin/main
 
 The framework supports containerized development and deployment with both Docker and Podman.
 
@@ -545,17 +500,10 @@ make docker-manage
 
 | Component | Description |
 | :--- | :--- |
-<<<<<<< HEAD
 | `Dockerfile` | Multi-stage builds: `base` (shared deps), `dev` (mounted development shell), `train` (training), `prod` (inference) |
 | `deploy-config/compose/docker-compose.yaml` | Base services, bridge network, ports, mounts, and health checks |
 | `deploy-config/compose/docker-compose.docker.yaml` | Docker-specific NVIDIA runtime settings |
 | `deploy-config/compose/docker-compose.podman.yaml` | Podman GPU devices, SELinux options, and mount labels |
-=======
-| `Dockerfile` | Multi-stage builds: `base` (shared deps), `train` (training), `prod` (inference) |
-| `docker-compose.yaml` | Main compose configuration with API health checks, json-file log rotation, model/report/cache mounts, and persistent OpenAPI output |
-| `docker-compose.docker.yaml` | Docker-specific GPU support plus host-network builds |
-| `docker-compose.podman.yaml` | Podman-specific GPU support plus host-network builds |
->>>>>>> origin/main
 
 The Makefile auto-detects Docker vs Podman. For Podman users, `make docker-*` does not require `alias docker=podman`; aliases are only useful if you run container commands manually.
 
@@ -564,20 +512,14 @@ Use `make help` for the command index and `make help-TARGET` for focused guidanc
 Choose the runtime mode that fits the workflow:
 
 ```bash
-<<<<<<< HEAD
 make docker-infer              # Full API + Nginx + frontend; defaults to internal policy
 # For stateless/public policy:
 make docker-infer DEPLOYMENT_MODE=public
-=======
-make docker-api       # API-only development mode on http://127.0.0.1:8001
-make docker-infer     # Full API + Nginx + frontend mode with automatic verification
->>>>>>> origin/main
 ```
 
 The API can also run directly on the host when the Python environment and checkpoints are available:
 
 ```bash
-<<<<<<< HEAD
 uv run python -m uvicorn deploy.api:app --host 127.0.0.1 --port 8000
 ```
 
@@ -593,16 +535,6 @@ with the frontend and deployment guidance in `knowledge/frontend.md`.
 Frontend evaluation history is pluggable through deployment profiles: use `evaluation_store.backend: sqlite` for an internal single-instance deployment, or `none` for a stateless/public deployment. With SQLite enabled, each record contains a browser session scope plus `timestamp`, `file_name`, `file_hash` (SHA-256), `task_type`, `model_used`, `mos_score`, `mos_interval`, and `inference_time_ms`; the frontend only reads records for its own session and can export selected or all of them as JSONL. This session scope is an isolation convenience, not user authentication.
 
 Upload and SQLite safety limits are defined centrally in deployment profiles: uploads default to a 100 MiB limit and 30-second read timeout; the frontend SQLite database defaults to a 256 MiB cap and 5-second busy timeout. Edit that file to change the shared deployment policy. Host-specific endpoints, ports, proxies, and the optional SQLite path remain in `.env`.
-=======
-uv run python -m uvicorn deploy.api:app --host 0.0.0.0 --port 8000
-```
-
-Use `http://127.0.0.1:8000/v1/health` and `http://127.0.0.1:8000/docs` in host mode. In the Nginx mode, use the `/api` prefix (`/api/v1/health`).
-
-The frontend's responsive and accessibility checks are documented in [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md). It is designed for keyboard and reduced-motion use; formal WCAG conformance still requires Lighthouse/axe scans and human assistive-technology testing.
-
-Frontend evaluations are appended to `reports/frontend-evaluations.jsonl` as one JSON object per line. Each record contains `timestamp`, `file_name`, `file_hash` (SHA-256), `task_type`, `model_used`, `mos_score`, `mos_interval`, and `inference_time_ms`.
->>>>>>> origin/main
 
 Dataset scripts detect `http_proxy`/`HTTP_PROXY`. On AutoDL cloud GPU instances, enable the platform proxy before downloading datasets:
 
@@ -610,17 +542,9 @@ Dataset scripts detect `http_proxy`/`HTTP_PROXY`. On AutoDL cloud GPU instances,
 source /etc/network_turbo
 ```
 
-<<<<<<< HEAD
 Compose forwards optional upper- and lowercase proxy variables only to services
 that may download packages or models. Nginx does not need proxy settings; the
 inference and Ollama services keep internal service names in `NO_PROXY`/`no_proxy`.
-=======
-Compose forwards optional upper- and lowercase proxy variables to the containers. It also extends `NO_PROXY`/`no_proxy` with localhost and the Compose service/container names, so health checks and API-to-Nginx traffic remain direct even when the host uses a proxy.
-
-The generic Docker Compose file uses portable bind mounts. On SELinux-enforcing Fedora/RHEL hosts, the Podman overlay adds `:Z` so Podman can relabel the frontend and `default.conf` for the container. If an older container was created before this option was added, recreate it with `podman-compose down` followed by `podman-compose up -d`.
-
-Torch/uv caches are mounted at `/app/.cache` in containers. Runtime services set `XDG_CACHE_HOME=/app/.cache`, `TORCH_HOME=/app/.cache/torch`, and `UV_CACHE_DIR=/app/.cache/uv`, so previously downloaded torchvision backbones can be reused.
->>>>>>> origin/main
 
 The generic Docker Compose file uses portable bind mounts. On SELinux-enforcing Fedora/RHEL hosts, the Podman overlay adds `:Z` so Podman can relabel the frontend and `default.conf` for the container. If an older container was created before this option was added, recreate it with `podman-compose down` followed by `podman-compose up -d`.
 
@@ -740,11 +664,7 @@ The framework includes security tools to audit dependencies:
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-<<<<<<< HEAD
 - **Version**: 0.9.0
-=======
-- **Version**: 0.7.5
->>>>>>> origin/main
 
 ---
 

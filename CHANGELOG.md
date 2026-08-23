@@ -5,7 +5,6 @@ All notable changes to Deep-VQA-Framework are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
-<<<<<<< HEAD
 ## [0.9.0] - 2026-08-23
 
 ### Added
@@ -62,8 +61,6 @@ and releases use [Semantic Versioning](https://semver.org/).
 
 ---
 
-=======
->>>>>>> origin/main
 ## [0.7.5] - 2026-08-21
 
 ### Added
@@ -85,17 +82,10 @@ and releases use [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Reworked the browser frontend for image/video upload, automatic IQA/VQA
-<<<<<<< HEAD
   routing, model results, JSONL history, and interpretability outputs.
 - Stored frontend evaluation history as append-only JSONL records containing
   timestamp, filename, SHA-256 file hash, task type, model, MOS score, MOS
   interval, and inference latency.
-=======
-  routing, model results, history export, and interpretability outputs.
-- Frontend evaluations are appended to
-  `reports/frontend-evaluations.jsonl` with timestamp, filename, SHA-256 file
-  hash, task type, model, MOS score, MOS interval, and inference latency.
->>>>>>> origin/main
 - Improved dataset integrity checks for missing, corrupted, duplicate, and
   filename/label-mismatched samples.
 - Improved the Docker/Podman workflow with separate API-only and full-stack
@@ -117,34 +107,7 @@ and releases use [Semantic Versioning](https://semver.org/).
   need for authentication, authorization, rate limiting, malware scanning,
   and TLS before exposure to untrusted networks.
 
-<<<<<<< HEAD
 ---
-=======
-## [0.7.3] - 2026-08-20
-
-### Added
-
-- Added image feature-map and Grad-CAM visualization API.
-- Expanded training diagnostics with residual-vs-true-MOS and MOS-bin reports.
-
-### Changed
-
-- Preserved complete per-sample error manifests for downstream analysis.
-
-## [0.7.1] - 2026-08-20
-
-### Added
-
-- Added RESTful FastAPI resources for health, model metadata, and media evaluations.
-- Added generated Swagger UI, ReDoc, and OpenAPI documentation.
-- Added feature-map and Grad-CAM visualization utilities.
-
-### Changed
-
-- Moved training plots into `src/visualization/`.
-- Improved dataset integrity auditing for missing, corrupted, duplicate, and
-  filename/label-mismatched samples.
->>>>>>> origin/main
 
 ## [0.7.0] - 2026-08-16
 
@@ -254,7 +217,6 @@ quality-assessment views, MOS denormalization, dataset EDA and integrity checks,
 shell-script automation, CI validation, and the original YAML-based training flow.
 The complete implementation history is available in `git log`.
 
-<<<<<<< HEAD
 ### Historical version-label note
 
 Commit `1923cd4` from 2026-05-24 used the message `0.9.2-beta`. That label was an
@@ -267,10 +229,6 @@ version history.
 [0.9.0]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.7.5...v0.9.0
 [0.7.5]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.7.0...v0.7.5
 [0.7.0]: https://github.com/autentisitet/deep-vqa-framework/releases/tag/v0.7.0
-=======
-[0.7.1]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.7.0...v0.7.1
-[0.7.0]: https://github.com/autentisitet/deep-vqa-framework
->>>>>>> origin/main
 [0.6.4]: https://github.com/autentisitet/deep-vqa-framework/commit/a43df487bee241484d50f7ea3e526f662ba4ba72
 [0.6.2]: https://github.com/autentisitet/deep-vqa-framework/commit/dd1a191
 [0.6.0]: https://github.com/autentisitet/deep-vqa-framework/commit/77fd572

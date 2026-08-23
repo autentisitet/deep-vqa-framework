@@ -27,7 +27,6 @@
         }
       }
     },
-
     "/v1/auth/status": {
       "get": {
         "tags": [
@@ -111,7 +110,6 @@
         }
       }
     },
-
     "/v1/models": {
       "get": {
         "tags": [
@@ -185,7 +183,6 @@
         }
       }
     },
-
     "/v1/frontend-evaluations": {
       "get": {
         "tags": [
@@ -301,7 +298,6 @@
         }
       }
     },
-
     "/v1/evaluations": {
       "post": {
         "tags": [
@@ -453,7 +449,6 @@
         ],
         "title": "AuthStatusResponse"
       },
-
       "Body_create_evaluation_v1_evaluations_post": {
         "properties": {
           "file": {
@@ -469,7 +464,6 @@
         ],
         "title": "Body_create_evaluation_v1_evaluations_post"
       },
-
       "Body_create_subjective_assessment_v1_subjective_assessments_post": {
         "properties": {
           "file": {
@@ -485,7 +479,6 @@
         ],
         "title": "Body_create_subjective_assessment_v1_subjective_assessments_post"
       },
-
       "Body_create_visualization_v1_visualizations_post": {
         "properties": {
           "file": {
@@ -615,7 +608,6 @@
         ],
         "title": "EvaluationResponse"
       },
-
       "FrontendEvaluationLogResponse": {
         "properties": {
           "items": {
@@ -639,7 +631,6 @@
         "title": "FrontendEvaluationLogResponse",
         "description": "Frontend evaluation records read from the SQLite evaluation store."
       },
-
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -679,7 +670,6 @@
         ],
         "title": "HealthResponse"
       },
-
       "LoginRequest": {
         "properties": {
           "api_key": {
@@ -693,7 +683,6 @@
         ],
         "title": "LoginRequest"
       },
-
       "ModelCollectionResponse": {
         "properties": {
           "items": {
@@ -769,7 +758,6 @@
         ],
         "title": "ModelSummary"
       },
-
       "SubjectiveAssessmentResponse": {
         "properties": {
           "media_type": {
@@ -827,7 +815,6 @@
         "title": "SubjectiveAssessmentResponse",
         "description": "Ephemeral Ollama-based quality description and Bayesian assessment."
       },
-
       "ValidationError": {
         "properties": {
           "loc": {
