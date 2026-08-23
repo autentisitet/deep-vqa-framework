@@ -741,40 +741,45 @@ async def create_visualization(
         await file.close()
 
 
+def _find_artifact(root: Path, requested_path: str) -> Path | None:
+    """Find a requested artifact among files enumerated from the trusted root."""
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            resolved = path.resolve(strict=True)
+            relative = resolved.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        if resolved.is_file() and relative.as_posix() == requested_path:
+            return resolved
+    return None
+
+
 @app.get(f"{API_PREFIX}/artifacts/{{artifact_path:path}}", include_in_schema=False)
 async def get_artifact(artifact_path: str, request: Request) -> FileResponse:
     """Serve generated visualization artifacts only after API authentication."""
     _require_auth(request)
     if EVALUATION_STORE_BACKEND == "none":
         raise HTTPException(status_code=404, detail="Artifacts are disabled in stateless mode")
-    normalized_artifact_path = Path(artifact_path).as_posix()
-    relative = Path(normalized_artifact_path)
+    normalized_artifact_path = artifact_path.replace("\\", "/")
+    segments = normalized_artifact_path.split("/")
     if (
         not normalized_artifact_path
         or normalized_artifact_path == "."
         or normalized_artifact_path.startswith("/")
-        or normalized_artifact_path.startswith("\\")
-        or relative.is_absolute()
-        or ".." in relative.parts
-    ):
-        raise HTTPException(status_code=404, detail="Artifact not found")
-
-    if any(
-        not segment
-        or segment in {".", ".."}
-        or not SAFE_ARTIFACT_SEGMENT_RE.fullmatch(segment)
-        for segment in relative.parts
+        or any(
+            not segment
+            or segment in {".", ".."}
+            or not SAFE_ARTIFACT_SEGMENT_RE.fullmatch(segment)
+            for segment in segments
+        )
     ):
         raise HTTPException(status_code=404, detail="Artifact not found")
 
     root = cfg.resolve(cfg.reports_dir / "iqa-test").resolve()
-    candidate = (root / relative).resolve(strict=False)
-    try:
-        candidate.relative_to(root)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Artifact not found") from None
-
-    if not candidate.is_file():
+    candidate = _find_artifact(root, normalized_artifact_path)
+    if candidate is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
     return FileResponse(candidate)
 
