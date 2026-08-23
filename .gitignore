@@ -22,9 +22,11 @@ examples/**/*
 venv/
 env/
 .env/
+.env
 .ruff_cache/
 .uv_cache/
 .mypy_cache/
+.pytest_cache/
 .cache/
 __pycache__/
 *.py[cod]
@@ -41,6 +43,10 @@ Thumbs.db
 
 .markdownlint.json
 .markdownlintignore
+Makefile.local
+config.mk
+tmp/
+temp/
 
 # Local AI / agent tooling
 .cursor/
@@ -48,6 +54,7 @@ Thumbs.db
 .cline/
 .continue/
 .windsurf/
+.trae/
 .codeium/
 .roo/
 .devin/
@@ -55,10 +62,5 @@ Thumbs.db
 .aider*
 .codex/
 .agents/
-
-tmp/
-temp/
-Makefile.local
-config.mk
 
 git_log.txt
