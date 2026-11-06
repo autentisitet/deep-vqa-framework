@@ -82,7 +82,7 @@ from .schemas import (
 
 API_PREFIX = "/v1"
 DEVICE = cfg.default_device
-SAFE_FILE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+SAFE_FILE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 MODEL_SETTINGS = cfg.deployment.models
 MODEL_PATHS = {model_id: cfg.resolve_path(settings.checkpoint_path) for model_id, settings in MODEL_SETTINGS.items()}
 OPENAPI_OUTPUT_PATH = cfg.resolve_path(Path("docs/openapi.json"))
@@ -1225,25 +1225,22 @@ async def get_generated_file(file_path: str, request: Request) -> FileResponse:
     if owner is None:
         raise ArtifactNotFoundError("Generated file not found")
     normalized_file_path = file_path.replace("\\", "/")
-    segments = normalized_file_path.split("/")
-    if (
-        not normalized_file_path
-        or normalized_file_path == "."
-        or normalized_file_path.startswith("/")
-        or any(
-            not segment
-            or segment.startswith(".")
-            or segment in {".", ".."}
-            or not SAFE_FILE_SEGMENT_RE.fullmatch(segment)
-            for segment in segments
-        )
-    ):
-        raise ArtifactNotFoundError("Generated file not found")
+    # Rebuild the request path from regex-validated segments so the value handed
+    # to the filesystem is a fresh string that cannot contain separators, "..",
+    # absolute prefixes, or dotfiles. CodeQL treats ``re.fullmatch(...).group(0)``
+    # as the sanitization boundary for path-injection analysis.
+    validated_segments: list[str] = []
+    for segment in normalized_file_path.split("/"):
+        match = SAFE_FILE_SEGMENT_RE.fullmatch(segment)
+        if match is None:
+            raise ArtifactNotFoundError("Generated file not found")
+        validated_segments.append(match.group(0))
+    safe_relative_path = "/".join(validated_segments)
 
     root = _generated_file_root()
     # Resolve the artifact directory before reading its owner, so a symlink or
     # ``..`` can never point the owner lookup outside the report directory.
-    owner_dir = _resolve_within(root, segments[0])
+    owner_dir = _resolve_within(root, validated_segments[0])
     if owner_dir is None or not owner_dir.is_dir():
         raise ArtifactNotFoundError("Generated file not found")
     recorded_owner = _artifact_owner(owner_dir)
@@ -1251,7 +1248,7 @@ async def get_generated_file(file_path: str, request: Request) -> FileResponse:
     # session's artifact exists.
     if recorded_owner is None or not hmac.compare_digest(recorded_owner, owner):
         raise ArtifactNotFoundError("Generated file not found")
-    candidate = _find_generated_file(root, normalized_file_path)
+    candidate = _find_generated_file(root, safe_relative_path)
     if candidate is None:
         raise ArtifactNotFoundError("Generated file not found")
     return FileResponse(candidate)
