@@ -1,0 +1,3 @@
+# Podman CPU-only overlay. SELinux labels live with the bind mounts in the base
+# topology, so this combination has no extra settings.
+services: {}

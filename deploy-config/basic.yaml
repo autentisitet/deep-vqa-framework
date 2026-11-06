@@ -1,0 +1,35 @@
+# Shared serving defaults. Mode overrides live in profiles/.
+models:
+  iqa:
+    checkpoint_path: deploy/iqa-models/tid2013_best.pt
+    task_type: iqa
+    media_type: image
+    model_name: IQAVQANet
+    backbone: swin_t
+    dataset: TID2013
+    mos_min: 0.242
+    mos_max: 7.214
+  vqa:
+    checkpoint_path: deploy/vqa-models/konvid-1k_best.pt
+    task_type: vqa
+    media_type: video
+    model_name: IQAVQANet
+    backbone: swin_t
+    dataset: KoNViD-1k
+    mos_min: 1.22
+    mos_max: 4.64
+inference_runtime:
+  preload_models: true
+  serialize_heavy_requests: true
+uploads:
+  max_bytes: 104857600
+  read_timeout_seconds: 30
+sqlite:
+  max_database_bytes: 268435456
+  busy_timeout_seconds: 5
+artifacts:
+  retention_seconds: 604800
+auth:
+  login_attempts: 5
+  login_window_seconds: 900
+  session_max_age_seconds: 86400

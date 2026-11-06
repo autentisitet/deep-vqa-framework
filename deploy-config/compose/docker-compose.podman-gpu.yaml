@@ -1,0 +1,20 @@
+# Podman-only GPU settings for v0.9.6 and SELinux mount labels.
+services:
+  vqa-dev:
+    security_opt:
+      - label=disable
+    devices:
+      - nvidia.com/gpu=all
+
+  vqa-train:
+    security_opt:
+      - label=disable
+    devices:
+      - nvidia.com/gpu=all
+
+  vqa-infer:
+    security_opt:
+      - label=disable
+    devices:
+      - nvidia.com/gpu=all
+

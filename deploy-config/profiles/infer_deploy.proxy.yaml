@@ -1,0 +1,5 @@
+# Overrides for ../basic.yaml: The upstream reverse proxy provides HTTPS and authentication; no history or artifacts are saved.
+auth:
+  mode: none
+evaluation_store:
+  backend: none
