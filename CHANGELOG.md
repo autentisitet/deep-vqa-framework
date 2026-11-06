@@ -7,8 +7,9 @@ and releases use [Semantic Versioning](https://semver.org/).
 
 ## [0.9.6] - Unreleased
 
-> All uncommitted work in the current release-preparation tree belongs to
-> the v0.9.6 release line. Changes remain uncommitted until explicit review.
+> Changes merged after the `v0.9.0` tag belong to the v0.9.6 release line
+> until the release is tagged. The comparison link at the end of this file is
+> the authoritative commit index for the current unreleased scope.
 
 ### Added
 
@@ -115,6 +116,11 @@ and releases use [Semantic Versioning](https://semver.org/).
   and their optional scanner dependencies. Repository security is documented
   around GitHub CodeQL, Dependabot, dependency review, secret scanning, CI,
   and `SECURITY.md` instead of presenting local scanners as a project feature.
+- Upgraded `filelock`, `urllib3`, and `setuptools` to patched versions and
+  regenerated the locked requirements export to resolve their Dependabot alerts.
+- Reduced routine Dependabot noise by scheduling Python and GitHub Actions
+  updates monthly and grouping minor and patch updates by ecosystem; major
+  updates remain separate for manual review.
 
 ### Security
 
