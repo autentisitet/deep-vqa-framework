@@ -2,9 +2,8 @@
 import gc
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
-import cv2
 import numpy as np
 import pandas as pd
 import torch
@@ -13,32 +12,29 @@ from torch.utils.data import DataLoader, Dataset
 
 from src.config.schemas import Config
 from src.core.engine import TrainerEngine
+from src.core.evaluator import Evaluator
 from src.data.eda.split import (
     infer_group_labels,
     make_group_kfold_splits,
     validate_group_split_isolation,
 )
+from src.data.image_io import read_image_rgb
 from src.data.preprocessing import (
+    Preprocessor,
     rgb_array_to_imagenet_tensor,
-    rgb_video_array_to_imagenet_tensor,
 )
-
-try:
-    from decord import VideoReader, cpu
-    DECORD_AVAILABLE = True
-except ImportError:
-    DECORD_AVAILABLE = False
-    logger.warning("Decord not available, using OpenCV for video loading.")
-
 from src.models.iqavqa_model import IQAVQANet
 from src.models.losses import IQAVQALoss
 from src.utils.checkpointing import select_best_checkpoint
+from src.utils.file_loader import CaseInsensitiveAssetResolver
 
 
-def release_torch_cache(func: Callable[..., Any]) -> Callable[..., Any]:
+def release_torch_cache[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """Release CUDA/cache resources after a training or evaluation stage."""
+
     @wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        """Call the wrapped stage, then release CUDA cache and run GC."""
         try:
             return func(*args, **kwargs)
         finally:
@@ -51,7 +47,10 @@ def release_torch_cache(func: Callable[..., Any]) -> Callable[..., Any]:
 
 def worker_init_fn(worker_id: int) -> None:
     """Set random seed for each DataLoader worker."""
-    np.random.seed(np.random.get_state()[1][0] + worker_id)
+    state = np.random.get_state(legacy=True)
+    if not isinstance(state, tuple):
+        raise TypeError("Expected the legacy NumPy random state tuple")
+    np.random.seed(int(state[1][0]) + worker_id)
 
 
 class ImageVideoDataset(Dataset):
@@ -65,8 +64,8 @@ class ImageVideoDataset(Dataset):
         df: pd.DataFrame,
         data_dir: Path,
         cfg: Config,
-        resolver: Any,
-        transform: Any = None,
+        resolver: CaseInsensitiveAssetResolver,
+        transform: Callable[[np.ndarray], torch.Tensor] | None = None,
     ):
         self.df = df.reset_index(drop=True)
         self.data_dir = Path(data_dir)
@@ -77,20 +76,17 @@ class ImageVideoDataset(Dataset):
         self.input_size = cfg.model.input_size
         self.data_type = cfg.dataset.data_type
 
-        self.traditional_cols = [
-            c for c in ["ssim", "vif", "dlm", "vmaf", "niqe"]
-            if c in self.df.columns
-        ]
+        self.traditional_cols = [c for c in ["ssim", "vif", "dlm", "vmaf", "niqe"] if c in self.df.columns]
 
     def __len__(self) -> int:
         return len(self.df)
 
-    def __getitem__(self, idx: int) -> dict[str, Any]:
+    def __getitem__(self, idx: int) -> dict[str, object]:
         row = self.df.iloc[idx]
         sample_id = str(row["sample_id"]).strip()
 
         try:
-            asset = self.resolver.resolve(sample_id)
+            asset = self.resolver.find_asset(sample_id)
             target_path = asset.path
             is_video = asset.is_video
         except Exception as e:
@@ -105,91 +101,26 @@ class ImageVideoDataset(Dataset):
             raise RuntimeError(f"Failed to read {target_path}") from e
 
         label = torch.tensor(row.get("normalized_score", row["mos"]), dtype=torch.float32)
-        payload = {"data": data_tensor, "label": label, "sample_id": sample_id}
+        payload: dict[str, object] = {"data": data_tensor, "label": label, "sample_id": sample_id}
 
         if self.traditional_cols:
-            payload["traditional"] = {
-                col: torch.tensor(row[col], dtype=torch.float32)
-                for col in self.traditional_cols
-            }
+            payload["traditional"] = {col: torch.tensor(row[col], dtype=torch.float32) for col in self.traditional_cols}
 
         return payload
 
     def _read_video(self, path: str) -> torch.Tensor:
-        """Read video using Decord with OpenCV fallback."""
-        if DECORD_AVAILABLE:
-            try:
-                vr = VideoReader(path, ctx=cpu(0))
-                total_frames = len(vr)
-
-                if total_frames >= self.num_frames:
-                    indices = np.linspace(0, total_frames - 1, self.num_frames, dtype=int).tolist()
-                else:
-                    indices = list(range(total_frames))
-
-                frames = vr.get_batch(indices).asnumpy()
-                if frames.size == 0:
-                    raise ValueError("Empty frames")
-
-                tensor = rgb_video_array_to_imagenet_tensor(frames, input_size=self.input_size)
-
-                if tensor.size(0) < self.num_frames:
-                    pad = tensor[-1].unsqueeze(0).repeat(self.num_frames - tensor.size(0), 1, 1, 1)
-                    tensor = torch.cat([tensor, pad], dim=0)
-
-                return tensor
-            except Exception as e:
-                logger.debug(f"Decord failed for {path}: {e}")
-
-        return self._read_video_opencv(path)
-
-    def _read_video_opencv(self, path: str) -> torch.Tensor:
-        """OpenCV fallback for video reading."""
-        cap = cv2.VideoCapture(path)
-        if not cap.isOpened():
-            raise ValueError(f"Failed to open video: {path}")
-
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if total_frames >= self.num_frames:
-            indices = np.linspace(0, total_frames - 1, self.num_frames, dtype=int)
-        else:
-            indices = range(self.num_frames)
-
-        frames = []
-        for idx in indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
-            ret, frame = cap.read()
-            if not ret:
-                break
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(frame)
-
-        cap.release()
-
-        if not frames:
-            raise ValueError(f"No readable frames in video: {path}")
-
-        video_np = np.stack(frames)
-        tensor = rgb_video_array_to_imagenet_tensor(video_np, input_size=self.input_size)
-
-        if tensor.size(0) < self.num_frames:
-            pad = tensor[-1].unsqueeze(0).repeat(self.num_frames - tensor.size(0), 1, 1, 1)
-            tensor = torch.cat([tensor, pad], dim=0)
-
-        return tensor
+        """Sample video frames with Decord."""
+        return Preprocessor(num_frames=self.num_frames, input_size=self.input_size).process_video(Path(path))
 
     def _read_image(self, path: str) -> torch.Tensor:
-        """Read and preprocess a single image."""
-        img = cv2.imread(path)
-        if img is None:
-            raise ValueError(f"Failed to decode image: {path}")
-
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        """Read and preprocess a single image with Pillow."""
+        image_np = read_image_rgb(Path(path))
 
         if self.transform:
-            return self.transform(img)
+            transformed: torch.Tensor = self.transform(image_np)
+            return transformed
 
-        return rgb_array_to_imagenet_tensor(img, input_size=self.input_size)
+        return rgb_array_to_imagenet_tensor(image_np, input_size=self.input_size)
 
 
 class TrainerExecutionPipeline:
@@ -202,7 +133,7 @@ class TrainerExecutionPipeline:
         cfg: Config,
         eda_df: pd.DataFrame,
         data_dir: Path,
-        resolver: Any,
+        resolver: CaseInsensitiveAssetResolver,
         fast_run: bool = False,
     ):
         self.cfg = cfg
@@ -218,8 +149,7 @@ class TrainerExecutionPipeline:
         self.num_workers = cfg.preprocessing.num_workers
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-
-    def execute_cross_validation(self, evaluator: Any) -> int:
+    def execute_cross_validation(self, evaluator: Evaluator) -> int:
         """Execute K-fold cross-validation."""
         n_splits = self.cfg.preprocessing.k_fold
         dataset_key = self.cfg.dataset.registry_key or self.cfg.dataset.name
@@ -305,21 +235,17 @@ class TrainerExecutionPipeline:
 
         return completed_folds
 
-
     @release_torch_cache
     def _run_fold(
         self,
         train_sub: pd.DataFrame,
         val_sub: pd.DataFrame,
-        evaluator: Any,
+        evaluator: Evaluator,
         current_fold: int,
     ) -> None:
-        train_dataset = ImageVideoDataset(
-            train_sub, self.data_dir, cfg=self.cfg, resolver=self.resolver
-        )
-        val_dataset = ImageVideoDataset(
-            val_sub, self.data_dir, cfg=self.cfg, resolver=self.resolver
-        )
+        """Train and validate one fold from scratch."""
+        train_dataset = ImageVideoDataset(train_sub, self.data_dir, cfg=self.cfg, resolver=self.resolver)
+        val_dataset = ImageVideoDataset(val_sub, self.data_dir, cfg=self.cfg, resolver=self.resolver)
 
         train_loader = DataLoader(
             train_dataset,
@@ -359,8 +285,10 @@ class TrainerExecutionPipeline:
         )
 
     def _build_optimizer(self, model: torch.nn.Module) -> torch.optim.Optimizer:
+        """Build the optimizer selected by the training config."""
         train_cfg = self.cfg.train
         optimizer_name = train_cfg.optimizer.lower()
+        optimizer_cls: type[torch.optim.Optimizer]
 
         if optimizer_name == "adamw":
             optimizer_cls = torch.optim.AdamW
@@ -386,7 +314,8 @@ class TrainerExecutionPipeline:
     def _build_scheduler(
         self,
         optimizer: torch.optim.Optimizer,
-    ) -> Any | None:
+    ) -> torch.optim.lr_scheduler.LRScheduler | torch.optim.lr_scheduler.ReduceLROnPlateau | None:
+        """Build the scheduler selected by the training config, if any."""
         train_cfg = self.cfg.train
         scheduler_name = train_cfg.scheduler.lower()
 
@@ -415,7 +344,6 @@ class TrainerExecutionPipeline:
             eta_min=1e-6,
         )
 
-
     def _prepare_data(self) -> pd.DataFrame:
         """Filter outliers and prepare data for cross-validation."""
         clean_df = self.eda_df.copy()
@@ -426,13 +354,11 @@ class TrainerExecutionPipeline:
 
         return clean_df
 
-
-
     @release_torch_cache
     def _evaluate_test_set(
         self,
         test_df: pd.DataFrame,
-        evaluator: Any,
+        evaluator: Evaluator,
         base_filename: str,
     ) -> None:
         """Evaluate on the held-out test set."""
@@ -454,9 +380,7 @@ class TrainerExecutionPipeline:
 
         model.eval()
 
-        test_dataset = ImageVideoDataset(
-            test_df, self.data_dir, cfg=self.cfg, resolver=self.resolver
-        )
+        test_dataset = ImageVideoDataset(test_df, self.data_dir, cfg=self.cfg, resolver=self.resolver)
         test_loader = DataLoader(
             test_dataset,
             batch_size=self.batch_size,

@@ -3,6 +3,7 @@ import torch.nn as nn
 
 
 def build_quality_head(num_features: int, dropout_rate: float) -> nn.Sequential:
+    """Build the MLP quality head that maps pooled features to a score."""
     return nn.Sequential(
         nn.Linear(num_features, 512),
         nn.BatchNorm1d(512),
@@ -18,6 +19,7 @@ def build_quality_head(num_features: int, dropout_rate: float) -> nn.Sequential:
 
 
 def init_head_weights(head: nn.Sequential) -> None:
+    """Initialize the head's linear and normalization layers."""
     for m in head.modules():
         if isinstance(m, nn.Linear):
             nn.init.kaiming_uniform_(m.weight, mode="fan_in", nonlinearity="relu")

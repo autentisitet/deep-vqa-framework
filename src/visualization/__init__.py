@@ -6,7 +6,7 @@ from .feature_visualizer import (
     load_image_tensor,
     to_spatial_feature_map,
 )
-from .training_plots import MetricsPlotter, PLOT_REGISTRY
+from .training_plots import PLOT_REGISTRY, MetricsPlotter
 
 __all__ = [
     "FeatureVisualizationResult",

@@ -1,0 +1,5 @@
+# Overrides for ../basic.yaml: Single-user loopback only; anonymous browser sessions own history and artifacts.
+auth:
+  mode: none
+evaluation_store:
+  backend: sqlite

@@ -1,5 +1,5 @@
-# Base Compose definition shared by Docker and Podman (release v0.9.0).
-# Deployment policy belongs in deploy-config/profiles/*.yaml; host-specific
+# Base Compose definition shared by Docker and Podman (release v0.9.6).
+# Mode settings belong in deploy-config/profiles/*.yaml; host-specific
 # values come from .env.
 services:
   vqa-dev:
@@ -12,19 +12,21 @@ services:
       - backend
     shm_size: 16gb
     volumes:
-      - ../../src:/app/src
-      - ../../train-config:/app/train-config:ro
-      - ../../deploy:/app/deploy
-      - ../../deploy-config:/app/deploy-config:ro
-      - ../../tests:/app/tests:ro
-      - ../../scripts:/app/scripts:ro
+      # Shared labels are harmless when SELinux is disabled and let Docker and
+      # Podman use the same runtime mount contract on enforcing hosts.
+      - ../../src:/app/src:z
+      - ../../train-config:/app/train-config:ro,z
+      - ../../deploy:/app/deploy:z
+      - ../../deploy-config:/app/deploy-config:ro,z
+      - ../../tests:/app/tests:ro,z
+      - ../../scripts:/app/scripts:ro,z
       # The deployment contract tests inspect the build recipe; keep this
       # metadata file mounted instead of copying the whole repository.
-      - ../../Dockerfile:/app/Dockerfile:ro
-      - ../../datasets:/app/datasets
-      - ../../results:/app/results
-      - ../../reports:/app/reports
-      - ../../.cache:/app/.cache
+      - ../../Dockerfile:/app/Dockerfile:ro,z
+      - ../../datasets:/app/datasets:z
+      - ../../results:/app/results:z
+      - ../../reports:/app/reports:z
+      - ../../.cache:/app/.cache:z
     environment:
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
@@ -38,8 +40,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "50m"
-        max-file: "3"
+        max-size: "${CONTAINER_LOG_MAX_SIZE:-50m}"
+        max-file: "${CONTAINER_LOG_MAX_FILES:-3}"
 
   vqa-train:
     build:
@@ -52,13 +54,13 @@ services:
       - backend
     shm_size: 16gb
     volumes:
-      - ../../datasets:/app/datasets
-      - ../../results:/app/results
-      - ../../reports:/app/reports
-      - ../../docs:/app/docs    # Save restful API docs for local reference
-      - ../../deploy/iqa-models:/app/deploy/iqa-models
-      - ../../deploy/vqa-models:/app/deploy/vqa-models
-      - ../../.cache:/app/.cache
+      - ../../datasets:/app/datasets:z
+      - ../../results:/app/results:z
+      - ../../reports:/app/reports:z
+      # Training copies the selected checkpoints back to the host model directories.
+      - ../../deploy/iqa-models:/app/deploy/iqa-models:z
+      - ../../deploy/vqa-models:/app/deploy/vqa-models:z
+      - ../../.cache:/app/.cache:z
     environment:
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
@@ -72,8 +74,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "50m"
-        max-file: "3"
+        max-size: "${CONTAINER_LOG_MAX_SIZE:-50m}"
+        max-file: "${CONTAINER_LOG_MAX_FILES:-3}"
 
 
   vqa-infer:
@@ -88,38 +90,40 @@ services:
     shm_size: 8gb
     expose:
       - "8000"
+    # Host-loopback only for local health/debug tooling; public traffic enters Nginx.
     ports:
       - "${API_BIND_HOST:-127.0.0.1}:${API_PORT:-8001}:${API_INTERNAL_PORT:-8000}"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-      - "host.containers.internal:host-gateway"
     volumes:
-      - ../../deploy/iqa-models:/app/deploy/iqa-models
-      - ../../deploy/vqa-models:/app/deploy/vqa-models
-      - ../../examples:/app/examples
-      - ../../reports:/app/reports
-      - ../../results:/app/results
-      - ../../docs:/app/docs    # Save restful API docs for local reference
-      - ../../.cache:/app/.cache
+      - ${IQA_MODEL_VOLUME_PATH:-/opt/deep-vqa/deploy/iqa-models}:/app/deploy/iqa-models:ro,z
+      - ${VQA_MODEL_VOLUME_PATH:-/opt/deep-vqa/deploy/vqa-models}:/app/deploy/vqa-models:ro,z
+      # Deployment policy is mounted rather than only baked into the image, so
+      # switching profiles takes effect without rebuilding the image.
+      - ../../deploy-config:/app/deploy-config:ro,z
+      - ../../examples:/app/examples:ro,z
+      - ../../reports:/app/reports:z
+      - vqa-uploads:/app/uploads
+      - ../../docs:/app/docs:z    # Save restful API docs for local reference
+      - ../../.cache:/app/.cache:z
     environment:
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - http_proxy=${http_proxy:-}
       - https_proxy=${https_proxy:-}
-      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1},vqa-infer,vqa-ollama,host.docker.internal,host.containers.internal
-      - no_proxy=${no_proxy:-localhost,127.0.0.1},vqa-infer,vqa-ollama,host.docker.internal,host.containers.internal
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1}
+      - no_proxy=${no_proxy:-localhost,127.0.0.1}
 
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - DEEP_VQA_API_KEY=${DEEP_VQA_API_KEY:-}
       - DEEP_VQA_AUTH_SECRET=${DEEP_VQA_AUTH_SECRET:-}
+      - DEEP_VQA_UPLOAD_DIR=${DEEP_VQA_UPLOAD_DIR:-/app/uploads}
       - DEEP_VQA_SQLITE_PATH=${DEEP_VQA_SQLITE_PATH:-reports/frontend-evaluations.sqlite3}
+      - DEEP_VQA_ACCOUNTS_SQLITE_PATH=${DEEP_VQA_ACCOUNTS_SQLITE_PATH:-reports/accounts.sqlite3}
       - DEEP_VQA_DEPLOYMENT_CONFIG=${DEEP_VQA_DEPLOYMENT_CONFIG:-deploy-config/profiles/infer_deploy.internal.yaml}
     restart: unless-stopped
     logging:
       driver: "json-file"
       options:
-        max-size: "50m"
-        max-file: "3"
+        max-size: "${CONTAINER_LOG_MAX_SIZE:-50m}"
+        max-file: "${CONTAINER_LOG_MAX_FILES:-3}"
     healthcheck:
       test: ["CMD", ".venv/bin/python", "-c", "import urllib.request; opener=urllib.request.build_opener(urllib.request.ProxyHandler({})); opener.open('http://127.0.0.1:8000/v1/health', timeout=5)"]
       start_period: 90s
@@ -138,13 +142,22 @@ services:
     ports:
       - "${WEB_BIND_HOST:-127.0.0.1}:${WEB_PORT:-8000}:${WEB_INTERNAL_PORT:-80}"
     volumes:
-      - ../../frontend:/usr/share/nginx/html:ro
-      - ../nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      # These files are private to Nginx, so use a private SELinux label.
+      - ../../frontend:/usr/share/nginx/html:ro,Z
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro,Z
+      - ../nginx/default.conf:/etc/nginx/conf.d/default.conf:ro,Z
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${CONTAINER_LOG_MAX_SIZE:-50m}"
+        max-file: "${CONTAINER_LOG_MAX_FILES:-3}"
     healthcheck:
-      # BusyBox wget's --spider uses HEAD; the API health route is GET-only.
-      # Fetch and discard the response so the probe exercises the real proxy path.
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--output-document=/dev/null", "http://127.0.0.1/api/v1/health"]
+      # Keep the container healthcheck local to Nginx. Rootless Podman can make
+      # BusyBox wget unable to connect to the container's own published socket
+      # even while host and peer-container traffic works. The Makefile performs
+      # the end-to-end HTTP probe through the published Nginx port.
+      test: ["CMD", "nginx", "-t"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -152,3 +165,6 @@ services:
 networks:
   backend:
     driver: bridge
+
+volumes:
+  vqa-uploads:

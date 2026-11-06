@@ -1,0 +1,3 @@
+# Docker CPU-only overlay. The base topology already contains the complete
+# cross-engine mount contract, so this combination has no extra settings.
+services: {}

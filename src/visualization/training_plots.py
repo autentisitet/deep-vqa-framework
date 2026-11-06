@@ -11,7 +11,6 @@ from loguru import logger
 from src.config.schemas import Config
 from src.utils.registry import Registry
 
-
 PLOT_REGISTRY = Registry[dict]("visualization_plots")
 PLOT_REGISTRY.register(
     "training_history",
@@ -71,6 +70,7 @@ class MetricsPlotter:
         self.base_prefix = f"{self.current_date}_{self.task_type}_{self.model_name}"
 
     def _safe_dataset_name(self, dataset_name: str) -> str:
+        """Normalize a dataset name for filenames."""
         return self.cfg.paths.dataset_slug(dataset_name)
 
     def render_registered(self, plot_name: str, **kwargs) -> None:
@@ -130,6 +130,7 @@ class MetricsPlotter:
 
     @staticmethod
     def _save_figure(fig, path: Path) -> None:
+        """Render and close a figure, saving it to ``path``."""
         fig.tight_layout()
         fig.savefig(path, dpi=150, bbox_inches="tight")
         plt.close(fig)
@@ -142,85 +143,10 @@ class MetricsPlotter:
             raise FileNotFoundError(f"Missing or invalid history logs at {csv_path}")
 
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-
-        # 1. Loss Curve
-        if "train_loss" in df.columns and "val_loss" in df.columns:
-            self._plot_lines(axes[0, 0], df, [
-                {"column": "train_loss", "label": "Train Loss", "marker": "o", "color": "tab:blue"},
-                {"column": "val_loss", "label": "Val Loss", "marker": "s", "color": "tab:orange"},
-            ])
-            axes[0, 0].set_title("Loss Convergence Curve", fontsize=12, fontweight="bold")
-            axes[0, 0].set_xlabel("Epoch")
-            axes[0, 0].set_ylabel("Loss")
-            axes[0, 0].legend()
-
-        # 2. PLCC and SROCC
-        if "plcc" in df.columns and "srocc" in df.columns:
-            self._plot_lines(axes[0, 1], df, [
-                {"column": "plcc", "label": "PLCC (Pearson)", "marker": "o", "color": "forestgreen"},
-                {"column": "srocc", "label": "SROCC (Spearman)", "marker": "s", "color": "royalblue"},
-            ])
-            axes[0, 1].set_title("PLCC / SROCC vs Human MOS", fontsize=12, fontweight="bold")
-            axes[0, 1].set_xlabel("Epoch")
-            axes[0, 1].set_ylabel("Correlation")
-            axes[0, 1].legend()
-            axes[0, 1].set_ylim(-0.05, 1.05)
-        else:
-            axes[0, 1].text(0.5, 0.5, "PLCC/SROCC Data Missing", ha="center", va="center", color="gray")
-            axes[0, 1].axis("off")
-
-        # 3. RMSE and R2
-        if "rmse" in df.columns and "r2" in df.columns:
-            ax1 = axes[1, 0]
-            sns.lineplot(
-                data=df,
-                x="epoch",
-                y="rmse",
-                ax=ax1,
-                label="RMSE",
-                marker="o",
-                markersize=4,
-                color="crimson",
-                linewidth=2,
-            )
-            ax1.set_xlabel("Epoch")
-            ax1.set_ylabel("RMSE", color="crimson")
-            ax1.tick_params(axis="y", labelcolor="crimson")
-            ax1.legend(loc="upper left")
-
-            ax2 = ax1.twinx()
-            sns.lineplot(
-                data=df,
-                x="epoch",
-                y="r2",
-                ax=ax2,
-                label="R²",
-                marker="s",
-                markersize=4,
-                color="darkorange",
-                linewidth=2,
-            )
-            ax2.set_ylabel("R²", color="darkorange")
-            ax2.tick_params(axis="y", labelcolor="darkorange")
-            ax2.legend(loc="upper right")
-            axes[1, 0].set_title("RMSE & R²", fontsize=12, fontweight="bold")
-        else:
-            axes[1, 0].text(0.5, 0.5, "RMSE/R2 Data Missing", ha="center", va="center", color="gray")
-            axes[1, 0].axis("off")
-
-        # 4. KROCC
-        if "krocc" in df.columns:
-            self._plot_lines(axes[1, 1], df, [
-                {"column": "krocc", "label": "KROCC (Kendall)", "marker": "^", "color": "purple"},
-            ])
-            axes[1, 1].set_title("KROCC (Kendall Tau)", fontsize=12, fontweight="bold")
-            axes[1, 1].set_xlabel("Epoch")
-            axes[1, 1].set_ylabel("KROCC")
-            axes[1, 1].set_ylim(-0.05, 1.05)
-            axes[1, 1].legend()
-        else:
-            axes[1, 1].text(0.5, 0.5, "KROCC Data Missing", ha="center", va="center", color="gray")
-            axes[1, 1].axis("off")
+        self._plot_loss_panel(axes[0, 0], df)
+        self._plot_correlation_panel(axes[0, 1], df)
+        self._plot_rmse_r2_panel(axes[1, 0], df)
+        self._plot_krocc_panel(axes[1, 1], df)
 
         plt.suptitle(
             f"Training History | Model: {self.model_name} ({version})",
@@ -230,6 +156,120 @@ class MetricsPlotter:
         )
         save_path = self.plots_dir / f"{self.base_prefix}_{version}_training_history.png"
         self._save_figure(fig, save_path)
+
+    def _plot_loss_panel(self, ax, df) -> None:
+        """Draw the loss-convergence panel."""
+        if "train_loss" not in df.columns or "val_loss" not in df.columns:
+            return
+        self._plot_lines(
+            ax,
+            df,
+            [
+                {"column": "train_loss", "label": "Train Loss", "marker": "o", "color": "tab:blue"},
+                {"column": "val_loss", "label": "Val Loss", "marker": "s", "color": "tab:orange"},
+            ],
+        )
+        ax.set_title("Loss Convergence Curve", fontsize=12, fontweight="bold")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss")
+        ax.legend()
+
+    def _plot_correlation_panel(self, ax, df) -> None:
+        """Draw the PLCC/SROCC correlation panel."""
+        if "plcc" not in df.columns or "srocc" not in df.columns:
+            ax.text(
+                0.5,
+                0.5,
+                "PLCC/SROCC Data Missing",
+                ha="center",
+                va="center",
+                color="gray",
+            )
+            ax.axis("off")
+            return
+        self._plot_lines(
+            ax,
+            df,
+            [
+                {"column": "plcc", "label": "PLCC (Pearson)", "marker": "o", "color": "forestgreen"},
+                {"column": "srocc", "label": "SROCC (Spearman)", "marker": "s", "color": "royalblue"},
+            ],
+        )
+        ax.set_title("PLCC / SROCC vs Human MOS", fontsize=12, fontweight="bold")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Correlation")
+        ax.legend()
+        ax.set_ylim(-0.05, 1.05)
+
+    def _plot_rmse_r2_panel(self, ax, df) -> None:
+        """Draw the twin-axis RMSE / R2 panel."""
+        if "rmse" not in df.columns or "r2" not in df.columns:
+            ax.text(
+                0.5,
+                0.5,
+                "RMSE/R2 Data Missing",
+                ha="center",
+                va="center",
+                color="gray",
+            )
+            ax.axis("off")
+            return
+        sns.lineplot(
+            data=df,
+            x="epoch",
+            y="rmse",
+            ax=ax,
+            label="RMSE",
+            marker="o",
+            markersize=4,
+            color="crimson",
+            linewidth=2,
+        )
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("RMSE", color="crimson")
+        ax.tick_params(axis="y", labelcolor="crimson")
+        ax.legend(loc="upper left")
+
+        ax2 = ax.twinx()
+        sns.lineplot(
+            data=df,
+            x="epoch",
+            y="r2",
+            ax=ax2,
+            label="R²",
+            marker="s",
+            markersize=4,
+            color="darkorange",
+            linewidth=2,
+        )
+        ax2.set_ylabel("R²", color="darkorange")
+        ax2.tick_params(axis="y", labelcolor="darkorange")
+        ax2.legend(loc="upper right")
+        ax.set_title("RMSE & R²", fontsize=12, fontweight="bold")
+
+    def _plot_krocc_panel(self, ax, df) -> None:
+        """Draw the KROCC panel."""
+        if "krocc" not in df.columns:
+            ax.text(
+                0.5,
+                0.5,
+                "KROCC Data Missing",
+                ha="center",
+                va="center",
+                color="gray",
+            )
+            ax.axis("off")
+            return
+        self._plot_lines(
+            ax,
+            df,
+            [{"column": "krocc", "label": "KROCC (Kendall)", "marker": "^", "color": "purple"}],
+        )
+        ax.set_title("KROCC (Kendall Tau)", fontsize=12, fontweight="bold")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("KROCC")
+        ax.set_ylim(-0.05, 1.05)
+        ax.legend()
 
     def plot_residuals(self, csv_path: Path, version: str = "v1") -> None:
         """Plot residual diagnostics: scatter, alignment, and distribution."""
@@ -251,9 +291,23 @@ class MetricsPlotter:
         residuals = y_pred - y_true
 
         fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+        self._plot_residual_scatter(axes[0], y_pred, residuals)
+        self._plot_true_vs_pred(axes[1], y_true, y_pred)
+        self._plot_residual_distribution(axes[2], residuals)
 
-        # 1. Residual scatter
-        axes[0].scatter(
+        plt.suptitle(f"Residual Analysis | Model: {self.model_name}", fontsize=13, fontweight="bold")
+        save_path = self.plots_dir / f"{self.base_prefix}_{version}_residuals.png"
+        self._save_figure(fig, save_path)
+
+        fig_true, ax_true = plt.subplots(figsize=(6, 5))
+        self._plot_residual_vs_true(ax_true, y_true, residuals)
+        self._save_figure(fig_true, self.plots_dir / f"{self.base_prefix}_{version}_residuals_vs_true.png")
+
+        self._export_error_tables(df, true_col, residuals, version)
+
+    def _plot_residual_scatter(self, ax, y_pred, residuals) -> None:
+        """Panel 1: residuals against predicted MOS."""
+        ax.scatter(
             y_pred,
             residuals,
             alpha=0.5,
@@ -262,13 +316,14 @@ class MetricsPlotter:
             edgecolors="w",
             linewidths=0.3,
         )
-        axes[0].axhline(y=0, color="crimson", linestyle="--", linewidth=1.5)
-        axes[0].set_xlabel("Predicted MOS")
-        axes[0].set_ylabel("Residual (Pred - True)")
-        axes[0].set_title("Residuals vs Predicted", fontsize=11, fontweight="bold")
+        ax.axhline(y=0, color="crimson", linestyle="--", linewidth=1.5)
+        ax.set_xlabel("Predicted MOS")
+        ax.set_ylabel("Residual (Pred - True)")
+        ax.set_title("Residuals vs Predicted", fontsize=11, fontweight="bold")
 
-        # 2. True vs Predicted
-        axes[1].scatter(
+    def _plot_true_vs_pred(self, ax, y_true, y_pred) -> None:
+        """Panel 2: predicted against true MOS with a perfect-fit line."""
+        ax.scatter(
             y_true,
             y_pred,
             alpha=0.5,
@@ -282,7 +337,7 @@ class MetricsPlotter:
         span = max(max_val - min_val, 1e-6)
         line_min = min_val - span * 0.03
         line_max = max_val + span * 0.03
-        axes[1].plot(
+        ax.plot(
             [line_min, line_max],
             [line_min, line_max],
             "crimson",
@@ -290,42 +345,53 @@ class MetricsPlotter:
             linewidth=1.5,
             label="Perfect",
         )
-        axes[1].set_xlim(line_min, line_max)
-        axes[1].set_ylim(line_min, line_max)
-        axes[1].set_aspect("equal", adjustable="box")
-        axes[1].set_xlabel("True MOS")
-        axes[1].set_ylabel("Predicted MOS")
-        axes[1].set_title("Predicted vs True", fontsize=11, fontweight="bold")
-        axes[1].legend()
+        ax.set_xlim(line_min, line_max)
+        ax.set_ylim(line_min, line_max)
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_xlabel("True MOS")
+        ax.set_ylabel("Predicted MOS")
+        ax.set_title("Predicted vs True", fontsize=11, fontweight="bold")
+        ax.legend()
 
-        # 3. Residual distribution
+    def _plot_residual_distribution(self, ax, residuals) -> None:
+        """Panel 3: residual distribution histogram with density."""
         sns.histplot(
             residuals,
             kde=True,
-            ax=axes[2],
+            ax=ax,
             color="purple",
             edgecolor="black",
             alpha=0.6,
             bins=20,
         )
-        axes[2].axvline(x=0, color="crimson", linestyle="--", linewidth=1.5)
-        axes[2].set_xlabel("Residual")
-        axes[2].set_ylabel("Density")
-        axes[2].set_title("Residual Distribution", fontsize=11, fontweight="bold")
+        ax.axvline(x=0, color="crimson", linestyle="--", linewidth=1.5)
+        ax.set_xlabel("Residual")
+        ax.set_ylabel("Density")
+        ax.set_title("Residual Distribution", fontsize=11, fontweight="bold")
 
-        plt.suptitle(f"Residual Analysis | Model: {self.model_name}", fontsize=13, fontweight="bold")
-        save_path = self.plots_dir / f"{self.base_prefix}_{version}_residuals.png"
-        self._save_figure(fig, save_path)
+    def _plot_residual_vs_true(self, ax, y_true, residuals) -> None:
+        """Secondary figure: residuals against true MOS."""
+        ax.scatter(
+            y_true,
+            residuals,
+            alpha=0.55,
+            s=20,
+            color="teal",
+            edgecolors="w",
+            linewidths=0.3,
+        )
+        ax.axhline(
+            0,
+            color="crimson",
+            linestyle="--",
+            linewidth=1.5,
+        )
+        ax.set_xlabel("True MOS")
+        ax.set_ylabel("Residual (Pred - True)")
+        ax.set_title("Residuals vs True MOS", fontweight="bold")
 
-        fig_true, ax_true = plt.subplots(figsize=(6, 5))
-        ax_true.scatter(y_true, residuals, alpha=0.55, s=20, color="teal", edgecolors="w", linewidths=0.3)
-        ax_true.axhline(0, color="crimson", linestyle="--", linewidth=1.5)
-        ax_true.set_xlabel("True MOS")
-        ax_true.set_ylabel("Residual (Pred - True)")
-        ax_true.set_title("Residuals vs True MOS", fontweight="bold")
-        self._save_figure(fig_true, self.plots_dir / f"{self.base_prefix}_{version}_residuals_vs_true.png")
-
-        # Additional diagnostics are exported as tabular data for downstream use.
+    def _export_error_tables(self, df, true_col: str, residuals, version: str) -> None:
+        """Export per-sample and per-MOS-bin error tables for downstream use."""
         analysis_dir = self.plots_dir.parent / "analysis" / "errors"
         analysis_dir.mkdir(parents=True, exist_ok=True)
         enriched = df.copy()
@@ -366,7 +432,7 @@ class MetricsPlotter:
             logger.warning("No metrics files provided for comparison.")
             return
 
-        models = []
+        models: list[str] = []
         plcc_list, srocc_list, rmse_list = [], [], []
 
         for m_name, info in metrics_csv_dict.items():
@@ -431,7 +497,12 @@ class MetricsPlotter:
                 )
 
         dataset_slug = self._safe_dataset_name(dataset_name)
-        plt.suptitle(f"Fold Comparison on {dataset_slug}", fontsize=14, fontweight="bold", y=1.02)
+        plt.suptitle(
+            f"Fold Comparison on {dataset_slug}",
+            fontsize=14,
+            fontweight="bold",
+            y=1.02,
+        )
         plt.tight_layout()
 
         save_path = self.plots_dir / f"comparison_{dataset_slug}_{self.current_date}.png"
@@ -441,7 +512,7 @@ class MetricsPlotter:
 
     def plot_fold_summary(self, metrics_csv_dict: dict, dataset_name: str) -> None:
         """Plot final fold metrics and metric stability across folds."""
-        rows = []
+        rows: list[dict] = []
         for fold_name, info in metrics_csv_dict.items():
             csv_path = info.get("csv_path")
             if not csv_path or not csv_path.exists():
@@ -502,7 +573,12 @@ class MetricsPlotter:
         axes[1].legend(title="")
 
         dataset_slug = self._safe_dataset_name(dataset_name)
-        plt.suptitle(f"Cross-Fold Summary on {dataset_slug}", fontsize=14, fontweight="bold", y=1.02)
+        plt.suptitle(
+            f"Cross-Fold Summary on {dataset_slug}",
+            fontsize=14,
+            fontweight="bold",
+            y=1.02,
+        )
         plt.tight_layout()
 
         save_path = self.plots_dir / f"fold_summary_{dataset_slug}_{self.current_date}.png"

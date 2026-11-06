@@ -1,13 +1,29 @@
 # src/utils/logging_utils.py
 import atexit
+import os
 import sys
 import time
 from functools import wraps
-from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 from loguru import logger
+
 from src.config.schemas import Config
+
+_CSV_HEADER = b"timestamp,level,module,function,line,message\n"
+
+
+def _open_csv_log(path: str, flags: int) -> int:
+    """Write one header when opening an empty CSV, including rotated files."""
+    descriptor = os.open(path, flags, 0o666)
+    try:
+        if os.fstat(descriptor).st_size == 0:
+            os.write(descriptor, _CSV_HEADER)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
 
 def _csv_safe_patcher(record) -> None:
     """
@@ -75,12 +91,7 @@ def log_prepare(
     base_filename = f"{timestamp}_{model_name.lower()}_{dataset_name.lower()}"
 
     # File log: DEBUG and above (full detail)
-    file_format = (
-        "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
-        "{level: <5} | "
-        "{name}:{function}:{line} - "
-        "{message}"
-    )
+    file_format = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <5} | {name}:{function}:{line} - {message}"
     logger.add(
         log_dir / f"{base_filename}.log",
         rotation="500 MB",
@@ -90,25 +101,12 @@ def log_prepare(
     )
 
     # CSV log: structured, escapable, with header
-    csv_format = (
-        '{time:YYYY-MM-DD HH:mm:ss.SSS},'
-        '{level},'
-        '{name},{function},{line},'
-        '"{extra[csv_message]}"'
-    )
+    csv_format = '{time:YYYY-MM-DD HH:mm:ss.SSS},{level},{name},{function},{line},"{extra[csv_message]}"'
     csv_path = log_dir / f"{base_filename}.csv"
-    csv_header = "timestamp,level,module,function,line,message\n"
-
-    def csv_rotation_callback(message, file_object):
-        file_object.write(csv_header)
-
-    if not csv_path.exists():
-        with open(csv_path, "w", encoding="utf-8") as f:
-            f.write(csv_header)
-
     logger.add(
         csv_path,
-        rotation=csv_rotation_callback,
+        rotation="500 MB",
+        opener=_open_csv_log,
         level=log_level,
         format=csv_format,
         encoding="utf-8",
@@ -122,7 +120,7 @@ def log_prepare(
     return base_filename
 
 
-def time_it(func: Callable) -> Callable:
+def time_it[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """
     Decorator to measure and log execution time of a function.
 
@@ -133,7 +131,8 @@ def time_it(func: Callable) -> Callable:
     """
 
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        """Run the wrapped function and log its elapsed wall-clock time."""
         start = time.perf_counter()
         result = func(*args, **kwargs)
         elapsed = time.perf_counter() - start

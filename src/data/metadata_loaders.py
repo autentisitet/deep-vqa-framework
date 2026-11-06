@@ -8,7 +8,7 @@ import pandas as pd
 from loguru import logger
 
 
-def clean_and_split_line(line: str, possible_delimiters: List[str] = None) -> Optional[List[str]]:
+def clean_and_split_line(line: str, possible_delimiters: Optional[List[str]] = None) -> Optional[List[str]]:
     """
     Clean line content and intelligently identify delimiters.
 
@@ -53,11 +53,7 @@ def clean_and_split_line(line: str, possible_delimiters: List[str] = None) -> Op
         fields = cleaned.split(delimiter)
 
     # Strip whitespace from each field and filter out empty strings
-    fields = [f.strip() for f in fields if f.strip()]
-
-    return fields
-
-
+    return list(filter(None, map(str.strip, fields)))
 
 
 class BaseMetadataLoader(ABC):
@@ -73,16 +69,12 @@ class BaseMetadataLoader(ABC):
         """
         pass
 
-
     def _ensure_extension(self, df: pd.DataFrame, ext: str) -> pd.DataFrame:
         """Make sure sample_id has a specified file extension."""
-        df["sample_id"] = df["sample_id"].apply(
-            lambda x: x if x.lower().endswith(ext) else x + ext
-        )
+        df["sample_id"] = df["sample_id"].apply(lambda x: x if x.lower().endswith(ext) else x + ext)
         return df
 
-
-    def _parse_with_cleaner(self, meta_file: Path, delimiter_hint: List[str] = None) -> pd.DataFrame:
+    def _parse_with_cleaner(self, meta_file: Path, delimiter_hint: Optional[List[str]] = None) -> pd.DataFrame:
         """
         Parse file line by line using clean_and_split_line.
 
@@ -107,29 +99,28 @@ class BaseMetadataLoader(ABC):
         return pd.DataFrame(records)
 
 
-
-
 class Tid2013Loader(BaseMetadataLoader):
     """Loader for TID2013 dataset."""
 
     def _add_reference_id(self, df: pd.DataFrame) -> pd.DataFrame:
-        df["reference_id"] = (
-            df["sample_id"]
-            .astype(str)
-            .str.extract(r"^([iI]\d{1,3})_", expand=False)
-            .str.lower()
-        )
+        """Derive a per-reference id from TID2013 sample ids."""
+        df["reference_id"] = df["sample_id"].astype(str).str.extract(r"^([iI]\d{1,3})_", expand=False).str.lower()
         df["reference_id"] = df["reference_id"].fillna(
             df["sample_id"].astype(str).str.replace(r"\.[^.]+$", "", regex=True).str.lower()
         )
         return df
 
-
     def load(self, meta_file: Path) -> pd.DataFrame:
+        """Load TID2013 metadata into ``sample_id``/``mos``/``reference_id`` columns."""
         # 使用 sep=r'\s+' 处理空格分隔，header=None 因为没有表头
         # names 明确指定列顺序：第一列是 MOS，第二列是 ID
         try:
-            df = pd.read_csv(meta_file, sep=r"\s+", header=None, names=["mos", "sample_id"])
+            df = pd.read_csv(
+                meta_file,
+                sep=r"\s+",
+                header=None,
+                names=["mos", "sample_id"],
+            )
             df = self._ensure_extension(df, ".bmp")
             df = self._add_reference_id(df)
             return df[["sample_id", "mos", "reference_id"]]
@@ -140,7 +131,7 @@ class Tid2013Loader(BaseMetadataLoader):
             records = []
             with open(meta_file, "r", encoding="utf-8") as f:
                 for line_num, line in enumerate(f, 1):
-                    fields = clean_and_split_line(line, delimiter_hint=[" ", "\t"])
+                    fields = clean_and_split_line(line, possible_delimiters=[" ", "\t"])
                     if not fields:
                         continue
                     if len(fields) < 2:
@@ -156,12 +147,11 @@ class Tid2013Loader(BaseMetadataLoader):
             return df[["sample_id", "mos", "reference_id"]]
 
 
-
-
 class KonvidLoader(BaseMetadataLoader):
     """Loader for KoNViD-1k dataset."""
 
     def load(self, meta_file: Path) -> pd.DataFrame:
+        """Load KoNViD-1k metadata into ``sample_id``/``mos`` columns."""
         try:
             df = pd.read_csv(meta_file, quotechar='"', skipinitialspace=True)
             df = df.rename(columns={"flickr_id": "sample_id", "mos": "mos"})
@@ -174,7 +164,7 @@ class KonvidLoader(BaseMetadataLoader):
             records = []
             with open(meta_file, "r", encoding="utf-8") as f:
                 for line_num, line in enumerate(f, 1):
-                    fields = clean_and_split_line(line, delimiter_hint=[","])
+                    fields = clean_and_split_line(line, possible_delimiters=[","])
                     if not fields:
                         continue
                     if line_num == 1 and fields[0].lower() == "flickr_id":
@@ -191,12 +181,11 @@ class KonvidLoader(BaseMetadataLoader):
             return df[["sample_id", "mos"]]
 
 
-
-
 class T2VqaLoader(BaseMetadataLoader):
     """Loader for T2VQA-DB dataset."""
 
     def load(self, meta_file: Path) -> pd.DataFrame:
+        """Load T2VQA-DB metadata into ``sample_id``/``mos`` columns."""
         try:
             df = pd.read_csv(
                 meta_file,
@@ -215,7 +204,7 @@ class T2VqaLoader(BaseMetadataLoader):
             records = []
             with open(meta_file, "r", encoding="utf-8") as f:
                 for line_num, line in enumerate(f, 1):
-                    fields = clean_and_split_line(line, delimiter_hint=["|"])
+                    fields = clean_and_split_line(line, possible_delimiters=["|"])
                     if not fields:
                         continue
                     if len(fields) < 3:

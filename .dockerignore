@@ -9,6 +9,7 @@ datasets/
 examples/
 results/
 reports/
+uploads/
 logs/
 .download_cache/
 nohup.out
@@ -38,8 +39,6 @@ Thumbs.db
 
 
 .git/
-.markdownlint.json
-.markdownlintignore
 Makefile.local
 config.mk
 tmp/
@@ -68,3 +67,6 @@ README_zh.md
 DISCLAIMER.md
 
 git_log.txt
+
+# Host-only deployment profiling; do not invalidate runtime dependency layers.
+scripts/measure_container_memory.py

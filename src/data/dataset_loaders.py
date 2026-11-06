@@ -1,15 +1,14 @@
 # src/data/dataset_loaders.py
 from dataclasses import dataclass
-from typing import Type
 
 from src.utils.registry import Registry
 
-from .metadata_loaders import KonvidLoader, T2VqaLoader, Tid2013Loader
+from .metadata_loaders import BaseMetadataLoader, KonvidLoader, T2VqaLoader, Tid2013Loader
 
 
 @dataclass(frozen=True)
 class DatasetRegistryEntry:
-    loader_cls: Type
+    loader_cls: type[BaseMetadataLoader]
     metadata_file: str
 
 
@@ -21,35 +20,36 @@ class MetadataLoaderFactory:
 
     @classmethod
     def normalize_key(cls, dataset_name: str) -> str:
+        """Validate and normalize a dataset name to its registry key."""
         key = dataset_name.lower().strip()
 
         if not cls._REGISTRY.contains(key):
             available = cls._REGISTRY.keys()
-            raise ValueError(
-                f"Unknown dataset: '{dataset_name}'. Available: {available}"
-            )
+            raise ValueError(f"Unknown dataset: '{dataset_name}'. Available: {available}")
 
         return key
 
     @classmethod
     def get_entry(cls, dataset_name: str) -> DatasetRegistryEntry:
+        """Return the registry entry for a dataset name."""
         return cls._REGISTRY.get(cls.normalize_key(dataset_name))
 
     @classmethod
-    def get_loader(cls, dataset_name: str):
+    def get_loader(cls, dataset_name: str) -> BaseMetadataLoader:
+        """Instantiate the metadata loader for a dataset name."""
         return cls.get_entry(dataset_name).loader_cls()
 
     @classmethod
     def get_metadata_file(cls, dataset_name: str) -> str:
+        """Return the metadata filename for a dataset name."""
         return cls.get_entry(dataset_name).metadata_file
 
-
     @classmethod
-    def register(cls, name: str, loader_cls, metadata_file: str = "mos.txt"):
+    def register(cls, name: str, loader_cls: type[BaseMetadataLoader], metadata_file: str = "mos.txt") -> None:
         """动态注册新的数据集加载器（扩展用）"""
         cls._REGISTRY.register(name, DatasetRegistryEntry(loader_cls, metadata_file), replace=True)
 
     @classmethod
-    def available_datasets(cls) -> list:
+    def available_datasets(cls) -> list[str]:
         """列出所有已注册的数据集名称"""
         return cls._REGISTRY.keys()

@@ -35,15 +35,21 @@ def to_spatial_feature_map(value: torch.Tensor) -> torch.Tensor:
         return value.permute(0, 2, 1).contiguous().view(batch, channels, side, side)
     if value.ndim != 4:
         raise ValueError(f"Expected a 4D spatial activation, got {tuple(value.shape)}")
-    # Swin emits [B,H,W,C], while ResNet emits [B,C,H,W]. A channel-last
-    # tensor has a final dimension no larger than both spatial dimensions;
-    # channel-first activations have the opposite layout.
-    if value.shape[-1] <= value.shape[1] and value.shape[-1] <= value.shape[2]:
+    # Swin emits [B,H,W,C], while convolutional backbones emit [B,C,H,W].
+    # Prefer the repeated spatial-dimension signature, then fall back to the
+    # channel-size convention. The latter handles non-square synthetic maps.
+    _, first, second, last = value.shape
+    if second == last and first != second:
+        return value
+    if first == second and last != first:
+        return value.permute(0, 3, 1, 2).contiguous()
+    if last < min(first, second) or last > max(first, second):
         return value.permute(0, 3, 1, 2).contiguous()
     return value
 
 
 def _normalise_map(value: torch.Tensor) -> torch.Tensor:
+    """Min-max normalise a spatial feature map per sample."""
     value = value.detach().float()
     value = value - value.amin(dim=(-2, -1), keepdim=True)
     return value / value.amax(dim=(-2, -1), keepdim=True).clamp_min(1e-6)
@@ -57,7 +63,8 @@ class FeatureVisualizer:
         self.device = torch.device(device)
 
     def _resolve_module(self, name: str) -> nn.Module:
-        modules = dict(self.model.named_modules())
+        """Resolve a named submodule, listing image layers on failure."""
+        modules: dict[str, nn.Module] = dict(self.model.named_modules())
         if name not in modules:
             choices = [key for key in modules if key.startswith("image_backbone")]
             raise KeyError(f"Unknown layer '{name}'. Example available image layers: {choices[-12:]}")
@@ -97,18 +104,20 @@ class FeatureVisualizer:
         if cam_layer and cam_layer not in requested:
             requested.append(cam_layer)
 
-        for name in requested:
-            module = self._resolve_module(name)
-
-            def save_activation(_module, _inputs, output, key=name):
-                if isinstance(output, torch.Tensor):
-                    captured[key] = output
-                    if output.requires_grad:
-                        output.register_hook(lambda grad, k=key: gradients.__setitem__(k, grad))
-
-            hooks.append(module.register_forward_hook(save_activation))
-
         try:
+            for name in requested:
+                module = self._resolve_module(name)
+
+                def save_activation(
+                    _module: nn.Module, _inputs: tuple[object, ...], output: object, key: str = name
+                ) -> None:
+                    """Capture a hook output and attach a gradient recorder."""
+                    if isinstance(output, torch.Tensor):
+                        captured[key] = output
+                        if output.requires_grad:
+                            output.register_hook(lambda grad, k=key: gradients.__setitem__(k, grad))
+
+                hooks.append(module.register_forward_hook(save_activation))
             self.model.zero_grad(set_to_none=True)
             score = self.model(image).reshape(-1)[0]
             cam = None
@@ -129,24 +138,24 @@ class FeatureVisualizer:
         return FeatureVisualizationResult(float(score.detach().cpu()), captured, cam)
 
     @staticmethod
-    def save_feature_grid(activation: torch.Tensor, path: Path, max_channels: int = 16) -> None:
+    def save_feature_grid(activation: torch.Tensor, path: Path, max_channels: int = 8) -> None:
         """Save mean-activation and up to ``max_channels`` individual maps."""
         maps = _normalise_map(to_spatial_feature_map(activation)[0].abs())
         count = min(max_channels, maps.shape[0])
-        columns = min(4, count + 1)
+        columns = min(3, count + 1)
         rows = int(np.ceil((count + 1) / columns))
-        figure, axes = plt.subplots(rows, columns, figsize=(3 * columns, 3 * rows), squeeze=False)
+        figure, axes = plt.subplots(rows, columns, figsize=(4.4 * columns, 4.4 * rows), squeeze=False)
         panels = [maps.mean(dim=0), *maps[:count]]
         titles = ["mean |activation|", *[f"channel {i}" for i in range(count)]]
         for axis, panel, title in zip(axes.flat, panels, titles):
             axis.imshow(panel.cpu(), cmap="magma", vmin=0, vmax=1)
-            axis.set_title(title)
+            axis.set_title(title, fontsize=14, pad=8)
             axis.axis("off")
         for axis in axes.flat[len(panels) :]:
             axis.axis("off")
         figure.tight_layout()
         path.parent.mkdir(parents=True, exist_ok=True)
-        figure.savefig(path, dpi=160, bbox_inches="tight")
+        figure.savefig(path, dpi=180, bbox_inches="tight", facecolor="#02070c")
         plt.close(figure)
 
     @staticmethod
@@ -156,14 +165,17 @@ class FeatureVisualizer:
         mean = torch.tensor(IMAGENET_MEAN).view(3, 1, 1)
         std = torch.tensor(IMAGENET_STD).view(3, 1, 1)
         rgb = (image * std + mean).clamp(0, 1).permute(1, 2, 0).numpy()
-        heat = cam[0].detach().cpu().numpy()
-        figure, axis = plt.subplots(figsize=(6, 6))
-        axis.imshow(rgb)
-        axis.imshow(heat, cmap="jet", alpha=alpha, vmin=0, vmax=1)
-        axis.axis("off")
+        heat = torch.nn.functional.interpolate(
+            cam.unsqueeze(1).detach().cpu().float(),
+            size=rgb.shape[:2],
+            mode="bilinear",
+            align_corners=False,
+        )[0, 0].numpy()
+        heat = np.clip(heat, 0.0, 1.0)
+        heat_rgb = plt.get_cmap("jet")(heat)[..., :3]
+        blended = np.clip((1.0 - alpha) * rgb + alpha * heat_rgb, 0.0, 1.0)
         path.parent.mkdir(parents=True, exist_ok=True)
-        figure.savefig(path, dpi=180, bbox_inches="tight", pad_inches=0)
-        plt.close(figure)
+        Image.fromarray((blended * 255).astype(np.uint8), mode="RGB").save(path)
 
 
 def load_image_tensor(path: Path, input_size: int) -> torch.Tensor:

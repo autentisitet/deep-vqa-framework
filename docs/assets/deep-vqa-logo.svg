@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="240" viewBox="0 0 960 240" role="img" aria-labelledby="title desc">
+  <title id="title">Deep-VQA</title>
+  <desc id="desc">Deep-VQA image and video quality assessment framework logo</desc>
+  <rect width="960" height="240" rx="24" fill="#07111f"/>
+  <rect x="38" y="38" width="164" height="164" rx="20" fill="#0d1a2b" stroke="#22344d" stroke-width="2"/>
+  <path d="M70 78h100v84H70z" fill="none" stroke="#55e3d1" stroke-width="8"/>
+  <path d="M88 139l22-24 18 17 24-31" fill="none" stroke="#62a8ff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="98" cy="101" r="8" fill="#55e3d1"/>
+  <rect x="82" y="168" width="20" height="14" rx="3" fill="#55e3d1"/>
+  <rect x="110" y="156" width="20" height="26" rx="3" fill="#62a8ff"/>
+  <rect x="138" y="143" width="20" height="39" rx="3" fill="#55e3d1"/>
+  <text x="244" y="112" fill="#f5f8ff" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="70" font-weight="800" letter-spacing="0">Deep-VQA</text>
+  <text x="248" y="158" fill="#91a2ba" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="25" letter-spacing="0">IMAGE AND VIDEO QUALITY ASSESSMENT</text>
+  <path d="M248 184h610" stroke="#22344d" stroke-width="2"/>
+  <circle cx="251" cy="184" r="5" fill="#55e3d1"/>
+  <circle cx="858" cy="184" r="5" fill="#62a8ff"/>
+</svg>

@@ -6,7 +6,6 @@ from torchvision import models
 
 from .torchvision_cache import build_torchvision_model
 
-
 _KNOWN_BACKBONE_FEATURE_DIMS = {
     "resnet50": 2048,
     "swin_t": 768,
@@ -14,6 +13,7 @@ _KNOWN_BACKBONE_FEATURE_DIMS = {
 
 
 def known_feature_dim(backbone_name: str) -> int:
+    """Return the known feature dimension for a supported backbone."""
     feature_dim = _KNOWN_BACKBONE_FEATURE_DIMS.get(backbone_name)
     if feature_dim is None:
         raise ValueError(f"Unsupported backbone: {backbone_name}")
@@ -21,6 +21,7 @@ def known_feature_dim(backbone_name: str) -> int:
 
 
 def build_backbone(backbone_name: str, use_pretrained: bool) -> tuple[nn.Module, int, Optional[nn.Module]]:
+    """Build a backbone, its feature dimension, and an optional norm layer."""
     if backbone_name == "resnet50":
         res_weights = models.ResNet50_Weights.IMAGENET1K_V1 if use_pretrained else None
         res = build_torchvision_model(models.resnet50, res_weights)

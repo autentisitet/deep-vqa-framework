@@ -3,7 +3,7 @@
   "info": {
     "title": "Deep-VQA Quality Assessment API",
     "description": "REST API for image and video quality assessment inference.",
-    "version": "0.9.0"
+    "version": "0.9.6"
   },
   "paths": {
     "/v1/health": {
@@ -12,6 +12,7 @@
           "system"
         ],
         "summary": "Check service health",
+        "description": "Report core IQA/VQA readiness.",
         "operationId": "health_v1_health_get",
         "responses": {
           "200": {
@@ -20,6 +21,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -33,6 +74,7 @@
           "auth"
         ],
         "summary": "Auth Status",
+        "description": "Report whether authentication is required and whether this request is authenticated.",
         "operationId": "auth_status_v1_auth_status_get",
         "responses": {
           "200": {
@@ -41,6 +83,200 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AuthStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/frontend-settings": {
+      "get": {
+        "tags": [
+          "frontend"
+        ],
+        "summary": "Report which frontend features are enabled",
+        "description": "Report the feature flags the frontend should enable for this visitor.",
+        "operationId": "frontend_settings_v1_frontend_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrontendSettingsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/register": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Create an account (accounts authentication mode only)",
+        "description": "Create an account and sign the caller in (accounts authentication mode only).",
+        "operationId": "auth_register_v1_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -54,6 +290,7 @@
           "auth"
         ],
         "summary": "Auth Login",
+        "description": "Sign the caller in with account credentials or an API key and set the auth cookie.",
         "operationId": "auth_login_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -76,12 +313,52 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
+          "401": {
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -95,6 +372,7 @@
           "auth"
         ],
         "summary": "Auth Logout",
+        "description": "End the current authentication and clear the auth and session cookies.",
         "operationId": "auth_logout_v1_auth_logout_post",
         "responses": {
           "200": {
@@ -103,6 +381,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AuthStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -115,7 +433,8 @@
         "tags": [
           "models"
         ],
-        "summary": "List loaded quality assessment models",
+        "summary": "List configured quality assessment models",
+        "description": "Return metadata for every configured quality assessment model.",
         "operationId": "list_models_v1_models_get",
         "responses": {
           "200": {
@@ -124,6 +443,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ModelCollectionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -136,7 +495,8 @@
         "tags": [
           "models"
         ],
-        "summary": "Get one loaded model",
+        "summary": "Get one configured quality assessment model",
+        "description": "Return metadata for one configured model, or 404 when unknown.",
         "operationId": "get_model_v1_models__model_id__get",
         "parameters": [
           {
@@ -160,6 +520,46 @@
               }
             }
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -169,16 +569,6 @@
               }
             },
             "description": "Not Found"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
           }
         }
       }
@@ -189,6 +579,7 @@
           "frontend"
         ],
         "summary": "List recent frontend evaluation log records",
+        "description": "Return the newest evaluation records owned by the caller's session.",
         "operationId": "list_frontend_evaluations_v1_frontend_evaluations_get",
         "parameters": [
           {
@@ -217,65 +608,7 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/subjective-assessments": {
-      "post": {
-        "tags": [
-          "frontend"
-        ],
-        "summary": "Describe image or video quality with Ollama and calculate a Bayesian assessment",
-        "description": "Run an ephemeral Ollama assessment; this route never writes SQLite or JSONL records.",
-        "operationId": "create_subjective_assessment_v1_subjective_assessments_post",
-        "parameters": [
-          {
-            "name": "video_frames",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 8,
-              "minimum": 1,
-              "description": "Evenly sampled frames for video assessment",
-              "default": 4,
-              "title": "Video Frames"
-            },
-            "description": "Evenly sampled frames for video assessment"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_create_subjective_assessment_v1_subjective_assessments_post"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SubjectiveAssessmentResponse"
-                }
-              }
-            }
-          },
-          "422": {
+          "401": {
             "content": {
               "application/json": {
                 "schema": {
@@ -283,9 +616,9 @@
                 }
               }
             },
-            "description": "Unprocessable Entity"
+            "description": "Unauthorized"
           },
-          "503": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
@@ -293,62 +626,7 @@
                 }
               }
             },
-            "description": "Service Unavailable"
-          }
-        }
-      }
-    },
-    "/v1/evaluations": {
-      "post": {
-        "tags": [
-          "evaluations"
-        ],
-        "summary": "Evaluate one uploaded image or video",
-        "operationId": "create_evaluation_v1_evaluations_post",
-        "parameters": [
-          {
-            "name": "model_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Serving model role: iqa or vqa",
-              "default": "iqa",
-              "title": "Model Id"
-            },
-            "description": "Serving model role: iqa or vqa"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_create_evaluation_v1_evaluations_post"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EvaluationResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
+            "description": "Forbidden"
           },
           "422": {
             "content": {
@@ -373,12 +651,119 @@
         }
       }
     },
+    "/v1/evaluations": {
+      "post": {
+        "tags": [
+          "evaluations"
+        ],
+        "summary": "Evaluate one uploaded image or video",
+        "description": "Evaluate one uploaded image or video with the selected quality model.\n\nThe upload is validated and persisted before the model is touched, then\ninference runs inside the heavy-request serialization policy. On success\nthe measured scores and latency are returned; frontend-tagged requests are\nalso appended to the evaluation history store.",
+        "operationId": "create_evaluation_v1_evaluations_post",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Model identifier: iqa or vqa",
+              "default": "iqa",
+              "title": "Model Id"
+            },
+            "description": "Model identifier: iqa or vqa"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_evaluation_v1_evaluations_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          }
+        }
+      }
+    },
     "/v1/visualizations": {
       "post": {
         "tags": [
           "visualizations"
         ],
         "summary": "Generate feature maps and Grad-CAM for an image",
+        "description": "Generate feature maps and a Grad-CAM overlay for an uploaded image.\n\nThe produced PNG files are written under an unguessable directory, tagged\nwith the caller's session owner, and only served back to that owner. The\nimage backbone must produce a differentiable spatial CAM for Grad-CAM.",
         "operationId": "create_visualization_v1_visualizations_post",
         "parameters": [
           {
@@ -387,11 +772,11 @@
             "required": false,
             "schema": {
               "type": "string",
-              "description": "Loaded image model role",
+              "description": "Image model identifier",
               "default": "iqa",
               "title": "Model Id"
             },
-            "description": "Loaded image model role"
+            "description": "Image model identifier"
           }
         ],
         "requestBody": {
@@ -415,15 +800,65 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
+          "401": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
-            }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           }
         }
       }
@@ -431,6 +866,15 @@
   },
   "components": {
     "schemas": {
+      "AuthMode": {
+        "type": "string",
+        "enum": [
+          "none",
+          "api_key",
+          "accounts"
+        ],
+        "title": "AuthMode"
+      },
       "AuthStatusResponse": {
         "properties": {
           "required": {
@@ -440,6 +884,21 @@
           "authenticated": {
             "type": "boolean",
             "title": "Authenticated"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/AuthMode",
+            "default": "api_key"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
           }
         },
         "type": "object",
@@ -464,21 +923,6 @@
         ],
         "title": "Body_create_evaluation_v1_evaluations_post"
       },
-      "Body_create_subjective_assessment_v1_subjective_assessments_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "description": "Image or video file to assess without persistence"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_create_subjective_assessment_v1_subjective_assessments_post"
-      },
       "Body_create_visualization_v1_visualizations_post": {
         "properties": {
           "file": {
@@ -494,8 +938,49 @@
         ],
         "title": "Body_create_visualization_v1_visualizations_post"
       },
+      "DatasetType": {
+        "type": "string",
+        "enum": [
+          "image",
+          "video"
+        ],
+        "title": "DatasetType"
+      },
+      "ErrorCode": {
+        "type": "integer",
+        "enum": [
+          1000,
+          1001,
+          1100,
+          1200,
+          1201,
+          1202,
+          1203,
+          1300,
+          1301,
+          1302,
+          1303,
+          1400,
+          1401,
+          1402,
+          1403,
+          1500,
+          1501,
+          1502,
+          1503,
+          1504,
+          1600,
+          1601
+        ],
+        "title": "ErrorCode",
+        "description": "Stable public business error codes, intentionally outside HTTP 100-599."
+      },
       "ErrorResponse": {
         "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode",
+            "description": "Stable business error code outside the reserved HTTP status range 100-599"
+          },
           "error": {
             "type": "string",
             "title": "Error"
@@ -514,11 +999,13 @@
         },
         "type": "object",
         "required": [
+          "code",
           "error"
         ],
         "title": "ErrorResponse",
         "example": {
-          "error": "Model 'iqa' is not loaded"
+          "code": 1100,
+          "error": "Model 'iqa' is not configured"
         }
       },
       "EvaluationResponse": {
@@ -536,12 +1023,10 @@
             "title": "Model Id"
           },
           "media_type": {
-            "type": "string",
-            "title": "Media Type"
+            "$ref": "#/components/schemas/DatasetType"
           },
           "task_type": {
-            "type": "string",
-            "title": "Task Type"
+            "$ref": "#/components/schemas/TaskType"
           },
           "model_name": {
             "type": "string",
@@ -612,8 +1097,7 @@
         "properties": {
           "items": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/FrontendEvaluationRecord"
             },
             "type": "array",
             "title": "Items"
@@ -631,18 +1115,115 @@
         "title": "FrontendEvaluationLogResponse",
         "description": "Frontend evaluation records read from the SQLite evaluation store."
       },
-      "HTTPValidationError": {
+      "FrontendEvaluationRecord": {
         "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "file_hash": {
+            "type": "string",
+            "title": "File Hash"
+          },
+          "task_type": {
+            "$ref": "#/components/schemas/TaskType"
+          },
+          "model_used": {
+            "type": "string",
+            "title": "Model Used"
+          },
+          "mos_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mos Score"
+          },
+          "mos_interval": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
             "type": "array",
-            "title": "Detail"
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Mos Interval"
+          },
+          "inference_time_ms": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Inference Time Ms"
           }
         },
         "type": "object",
-        "title": "HTTPValidationError"
+        "required": [
+          "timestamp",
+          "file_name",
+          "file_hash",
+          "task_type",
+          "model_used",
+          "mos_score",
+          "mos_interval",
+          "inference_time_ms"
+        ],
+        "title": "FrontendEvaluationRecord",
+        "description": "Public history fields; owner/session identifiers stay in storage."
+      },
+      "FrontendSettingsResponse": {
+        "properties": {
+          "auth_required": {
+            "type": "boolean",
+            "title": "Auth Required"
+          },
+          "authenticated": {
+            "type": "boolean",
+            "title": "Authenticated"
+          },
+          "auth_mode": {
+            "$ref": "#/components/schemas/AuthMode",
+            "default": "api_key"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "evaluation_history_enabled": {
+            "type": "boolean",
+            "title": "Evaluation History Enabled"
+          },
+          "visualizations_enabled": {
+            "type": "boolean",
+            "title": "Visualizations Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "auth_required",
+          "authenticated",
+          "evaluation_history_enabled",
+          "visualizations_enabled"
+        ],
+        "title": "FrontendSettingsResponse",
+        "description": "Frontend login, history, and visualization settings."
       },
       "HealthResponse": {
         "properties": {
@@ -673,14 +1254,41 @@
       "LoginRequest": {
         "properties": {
           "api_key": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Api Key"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
           }
         },
+        "additionalProperties": false,
         "type": "object",
-        "required": [
-          "api_key"
-        ],
         "title": "LoginRequest"
       },
       "ModelCollectionResponse": {
@@ -709,11 +1317,15 @@
           "model_id": {
             "type": "string",
             "title": "Model Id",
-            "description": "Serving role: iqa or vqa"
+            "description": "Configured model identifier: iqa or vqa"
+          },
+          "loaded": {
+            "type": "boolean",
+            "title": "Loaded",
+            "description": "Whether this model currently occupies worker memory"
           },
           "task_type": {
-            "type": "string",
-            "title": "Task Type"
+            "$ref": "#/components/schemas/TaskType"
           },
           "model_name": {
             "type": "string",
@@ -728,8 +1340,7 @@
             "title": "Dataset"
           },
           "media_type": {
-            "type": "string",
-            "title": "Media Type"
+            "$ref": "#/components/schemas/DatasetType"
           },
           "mos_min": {
             "type": "number",
@@ -747,6 +1358,7 @@
         "type": "object",
         "required": [
           "model_id",
+          "loaded",
           "task_type",
           "model_name",
           "backbone",
@@ -758,102 +1370,36 @@
         ],
         "title": "ModelSummary"
       },
-      "SubjectiveAssessmentResponse": {
+      "RegisterRequest": {
         "properties": {
-          "media_type": {
+          "email": {
             "type": "string",
-            "title": "Media Type"
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Email"
           },
-          "description": {
+          "password": {
             "type": "string",
-            "title": "Description"
-          },
-          "llm_score": {
-            "type": "integer",
-            "title": "Llm Score",
-            "description": "Ollama subjective visual-quality score in [0, 100]"
-          },
-          "bayesian_score": {
-            "type": "number",
-            "title": "Bayesian Score",
-            "description": "Beta-prior posterior mean in [0, 100]"
-          },
-          "credible_interval": {
-            "prefixItems": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "type": "array",
-            "maxItems": 2,
-            "minItems": 2,
-            "title": "Credible Interval",
-            "description": "Approximate 95% Bayesian credible interval"
-          },
-          "model_used": {
-            "type": "string",
-            "title": "Model Used"
-          },
-          "frames_sampled": {
-            "type": "integer",
-            "title": "Frames Sampled"
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Password"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
-          "media_type",
-          "description",
-          "llm_score",
-          "bayesian_score",
-          "credible_interval",
-          "model_used",
-          "frames_sampled"
+          "email",
+          "password"
         ],
-        "title": "SubjectiveAssessmentResponse",
-        "description": "Ephemeral Ollama-based quality description and Bayesian assessment."
+        "title": "RegisterRequest"
       },
-      "ValidationError": {
-        "properties": {
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "type": "array",
-            "title": "Location"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Message"
-          },
-          "type": {
-            "type": "string",
-            "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
-          }
-        },
-        "type": "object",
-        "required": [
-          "loc",
-          "msg",
-          "type"
+      "TaskType": {
+        "type": "string",
+        "enum": [
+          "iqa",
+          "vqa"
         ],
-        "title": "ValidationError"
+        "title": "TaskType"
       },
       "VisualizationResponse": {
         "properties": {

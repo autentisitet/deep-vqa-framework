@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from src.config.schemas import Config
+
 from .backbones import build_backbone, known_feature_dim
 from .heads import build_quality_head, init_head_weights
 from .torchvision_cache import configure_torch_weight_cache
@@ -65,6 +66,7 @@ class IQAVQANet(nn.Module):
             self._ensure_video_branch(use_pretrained)
 
     def _infer_target_media_type(self, cfg: Config) -> str:
+        """Determine the media type this model instance should serve."""
         data_type = getattr(cfg.dataset, "data_type", "").lower()
         if data_type in {"image", "video"}:
             return data_type
@@ -82,19 +84,22 @@ class IQAVQANet(nn.Module):
         return "both"
 
     def _freeze_module_if_needed(self, module: nn.Module) -> None:
+        """Freeze a module's parameters when the config requests it."""
         if not self.freeze_backbone:
             return
         for param in module.parameters():
             param.requires_grad = False
 
     def _current_model_device(self) -> torch.device | None:
+        """Return the device this model currently lives on, if determinable."""
         for tensor in self.parameters():
             return tensor.device
-        for tensor in self.buffers():
-            return tensor.device
+        for buffer in self.buffers():
+            return buffer.device
         return None
 
     def _move_modules_to_device(self, device: torch.device | None, *modules: Optional[nn.Module]) -> None:
+        """Move the given modules to ``device``, skipping any that are ``None``."""
         if device is None:
             return
         for module in modules:
@@ -103,6 +108,7 @@ class IQAVQANet(nn.Module):
             module.to(device)
 
     def _build_temporal_fusion(self) -> nn.TransformerEncoder:
+        """Build the transformer that fuses per-frame video features."""
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=self.video_num_features,
             nhead=8,
@@ -114,6 +120,7 @@ class IQAVQANet(nn.Module):
         return nn.TransformerEncoder(encoder_layer, num_layers=self.num_vqa_layers)
 
     def _build_temporal_position_embedding(self, device: torch.device | None = None) -> nn.Parameter:
+        """Build the learned sinusoidal temporal position embedding."""
         position = torch.arange(self.num_frames, dtype=torch.float32, device=device).unsqueeze(1)
         div_term = torch.exp(
             torch.arange(0, self.video_num_features, 2, dtype=torch.float32, device=device)
@@ -126,10 +133,11 @@ class IQAVQANet(nn.Module):
         return nn.Parameter(pe)
 
     def _position_embedding_for(self, frame_count: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        """Return a position embedding matched to the given frame count and dtype."""
         if self.temporal_position_embedding is None:
             self.temporal_position_embedding = self._build_temporal_position_embedding(device=device)
 
-        pos = self.temporal_position_embedding
+        pos: torch.Tensor = self.temporal_position_embedding
         if pos.device != device:
             pos = pos.to(device)
 
@@ -145,6 +153,7 @@ class IQAVQANet(nn.Module):
         return pos_resampled.to(dtype=dtype)
 
     def _ensure_image_branch(self, use_pretrained: Optional[bool] = None) -> None:
+        """Build the image backbone and quality head once, if not present."""
         if self.image_backbone is not None and self.image_quality_head is not None:
             return
 
@@ -167,11 +176,8 @@ class IQAVQANet(nn.Module):
         )
 
     def _ensure_video_branch(self, use_pretrained: Optional[bool] = None) -> None:
-        if (
-            self.video_backbone is not None
-            and self.temporal_fusion is not None
-            and self.video_quality_head is not None
-        ):
+        """Build the video backbone, fusion, and quality head once, if not present."""
+        if self.video_backbone is not None and self.temporal_fusion is not None and self.video_quality_head is not None:
             return
 
         load_pretrained = self._load_pretrained_backbone if use_pretrained is None else bool(use_pretrained)
@@ -243,9 +249,7 @@ class IQAVQANet(nn.Module):
             self._ensure_image_branch()
             if self.image_backbone is None:
                 raise RuntimeError("Image branch was not initialized.")
-            return self._extract_features(
-                x, self.image_backbone, self.image_num_features, self.image_feature_norm
-            )
+            return self._extract_features(x, self.image_backbone, self.image_num_features, self.image_feature_norm)
 
         if x.dim() == 5:
             if x.shape[2] != 3:
@@ -298,8 +302,8 @@ class IQAVQANet(nn.Module):
                 self.image_num_features,
                 self.image_feature_norm,
             )
-            score = self.image_quality_head(features)
-            return score.squeeze(-1)
+            image_score: torch.Tensor = self.image_quality_head(features)
+            return image_score.squeeze(-1)
 
         if x.dim() == 5:
             if x.shape[2] != 3:
@@ -329,8 +333,8 @@ class IQAVQANet(nn.Module):
             v_fused = self.temporal_fusion(v)
             v_global = torch.mean(v_fused, dim=1)
 
-            score = self.video_quality_head(v_global)
-            return score.squeeze(-1)
+            video_score: torch.Tensor = self.video_quality_head(v_global)
+            return video_score.squeeze(-1)
 
         raise ValueError(f"Expected 4D or 5D input, got {x.dim()}D")
 

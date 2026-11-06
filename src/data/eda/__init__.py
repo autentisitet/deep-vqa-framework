@@ -1,7 +1,8 @@
 # src/data/eda/__init__.py
-from .integrity import check_media_integrity, check_image_integrity, check_video_integrity
 # Backward-compatible export. Plotting now belongs to src.visualization.
 from src.visualization.training_plots import MetricsPlotter
+
+from .integrity import check_image_integrity, check_media_integrity, check_video_integrity
 from .split import (
     check_fold_distribution,
     create_stratified_labels,

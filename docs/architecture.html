@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Deep-VQA-Framework Architecture</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        import svgPanZoom from 'https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/+esm';
+
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'base',
+            themeVariables: {
+                fontFamily: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                primaryColor: '#eef4ff',
+                primaryBorderColor: '#3367d6',
+                lineColor: '#334155',
+                textColor: '#111827'
+            }
+        });
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            const container = document.querySelector('.mermaid');
+            if (!container) return;
+            try {
+                await mermaid.run({ nodes: [container] });
+                const svgElement = container.querySelector('svg');
+                if (!svgElement) throw new Error('Mermaid did not produce an SVG');
+                svgElement.setAttribute('width', '100%');
+                svgElement.setAttribute('height', '100%');
+                svgPanZoom(svgElement, {
+                    zoomEnabled: true,
+                    controlIconsEnabled: false,
+                    fit: true,
+                    center: true,
+                    minZoom: 0.5,
+                    maxZoom: 10
+                });
+            } catch (error) {
+                container.textContent = `Architecture diagram unavailable: ${error.message}`;
+                container.style.padding = '96px 24px';
+                container.style.color = '#b91c1c';
+            }
+        });
+    </script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #f8fafc;
+            overflow: hidden;
+            font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        .topbar {
+            position: fixed;
+            z-index: 10;
+            top: 16px;
+            left: 16px;
+            right: 16px;
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 12px 16px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
+            color: #0f172a;
+            pointer-events: none;
+        }
+        .title {
+            font-weight: 700;
+            font-size: 15px;
+        }
+        .subtitle {
+            color: #475569;
+            font-size: 13px;
+        }
+        .mermaid {
+            width: 100vw;
+            height: 100vh;
+            padding-top: 64px;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div class="title">Deep-VQA-Framework Platform v0.9.6</div>
+        <div class="subtitle">Dataset audit · reproducible IQA/VQA training · evaluation · checkpoint handoff · FastAPI, Nginx, and containers</div>
+    </div>
+    <div class="mermaid">
+    graph TD
+        classDef transitionLink stroke:#d32f2f,stroke-width:5px,stroke-dasharray:5;
+        classDef warn fill:#ffebee,stroke:#c62828,stroke-width:2px,stroke-dasharray:3;
+
+        subgraph STAGE_1 [1. Infrastructure scripts]
+            B[bootstrap.sh] --> S1[setup_env.sh]
+            S1 --> S3[manage_data.sh]
+            S1 --> A[archive_results.sh]
+            S1 --> C[cache_clean.sh]
+            S6[ci_test_extract.sh] -.CI.-> S3
+        end
+
+        subgraph STAGE_2 [2. Typed configuration]
+            C1[train-config/basic.yaml] --> CL[src/config/loader.py<br/>load_config]
+            C3[models/*.yaml] --> CL
+            C2[train-config/dataset_config.yaml] --> CL
+            CL -->|"Pydantic validation and type safety"| M[main.py]
+        end
+
+        subgraph STAGE_3 [3. Core utilities]
+            M --> LG[logging_utils.py<br/>log_prepare + deploy decorator]
+            M --> CF[src/config/schemas.py<br/>Config + PathsConfig]
+            CF -->|"cfg.paths.xxx_dir()"| M
+        end
+
+        subgraph STAGE_4 [4. Data processing]
+            M --> DE[data_eda.py<br/>DataEDA]
+            DE --> MF[dataset_loaders.py] --> ML[metadata_loaders.py<br/>Tid2013/Konvid/T2Vqa Loader]
+            DE --> INT[eda/integrity.py<br/>missing, corrupt, blank, and skipped-frame checks]
+            INT --> BAD[(results/dataset/corrupted/<br/>quarantine and label backup)]
+            DE --> STA[eda/statistics.py<br/>EDA and MOS statistics]
+            DE --> PP[preprocessing.py<br/>RGB·bicubic 232·center crop 224<br/>ImageNet mean/std]
+            DE --> SPL[eda/split.py<br/>Group train/val/test + Group K-fold]
+            DE --> FL[utils/file_loader.py<br/>CaseInsensitiveAssetResolver]
+            DE --> TY[dataset_types.py]
+            DE --> DF[(processed DataFrame<br/>and MOS normalization statistics)]
+        end
+
+        subgraph STAGE_5 [5. Model training]
+            DF --> TR[trainer.py]
+            PP --> TR
+            TR -->|"evaluator dependency"| E[engine.py<br/>TrainerEngine]
+            E --> N{iqavqa_model.py<br/>IQAVQANet<br/>tensor-rank routing}
+            N -->|"4D tensor Bx3x224x224"| IQA[Image branch<br/>Swin-T IMAGENET1K_V1<br/>LayerNorm + AdaptiveAvgPool2d<br/>feature Bx768]
+            N -->|"5D tensor BxFx3x224x224"| VQA[Video branch<br/>Swin-T IMAGENET1K_V1<br/>LayerNorm + spatial pooling<br/>frame feature BxFx768]
+            VQA --> TF[Temporal fusion<br/>positional embedding<br/>TransformerEncoder + temporal average]
+            IQA --> HD[heads.py<br/>Quality head<br/>3-layer MLP + Sigmoid]
+            TF --> HD
+            N --> BB[backbones.py<br/>torchvision cache + hash recovery]
+            E --> L{losses.py<br/>IQAVQALoss}
+            TR --> EV[evaluator.py<br/>Evaluator]
+            EV --> MP[metrics_plotter.py]
+        end
+
+        subgraph STAGE_6 [6. Output files]
+            TR --> F[(best checkpoints<br/>results/dataset/model_outputs/)]
+            MP --> PLOTS[(EDA + training + residual + fold diagnostics<br/>results/dataset/plots/)]
+            TR --> AR[archive_results.sh]
+            AR --> LOG[(Log + Config + Plots + Weights<br/>results/dataset/)]
+        end
+
+        subgraph STAGE_7 [7. Inference delivery]
+            F -->|"publish successful checkpoint<br/>dataset_best.pt"| BM[(deploy/iqa-models/<br/>deploy/vqa-models/)]
+            BM --> CORE[deploy/config.py + deploy/web/ + deploy/inference/<br/>instance config + HTTP service + model serving]
+            CORE --> API[deploy/web/api.py<br/>FastAPI /v1/evaluations /v1/auth /v1/health]
+            CORE --> CLI[deploy/inference/cli.py<br/>Batch inference CLI]
+            API --> DIAG[(Feature maps + Grad-CAM<br/>reports/iqa-test/)]
+            API --> AUTH[deploy/web/accounts.py<br/>scrypt password hashing<br/>hashed session tokens]
+            AUTH --> ADB[(reports/accounts.sqlite3)]
+            API --> HIST[(reports/frontend-evaluations.sqlite3)]
+            AUTH -. owns .-> DIAG
+            NGINX[nginx<br/>static frontend and /api/ proxy<br/>browser delivery mode] --> API
+            WEB[frontend/index.html<br/>browser frontend] --> NGINX
+            ENV[.env from .env.example<br/>ports · endpoints · local proxy] --> CORE
+            API --> EXT[external API clients]
+        end
+
+        subgraph STAGE_8 [8. Container network connections]
+            BASE[Dockerfile base stage] --> DEVIMG[vqa-dev image]
+            BASE --> TRAINIMG[vqa-train image]
+            BASE --> INFERIMG[vqa-infer image]
+            NIMG[official nginx:alpine] --> NGINXSVC[Compose service vqa-nginx]
+            INFERIMG --> INFERSVC[Compose service vqa-infer]
+            INFERSVC --> INFERCTR[vqa-infer container]
+            NGINXSVC --> NGINXCTR[vqa-nginx container]
+            BACKEND[(backend bridge network)] --- INFERCTR
+            BACKEND --- NGINXCTR
+            INFERSVC -. healthcheck first .-> NGINXSVC
+        end
+
+        STAGE_1 ==> STAGE_2
+        STAGE_2 ==> STAGE_3
+        STAGE_3 ==> STAGE_4
+        STAGE_4 ==> STAGE_5
+        STAGE_5 ==> STAGE_6
+        STAGE_6 ==> STAGE_7
+
+        class STAGE_1,STAGE_2,STAGE_3,STAGE_4,STAGE_5,STAGE_6,STAGE_7 transitionLink
+
+        style STAGE_1 fill:#f5f5f5,stroke:#333
+        style STAGE_2 fill:#e1f5fe,stroke:#01579b
+        style STAGE_3 fill:#fffde7,stroke:#f9a825
+        style STAGE_4 fill:#fff3e0,stroke:#ef6c00
+        style STAGE_5 fill:#e8f5e9,stroke:#2e7d32
+        style STAGE_6 fill:#fce4ec,stroke:#c2185b
+        style STAGE_7 fill:#ede7f6,stroke:#512da8
+        style F fill:#ff9800,stroke:#e65100,stroke-width:4px
+        style API fill:#ffcdd2,stroke:#c62828,stroke-width:3px
+    </div>
+</body>
+</html>

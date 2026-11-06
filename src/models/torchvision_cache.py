@@ -4,7 +4,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Callable
+from typing import Callable, TypeVar
 from urllib.parse import urlparse
 
 import torch
@@ -13,16 +13,22 @@ from loguru import logger
 
 from src.config.schemas import Config
 
-
 _TORCHVISION_HASH_RE = re.compile(r"-([0-9a-f]{8,64})\.(?:pth|pt)$")
+
+# Preserve the concrete torchvision model type through the cache wrapper so
+# callers keep precise attribute types (e.g. ResNet.fc) instead of the
+# Tensor | Module union that nn.Module.__getattr__ infers.
+_ModelT = TypeVar("_ModelT", bound=nn.Module)
 
 
 def _expected_hash_from_filename(path: Path) -> str | None:
+    """Parse the expected SHA-256 prefix embedded in a torchvision filename."""
     match = _TORCHVISION_HASH_RE.search(path.name)
     return match.group(1) if match else None
 
 
 def _sha256_hexdigest(path: Path) -> str | None:
+    """Return a file's SHA-256 digest, or ``None`` when it cannot be read."""
     digest = hashlib.sha256()
     try:
         with path.open("rb") as fh:
@@ -35,6 +41,7 @@ def _sha256_hexdigest(path: Path) -> str | None:
 
 
 def _sha256_prefix_matches(path: Path) -> bool:
+    """Whether a file's digest matches the hash prefix in its filename."""
     expected_hash = _expected_hash_from_filename(path)
     if expected_hash is None:
         return True
@@ -44,6 +51,7 @@ def _sha256_prefix_matches(path: Path) -> bool:
 
 
 def _prune_invalid_torch_checkpoints(checkpoints_dir: Path) -> None:
+    """Delete cached weight files whose digest fails the filename check."""
     if not checkpoints_dir.exists():
         return
 
@@ -60,13 +68,15 @@ def _prune_invalid_torch_checkpoints(checkpoints_dir: Path) -> None:
 
 
 def _checkpoint_name_from_weights(weights: object) -> str | None:
-    url = getattr(weights, "url", None)
-    if not url:
+    """Return the download filename encoded in a torchvision weights URL."""
+    url: object = getattr(weights, "url", None)
+    if not isinstance(url, str) or not url:
         return None
     return Path(urlparse(url).path).name
 
 
 def _cached_weight_path(weights: object) -> Path | None:
+    """Return the local cache path for a torchvision weights object."""
     checkpoint_name = _checkpoint_name_from_weights(weights)
     if checkpoint_name is None:
         return None
@@ -74,6 +84,7 @@ def _cached_weight_path(weights: object) -> Path | None:
 
 
 def _remove_cached_weight_file(weights: object) -> Path | None:
+    """Delete a cached weight file, tolerating a missing file."""
     checkpoint_path = _cached_weight_path(weights)
     if checkpoint_path is None:
         return None
@@ -123,7 +134,7 @@ def configure_torch_weight_cache(cfg: Config) -> Path:
     """
     default_cache_root = Path.home() / ".cache" / "torch"
     env_cache_root = Path(os.environ["TORCH_HOME"]).expanduser() if os.environ.get("TORCH_HOME") else None
-    cache_root = cfg.paths.resolve(cfg.paths.cache_dir) / "torch"
+    cache_root = cfg.paths.resolve_path(cfg.paths.cache_dir) / "torch"
     os.environ["TORCH_HOME"] = str(cache_root)
 
     hub_dir = cache_root / "hub"
@@ -139,7 +150,8 @@ def configure_torch_weight_cache(cfg: Config) -> Path:
     return checkpoints_dir
 
 
-def build_torchvision_model(builder: Callable[..., nn.Module], weights: object | None) -> nn.Module:
+def build_torchvision_model(builder: Callable[..., _ModelT], weights: object | None) -> _ModelT:
+    """Build a torchvision model, retrying once after a corrupt-cache failure."""
     try:
         return builder(weights=weights)
     except RuntimeError as exc:

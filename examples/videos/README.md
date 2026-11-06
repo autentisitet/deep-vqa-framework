@@ -10,8 +10,14 @@ Place your test videos here for batch inference.
 - `.mkv`
 - `.wmv`
 
+---
+
 ## Usage
 
 ```bash
-make test-videos
+make docker-batch-test VIDEOS=1
 ```
+
+Video inputs are decoded with the configured OpenCV/Decord path before
+inference. A forged or misleading filename suffix is rejected instead of being
+trusted as the media identity.
