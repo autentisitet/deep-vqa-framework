@@ -30,15 +30,13 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 # Parse arguments
 # ============================================================
 INSTALL_DEV=false
-INSTALL_SECURITY=false
 USE_MIRROR=false
 
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dev)      INSTALL_DEV=true; shift ;;
-        --security) INSTALL_SECURITY=true; shift ;;
-        --all)      INSTALL_DEV=true; INSTALL_SECURITY=true; shift ;;
+        --all)      INSTALL_DEV=true; shift ;;
         --mirror)   USE_MIRROR=true; shift ;;
         --help|-h)
             cat << EOF
@@ -46,8 +44,7 @@ Usage: ./setup_env.sh [OPTIONS]
 
 Options:
   --dev         Install development tools (pytest, ruff, mypy, black, isort)
-  --security    Install security tools (pip-audit, cyclonedx-bom, safety)
-  --all         Install all optional tools
+  --all         Install development tools
   --mirror      Use TUNA mirror for pip (China users)
   --help        Show this help message
 EOF
@@ -93,7 +90,6 @@ fi
 # Package lists
 # ============================================================
 UV_DEV_PACKAGES=(pytest ruff mypy black isort)
-UV_SECURITY_PACKAGES=(pip-audit cyclonedx-bom safety)
 
 
 
@@ -241,6 +237,11 @@ SYNC_ARGS=""
 
 if [ "$USE_TORCH_INDEX" = true ] && [ -n "$TORCH_INDEX" ]; then
     SYNC_ARGS="$SYNC_ARGS --extra-index-url $TORCH_INDEX"
+    # The official PyTorch index also carries a partial set of transitive
+    # packages. uv's default first-index policy can stop there (for example at
+    # an older tqdm) instead of considering the primary PyPI/TUNA index. Both
+    # indexes are explicitly trusted here, so resolve across them.
+    SYNC_ARGS="$SYNC_ARGS --index-strategy unsafe-best-match"
 fi
 
 if [ -n "$UV_INDEX_URL" ]; then
@@ -264,7 +265,7 @@ log_ok "Build-system dependencies installed."
 # ============================================================
 # Install optional tools
 # ============================================================
-if [ "$INSTALL_DEV" = true ] || [ "$INSTALL_SECURITY" = true ]; then
+if [ "$INSTALL_DEV" = true ]; then
     ensure_optional_deps
 fi
 
@@ -281,15 +282,6 @@ if [ "$INSTALL_DEV" = true ]; then
     echo "  • mypy (type checking)"
     echo "  • black (code formatter)"
     echo "  • isort (import sorting)"
-fi
-
-if [ "$INSTALL_SECURITY" = true ]; then
-    log_info "Installing security tools..."
-    uv add --optional security "${UV_SECURITY_PACKAGES[@]}" 2>/dev/null || true
-    log_ok "Security tools installed:"
-    echo "  • pip-audit (vulnerability scanning)"
-    echo "  • cyclonedx-bom (SBOM generation)"
-    echo "  • safety (dependency security check)"
 fi
 
 
@@ -311,7 +303,6 @@ echo ""
 echo "  Python Version: ${PYTHON_VERSION}"
 echo "  Virtual Env:    $(pwd)/.venv"
 echo "  Dev Tools:      $([ "$INSTALL_DEV" = true ] && echo "${GREEN}Installed${NC}" || echo "${YELLOW}Skipped${NC}")"
-echo "  Security Tools: $([ "$INSTALL_SECURITY" = true ] && echo "${GREEN}Installed${NC}" || echo "${YELLOW}Skipped${NC}")"
 echo ""
 echo "To use uv in current shell:"
 echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""

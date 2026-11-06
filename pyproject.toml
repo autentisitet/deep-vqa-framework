@@ -1,6 +1,6 @@
 [project]
 name = "deep-vqa-framework"
-version = "0.9.0"
+version = "0.9.6"
 description = "Unified deep learning framework for Image and Video Quality Assessment (IQA/VQA)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -24,7 +24,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
-    "cryptography>=50.0.0",
+    "av>=14.0.0",
     "decord>=0.6.0",
     "fastapi>=0.139.2",
     "gdown>=6.0.0",
@@ -56,11 +56,6 @@ dev = [
     "black>=26.5.1",
     "isort>=8.0.1",
 ]
-security = [
-    "cyclonedx-bom>=7.3.1",
-    "pip-audit>=2.10.1",
-    "safety>=3.8.1",
-]
 
 [project.urls]
 Homepage = "https://github.com/autentisitet/deep-vqa-framework"
@@ -89,15 +84,22 @@ target-version = "py312"
 
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
+select = ["E", "F", "W", "I", "TID251"]
 ignore = [
     "E501",   # line too long (handled by formatter)
-    "F401",   # unused imports (models may use star imports)
 ]
 
 
 [tool.ruff.lint.per-file-ignores]
-"src/main.py" = ["F401"]
+# The entry point pins thread counts (OMP/MKL/OpenBLAS, cv2.setNumThreads)
+# before importing torch, cv2, or the training stack, so the imports that
+# follow those statements are intentional rather than misordered.
+"src/main.py" = ["F401", "E402"]
+
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"typing.Any".msg = "Use a concrete type, a generic, or object with explicit narrowing."
+"typing_extensions.Any".msg = "Use a concrete type, a generic, or object with explicit narrowing."
 
 
 [tool.ruff.lint.isort]

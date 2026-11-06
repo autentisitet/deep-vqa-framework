@@ -8,6 +8,7 @@
 datasets/
 results/
 reports/
+uploads/
 logs/
 .download_cache/
 nohup.out
@@ -41,14 +42,13 @@ Thumbs.db
 .idea/
 *.swp
 
-.markdownlint.json
-.markdownlintignore
 Makefile.local
 config.mk
 tmp/
 temp/
 
-# Local AI / agent tooling
+# Local AI / agent tooling.
+.agents/
 .cursor/
 .claude/
 .cline/
@@ -61,6 +61,5 @@ temp/
 .gemini/
 .aider*
 .codex/
-.agents/
 
 git_log.txt

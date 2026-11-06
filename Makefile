@@ -13,9 +13,8 @@ SHELL := /bin/bash
 PROJECT_NAME := Deep-VQA-Framework
 ROOT_DIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 LOG_DIR := $(ROOT_DIR)/results/scripts_logs
-SECURITY_DIR := $(ROOT_DIR)/reports/security
 
-$(shell mkdir -p $(LOG_DIR) $(SECURITY_DIR))
+$(shell mkdir -p $(LOG_DIR))
 
 
 # ============================================================
@@ -37,19 +36,21 @@ UV_RUN := uv run
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: help help-% bootstrap setup install env-secrets data info cache_clean archive results-clean
+.PHONY: help h '?' help-% bootstrap setup install data info cache-clean archive results-clean
 
 .PHONY: git-log version-sync version-check
 
-.PHONY: pytest test-images test-videos test-all
+.PHONY: pytest docker-batch-test
+.PHONY: _docker-batch-images _docker-batch-videos
 
 .PHONY: check-code fmt black isort format-all typecheck
-.PHONY: vuln-audit sbom safety security-all
 
-.PHONY: docker-dev docker-train docker-stop docker-manage
-.PHONY: docker-purge-all
-.PHONY: docker-infer docker-infer-internal docker-infer-public
-.PHONY: docker-infer-internal-ollama docker-infer-public-ollama docker-deploy-check
+.PHONY: docker-dev docker-train docker-stop docker-manage local
+.PHONY: docker-purge-train docker-purge-deploy docker-purge-all
+
+.PHONY: env-secrets docker-infer account-disable account-enable account-reset-password
+.PHONY: docker-deploy-check docker-memory-measure
+
 
 
 
@@ -62,85 +63,98 @@ UV_RUN := uv run
 # ------------------------------------------------------------
 help:
 	@echo '$(BOLD)$(CYAN)Deep-VQA-Framework Makefile$(RESET)'
+	@echo 'Project targets are listed below.'
+	@echo 'Use `make`, `make help`, `make h`, or `make ?` for this index.'
+	@echo '`make --help` shows GNU Make options, not project targets.'
 	@echo ''
 	@echo '$(GREEN)Environment:$(RESET)'
 
-	@echo '  make bootstrap [MIRROR=1]                   Install system dependencies (apt)'
-	@echo '  make setup [DEV=1 SECURITY=1 MIRROR=1]      Install Python dependencies (uv)'
-	@echo '  make install [DEV=1 SECURITY=1 MIRROR=1]    Bootstrap + Setup (full installation)'
-	@echo '  make env-secrets                            Create .env and generate API/cookie secrets'
-	@echo '  make data                                  Download and prepare datasets'
+	@echo '  $(CYAN)make bootstrap [MIRROR=1]$(RESET)                   Install required system packages (apt)'
+	@echo '  $(CYAN)make setup [DEV=1 MIRROR=1]$(RESET)      Install Python dependencies (uv)'
+	@echo '  $(CYAN)make install [DEV=1 MIRROR=1]$(RESET)    Install system and Python dependencies'
+	@echo '  $(CYAN)make env-secrets$(RESET)                            Create .env and generate API/cookie secrets'
+	@echo '  $(CYAN)make data$(RESET)                                  Download and prepare datasets'
 
 	@echo ''
 	@echo '$(YELLOW)Code Quality:$(RESET)'
-	@echo '  make check-code     Run ruff linter'
-	@echo '  make format-all     Format code (black + isort + ruff)'
-	@echo '  make typecheck      Run mypy type checker'
-	@echo '  make version-check  Verify README/runtime version markers match pyproject.toml'
+	@echo '  $(CYAN)make check-code$(RESET)     Run ruff linter'
+	@echo '  $(CYAN)make format-all$(RESET)     Format code (black + isort + ruff)'
+	@echo '  $(CYAN)make typecheck$(RESET)      Run mypy type checker'
+	@echo '  $(CYAN)make version-check$(RESET)  Verify README/runtime version markers match pyproject.toml'
 	@echo ''
-	@echo '$(RED)Security:$(RESET)'
-	@echo '  make vuln-audit     Scan dependencies for CVEs'
-	@echo '  make sbom           Generate CycloneDX SBOM'
-	@echo '  make security-all   Run all security checks'
 	@echo ''
 	@echo '$(CYAN)Docker:$(RESET)'
 
-	@echo '  make docker-dev [BUILD_ARGS="..."]         Open a dev shell (dev tools included)'
-	@echo '  make docker-train [DEV=1 BUILD_ARGS="..."] Run the configured training jobs'
-	@echo '  make docker-stop                           Stop project containers, including Ollama if running'
-	@echo '  make docker-manage                         Inspect runtime and project resources'
-	@echo '  make docker-purge-all                      Remove all project containers/images'
-	@echo '  make docker-infer [DEPLOYMENT_MODE=public] Default inference stack'
-	@echo '  make docker-infer-internal-ollama          Internal profile + Ollama'
-	@echo '  make docker-infer-public-ollama            Public profile + Ollama'
-	@echo '  make docker-deploy-check                   Check API and optional Nginx/Ollama services'
-	@echo '  Note: inference commands create .env from .env.example when missing; internal mode still needs keys.'
+	@echo '  $(CYAN)make docker-dev$(RESET) [BUILD_ARGS="..."]         Open a dev shell (dev tools included)'
+	@echo '  $(CYAN)make docker-train$(RESET) [DEV=1 BUILD_ARGS="..."] Run the configured training jobs'
+	@echo '  $(CYAN)make docker-stop$(RESET)                           Stop project containers'
+	@echo '  $(CYAN)make docker-manage$(RESET)                         Inspect runtime and project resources'
+	@echo '  $(CYAN)make account-disable EMAIL=...$(RESET)             Disable an account and revoke its sessions'
+	@echo '  $(CYAN)make account-enable EMAIL=...$(RESET)              Enable an account'
+	@echo '  $(CYAN)make account-reset-password EMAIL=...$(RESET)      Reset a password and revoke its sessions'
+	@echo '  $(CYAN)make docker-purge-all$(RESET)                      Remove all project containers/images/upload volume'
+	@echo '  $(CYAN)make docker-purge-train$(RESET)                    Remove only training/dev containers and images'
+	@echo '  $(CYAN)make docker-purge-deploy$(RESET)                   Remove only inference/Nginx containers and inference image'
+	@echo '  $(CYAN)make docker-infer$(RESET) [DEPLOYMENT_MODE=proxy] [GPU=1] Start Nginx and FastAPI'
+	@echo '  $(CYAN)make local$(RESET)                                 Single-user CPU stack on loopback, no login'
+	@echo '  $(CYAN)make docker-deploy-check$(RESET)                   Check Nginx and API services'
+	@echo '  $(CYAN)make docker-memory-measure$(RESET) [MEMORY_ARGS="..."] Measure container memory'
+	@echo '  Note: inference creates .env if missing; accounts mode needs no shared key.'
 	@echo ''
 	@echo '$(BLUE)Inference:$(RESET)'
-	@echo '  make test-images     Batch inference on examples/images/'
-	@echo '  make test-videos     Batch inference on examples/videos/'
-	@echo '  make test-all        Batch inference on all examples/'
-	@echo '  make pytest          Run the tests/ pytest suite'
+	@echo '  $(CYAN)make docker-batch-test$(RESET) [IMAGES=1] [VIDEOS=1] Container batch inference'
+	@echo '  $(CYAN)make benchmark$(RESET) [ROLES=iqa,vqa] [THREADS=2] Held-out accuracy, baseline, latency'
+	@echo '  $(CYAN)make pytest$(RESET)          Run the tests/ pytest suite'
+	@echo '  $(CYAN)make preflight$(RESET)      Run the full repository gate'
 
 	@echo ''
 	@echo '$(BLUE)Maintenance:$(RESET)'
-	@echo '  make cache_clean    Remove cache and temporary files'
-	@echo '  make results-clean       Delete dated .pt/.csv/.log files older than 3 days'
-	@echo '  make archive [ARCHIVE_ARGS="..."]       Package results'
-	@echo '  make git-log        Export git history and update ignore files'
+	@echo '  $(CYAN)make cache-clean$(RESET)    Remove cache and temporary files'
+	@echo '  $(CYAN)make results-clean$(RESET)       Delete dated .pt/.csv/.log files older than 3 days'
+	@echo '  $(CYAN)make archive$(RESET) [ARCHIVE_ARGS="..."]       Package results'
+	@echo '  $(CYAN)make git-log$(RESET)        Export git history and update ignore files'
 	@echo ''
 	@echo '$(CYAN)Info:$(RESET)'
-	@echo '  make info           Show environment details'
+	@echo '  $(CYAN)make info$(RESET)           Show environment details'
 	@echo ''
 
 	@echo '$(BOLD)Parameters:$(RESET)'
 	@echo '  DEV=1                       Include development tools'
-	@echo '  SECURITY=1                  Include security tools'
 	@echo '  MIRROR=1                    Use the TUNA package mirror'
-	@echo '  DEPLOYMENT_MODE=internal|public  Select inference profile (default: internal)'
+	@echo '  DEPLOYMENT_MODE=internal|proxy|local  Select start mode (default: internal)'
+	@echo '  ROLES=iqa,vqa               Models to benchmark (default: iqa,vqa)'
+	@echo '  THREADS=2                   Torch/OpenCV threads for benchmark latency (default: 2)'
+	@echo '  BENCH_DEVICE=cpu|cuda       Benchmark device (default: cpu)'
+	@echo '  BENCHMARK_ARGS="..."        Advanced benchmark script arguments'
+	@echo '  GPU=1                      Enable NVIDIA GPU access (default: CPU)'
 	@echo '  BUILD_ARGS="..."             Advanced Docker build flags'
 	@echo '  ARCHIVE_ARGS="..."           Advanced archive script arguments'
 	@echo '  GIT_LOG_FILE="..."            Git history output path'
-	@echo '  BOOTSTRAP_ARGS/SETUP_ARGS    Advanced raw script arguments (optional)'
+	@echo '  BOOTSTRAP_ARGS/SETUP_ARGS    Extra script arguments (optional)'
 	@echo ''
 	@echo '$(BOLD)Examples:$(RESET)'
-	@echo '  make bootstrap MIRROR=1'
-	@echo '  make setup DEV=1 MIRROR=1'
-	@echo '  make install DEV=1 SECURITY=1 MIRROR=1'
-	@echo '  make env-secrets'
-	@echo '  make docker-infer'
-	@echo '  make docker-infer DEPLOYMENT_MODE=public'
-	@echo '  make docker-infer-internal-ollama'
-	@echo '  make docker-train DEV=1'
-	@echo '  make docker-train BUILD_ARGS="--build-arg USE_BUILD_PROXY=true"'
-	@echo '  make archive ARCHIVE_ARGS="--results"'
-	@echo '  make git-log GIT_LOG_FILE="results/git_log.txt"'
-	@echo '  make test-all'
+	@echo '  $(CYAN)make bootstrap MIRROR=1$(RESET)'
+	@echo '  $(CYAN)make setup DEV=1 MIRROR=1$(RESET)'
+	@echo '  $(CYAN)make install DEV=1 MIRROR=1$(RESET)'
+	@echo '  $(CYAN)make env-secrets$(RESET)'
+	@echo '  $(CYAN)make docker-infer$(RESET)'
+	@echo '  $(CYAN)make docker-infer DEPLOYMENT_MODE=proxy$(RESET)'
+	@echo '  $(CYAN)make local$(RESET)'
+	@echo '  $(CYAN)make docker-train DEV=1$(RESET)'
+	@echo '  $(CYAN)make docker-train BUILD_ARGS="--build-arg USE_BUILD_PROXY=true"$(RESET)'
+	@echo '  $(CYAN)make archive ARCHIVE_ARGS="--results"$(RESET)'
+	@echo '  $(CYAN)make git-log GIT_LOG_FILE="results/git_log.txt"$(RESET)'
+	@echo '  $(CYAN)make docker-batch-test$(RESET)'
+	@echo '  $(CYAN)make docker-batch-test IMAGES=1$(RESET)'
+	@echo '  $(CYAN)make docker-batch-test VIDEOS=1$(RESET)'
 	@echo '  uv run python -m src.main --dataset tid2013 --model swin_iqa'
 	@echo '  uv run python -m src.main --dataset konvid-1k --model swin_vqa'
 	@echo ''
 	@echo '  Detailed help: make help-TARGET (for example: make help-docker-infer)'
-	@echo '  Knowledge base: knowledge/README.md'
+	@echo '  Documentation:  docs/README.md'
+
+h ?:
+	@$(MAKE) help
 
 help-%:
 	@case "$*" in \
@@ -163,23 +177,35 @@ help-%:
 			echo 'PURPOSE: Run the configured training workflows.'; \
 			echo 'NOTE: DEV=1 adds pytest/ruff/mypy/black/isort to the image.' ;; \
 		docker-infer) \
-			echo 'COMMAND: make docker-infer [DEPLOYMENT_MODE=internal|public]'; \
-			echo 'PURPOSE: Start vqa-infer and vqa-nginx; default profile is internal.'; \
-			echo 'NOTE: use make docker-infer-internal-ollama for subjective quality.' ;; \
-		docker-infer-internal-ollama|docker-infer-public-ollama) \
-			echo 'COMMAND: make '$*; \
-			echo 'PURPOSE: Start vqa-ollama, initialize the model, then start inference.'; \
-			echo 'NOTE: internal mode requires DEEP_VQA_API_KEY and DEEP_VQA_AUTH_SECRET.' ;; \
+			echo 'COMMAND: make docker-infer [DEPLOYMENT_MODE=internal|proxy|local] [GPU=1]'; \
+			echo 'PURPOSE: Start vqa-infer and vqa-nginx; default mode is internal.'; \
+			echo 'NOTE: internal accounts register via browser; legacy api_key mode requires secrets.' ;; \
 		docker-stop) \
 			echo 'COMMAND: make docker-stop'; \
 			echo 'PURPOSE: Stop project services without deleting data.' ;; \
 		docker-purge-all) \
 			echo 'COMMAND: make docker-purge-all'; \
-			echo 'PURPOSE: Remove project containers, images, and volumes.' ;; \
+			echo 'PURPOSE: Remove project containers, images, network, and named upload volume.'; \
+			echo 'WARNING: Does not remove host bind-mounted data; upload volume data is lost.' ;; \
+		docker-purge-train) \
+			echo 'COMMAND: make docker-purge-train'; \
+			echo 'PURPOSE: Remove only vqa-train/vqa-dev containers and their project images.'; \
+			echo 'NOTE: Host datasets, results, reports, checkpoints, and volumes are kept.' ;; \
+		docker-purge-deploy) \
+			echo 'COMMAND: make docker-purge-deploy'; \
+			echo 'PURPOSE: Remove only vqa-nginx/vqa-infer containers and the vqa-infer image.'; \
+			echo 'NOTE: Host reports, accounts, checkpoints, and upload volume are kept.' ;; \
 		docker-deploy-check) \
 			echo 'COMMAND: make docker-deploy-check'; \
-			echo 'PURPOSE: Check API and optional Nginx/Ollama services.' ;; \
-		test-images|test-videos|test-all) echo 'make $*'; echo '  Run deployment batch inference against the example media set.' ;; \
+			echo 'PURPOSE: Check API and Nginx health and the proxied browser entry point.' ;; \
+		docker-memory-measure) \
+			echo 'COMMAND: make docker-memory-measure [MEMORY_ARGS="..."]'; \
+			echo 'PURPOSE: Measure idle, peak, and settled container memory across real requests.'; \
+			echo 'OUTPUT: reports/memory/latest.json and reports/memory/latest.md.' ;; \
+		docker-batch-test) \
+			echo 'COMMAND: make docker-batch-test [IMAGES=1] [VIDEOS=1]'; \
+			echo 'PURPOSE: Run batch media inference through deploy/inference/cli.py inside vqa-infer.'; \
+			echo 'NOTE: No selector runs both image and video batches.' ;; \
 		pytest) echo 'make pytest'; echo '  Run the tests/ pytest suite.' ;; \
 		*) echo "No detailed help is available for '$*'. Run 'make help' to list targets."; exit 1 ;; \
 		esac
@@ -193,23 +219,22 @@ version-check:
 
 
 DEV ?= 0
-SECURITY ?= 0
 MIRROR ?= 0
 INSTALL_ARGS ?=
 BOOTSTRAP_ARGS ?= $(if $(filter 1 true yes,$(MIRROR)),--mirror) $(filter --mirror,$(INSTALL_ARGS))
-SETUP_ARGS ?= $(if $(filter 1 true yes,$(MIRROR)),--mirror) $(if $(filter 1 true yes,$(DEV)),--dev) $(if $(filter 1 true yes,$(SECURITY)),--security) $(INSTALL_ARGS)
+SETUP_ARGS ?= $(if $(filter 1 true yes,$(MIRROR)),--mirror) $(if $(filter 1 true yes,$(DEV)),--dev) $(INSTALL_ARGS)
 ARCHIVE_ARGS ?= --all
 GIT_LOG_FILE ?= $(ROOT_DIR)/git_log.txt
 bootstrap:
 	@chmod +x $(ROOT_DIR)/scripts/*.sh
-	@cd $(ROOT_DIR)/scripts && bash bootstrap.sh $(BOOTSTRAP_ARGS) 2>&1 | tee $(LOG_DIR)/bootstrap.log
+	@set -o pipefail; cd $(ROOT_DIR)/scripts && bash bootstrap.sh $(BOOTSTRAP_ARGS) 2>&1 | tee $(LOG_DIR)/bootstrap.log
 	@echo "$(GREEN)[OK]$(RESET) Bootstrap complete."
 
 
 
 setup:
 	@chmod +x $(ROOT_DIR)/scripts/*.sh
-	@cd $(ROOT_DIR)/scripts && bash setup_env.sh $(SETUP_ARGS) 2>&1 | tee $(LOG_DIR)/setup_env.log
+	@set -o pipefail; cd $(ROOT_DIR)/scripts && bash setup_env.sh $(SETUP_ARGS) 2>&1 | tee $(LOG_DIR)/setup_env.log
 	@echo "$(GREEN)[OK]$(RESET) Setup complete. Run 'make info' to verify."
 
 
@@ -229,16 +254,17 @@ install: bootstrap setup
 
 data:
 	@echo "$(BLUE)[INFO]$(RESET) Preparing datasets..."
-	@cd $(ROOT_DIR)/scripts && bash manage_data.sh 2>&1 | tee $(LOG_DIR)/manage_data.log
+	@set -o pipefail; cd $(ROOT_DIR)/scripts && bash manage_data.sh 2>&1 | tee $(LOG_DIR)/manage_data.log
 	@echo "$(GREEN)[OK]$(RESET) Data ready."
 
 
 
 
-cache_clean:
+cache-clean:
 	@echo "$(YELLOW)[WARN]$(RESET) Cleaning caches..."
 	@read -p "Remove all caches? [y/N] " confirm; \
 	if [ "$$confirm" = "y" ]; then \
+		set -o pipefail; \
 		bash $(ROOT_DIR)/scripts/cache_clean.sh 2>&1 | tee $(LOG_DIR)/cache_clean.log; \
 		echo "$(GREEN)[OK]$(RESET) Clean completed."; \
 	else \
@@ -258,13 +284,13 @@ results-clean:
 	fi; \
 	: > "$(LOG_DIR)/results_clean.log"; \
 	count=0; \
-	while IFS= read -r -d '' artifact; do \
-		filename="$$(basename "$$artifact")"; \
+	while IFS= read -r -d '' output_file; do \
+		filename="$$(basename "$$output_file")"; \
 		run_at="$${filename:0:15}"; \
 		if [[ "$$run_at" =~ ^[0-9]{8}_[0-9]{6}$$ ]] && [[ "$$run_at" < "$$retention_before" ]]; then \
-			printf "$(YELLOW)[INFO]$(RESET) Deleting artifact from %s: %s\n" "$$run_at" "$$filename"; \
-			rm -f -- "$$artifact"; \
-			printf '%s\n' "$$artifact" | tee -a "$(LOG_DIR)/results_clean.log"; \
+			printf "$(YELLOW)[INFO]$(RESET) Deleting output file from %s: %s\n" "$$run_at" "$$filename"; \
+			rm -f -- "$$output_file"; \
+			printf '%s\n' "$$output_file" | tee -a "$(LOG_DIR)/results_clean.log"; \
 			count=$$((count + 1)); \
 		fi; \
 	done < <(find "$(ROOT_DIR)/results" -type f \( -name '*.pt' -o -name '*.csv' -o -name '*.log' \) -print0); \
@@ -276,7 +302,7 @@ archive:
 	@if [ -f "$(LOG_DIR)/archive.log" ]; then \
 		mv "$(LOG_DIR)/archive.log" "$(LOG_DIR)/archive.log.$$(date +%Y%m%d%H%M%S).bak"; \
 	fi
-	@cd $(ROOT_DIR)/scripts && bash archive_results.sh $(ARCHIVE_ARGS) 2>&1 | tee $(LOG_DIR)/archive.log
+	@set -o pipefail; cd $(ROOT_DIR)/scripts && bash archive_results.sh $(ARCHIVE_ARGS) 2>&1 | tee $(LOG_DIR)/archive.log
 	@echo "$(GREEN)[OK]$(RESET) Archive completed."
 
 git-log:
@@ -322,18 +348,35 @@ pytest:
 	@set -o pipefail; cd $(ROOT_DIR) && PYTHONPATH="$(ROOT_DIR)" uv run --no-sync pytest -q 2>&1 | sed 's/^/  /'
 	@echo "$(GREEN)[OK]$(RESET) Pytest suite passed."
 
-test-images:
-	@echo "[INFO] Testing images..."
-	@uv run python -m deploy.cli -i examples/images/
+preflight:
+	@echo "$(BLUE)[INFO]$(RESET) Running the repository gate..."
+	@bash scripts/preflight.sh
+
+_docker-batch-images:
+	@echo "[INFO] Running image batch inference..."
+	@$(COMPOSE_ENV) $(COMPOSE) $(COMPOSE_FILES) run --rm --no-deps -T vqa-infer \
+		.venv/bin/python -m deploy.inference.cli -i examples/images/
 	@echo "[OK] Results saved under reports/iqa-test/"
 
-test-videos:
-	@echo "[INFO] Testing videos..."
-	@uv run python -m deploy.cli -i examples/videos/
+_docker-batch-videos:
+	@echo "[INFO] Running video batch inference..."
+	@$(COMPOSE_ENV) $(COMPOSE) $(COMPOSE_FILES) run --rm --no-deps -T vqa-infer \
+		.venv/bin/python -m deploy.inference.cli -i examples/videos/
 	@echo "[OK] Results saved under reports/vqa-test/"
 
-test-all: test-images test-videos
-	@echo "[OK] All tests completed"
+docker-batch-test:
+	$(call check_runtime)
+	$(call check_deployment_mode)
+	$(COMPOSE_ENV) $(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-infer
+	@if [ "$(IMAGES)$(VIDEOS)" != "" ] && [ "$(IMAGES)" != "1" ] && [ "$(IMAGES)" != "true" ] && [ "$(IMAGES)" != "yes" ] && [ "$(VIDEOS)" != "1" ] && [ "$(VIDEOS)" != "true" ] && [ "$(VIDEOS)" != "yes" ]; then \
+		echo "ERROR: IMAGES and VIDEOS must be boolean values (1/true/yes)."; exit 2; \
+	fi
+	@if [ "$(IMAGES)$(VIDEOS)" = "" ] || [ "$(IMAGES)" = "1" ] || [ "$(IMAGES)" = "true" ] || [ "$(IMAGES)" = "yes" ]; then \
+		$(MAKE) _docker-batch-images; \
+	fi
+	@if [ "$(IMAGES)$(VIDEOS)" = "" ] || [ "$(VIDEOS)" = "1" ] || [ "$(VIDEOS)" = "true" ] || [ "$(VIDEOS)" = "yes" ]; then \
+		$(MAKE) _docker-batch-videos; \
+	fi
 	@jq -s '.[] | .[] | {file: .file, mos: .mos_score}' \
 		reports/iqa-test/*.json reports/vqa-test/*.json 2>/dev/null \
 		|| echo "[WARN] jq not installed, check JSON files manually"
@@ -350,30 +393,30 @@ check-code:
 	@echo "$(YELLOW)[INFO]$(RESET) Running code quality checks..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
 	$(call require_tool,ruff,dev)
-	@cd $(ROOT_DIR) && uv run ruff format --check . 2>&1 | sed 's/^/  /'
-	@cd $(ROOT_DIR) && uv run ruff check . 2>&1 | sed 's/^/  /'
+	@set -o pipefail; cd $(ROOT_DIR) && uv run --no-sync ruff format --check . 2>&1 | sed 's/^/  /'
+	@set -o pipefail; cd $(ROOT_DIR) && uv run --no-sync ruff check . 2>&1 | sed 's/^/  /'
 	@echo "$(GREEN)[OK]$(RESET) All checks passed."
 
 fmt:
 	@echo "$(YELLOW)[INFO]$(RESET) Formatting code with ruff..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
 	$(call require_tool,ruff,dev)
-	@cd $(ROOT_DIR) && uv run ruff format . 2>&1 | sed 's/^/  /'
-	@cd $(ROOT_DIR) && uv run ruff check . --fix 2>&1 | sed 's/^/  /'
+	@set -o pipefail; cd $(ROOT_DIR) && uv run --no-sync ruff format . 2>&1 | sed 's/^/  /'
+	@set -o pipefail; cd $(ROOT_DIR) && uv run --no-sync ruff check . --fix 2>&1 | sed 's/^/  /'
 	@echo "$(GREEN)[OK]$(RESET) Formatting complete."
 
 black:
 	@echo "$(YELLOW)[INFO]$(RESET) Formatting with black..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
 	$(call require_tool,black,dev)
-	@cd $(ROOT_DIR) && uv run black src/ 2>&1 | sed 's/^/  /'
+	@set -o pipefail; cd $(ROOT_DIR) && uv run --no-sync black src/ 2>&1 | sed 's/^/  /'
 	@echo "$(GREEN)[OK]$(RESET) black complete."
 
 isort:
 	@echo "$(YELLOW)[INFO]$(RESET) Sorting imports with isort..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
 	$(call require_tool,isort,dev)
-	@cd $(ROOT_DIR) && uv run isort src/ 2>&1 | sed 's/^/  /'
+	@set -o pipefail; cd $(ROOT_DIR) && uv run --no-sync isort src/ 2>&1 | sed 's/^/  /'
 	@echo "$(GREEN)[OK]$(RESET) isort complete."
 
 format-all: black isort fmt
@@ -383,59 +426,8 @@ typecheck:
 	@echo "$(YELLOW)[INFO]$(RESET) Running mypy type checks..."
 	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
 	$(call require_tool,mypy,dev)
-	@cd $(ROOT_DIR) && uv run mypy src/ --ignore-missing-imports 2>&1 | sed 's/^/  /'
+	@set -o pipefail; cd $(ROOT_DIR) && uv run --no-sync mypy --explicit-package-bases deploy src --ignore-missing-imports 2>&1 | sed 's/^/  /'
 	@echo "$(GREEN)[OK]$(RESET) Type checks complete."
-
-
-
-
-# ------------------------------------------------------------
-# Security
-# ------------------------------------------------------------
-vuln-audit:
-	@echo "$(RED)[INFO]$(RESET) Auditing dependencies for vulnerabilities..."
-	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
-	$(call require_tool,pip-audit,security)
-	@cd $(ROOT_DIR) && uv pip freeze > $(ROOT_DIR)/requirements.txt
-	@cd $(ROOT_DIR) && uv run pip-audit \
-		--requirement $(ROOT_DIR)/requirements.txt \
-		--format json \
-		--output $(SECURITY_DIR)/audit-report.json \
-		--desc || true
-	@cd $(ROOT_DIR) && uv run pip-audit \
-		--requirement $(ROOT_DIR)/requirements.txt \
-		--format columns \
-		| tee $(SECURITY_DIR)/audit-report.txt
-	@echo "$(GREEN)[OK]$(RESET) Audit complete. Reports: $(CYAN)$(SECURITY_DIR)/$(RESET)"
-
-sbom:
-	@echo "$(BLUE)[INFO]$(RESET) Generating SBOM (CycloneDX)..."
-	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
-	$(call require_tool,cyclonedx-bom,security)
-	@cd $(ROOT_DIR) && uv run cyclonedx-py environment \
-		--output-format json \
-		--output-file $(SECURITY_DIR)/sbom-cyclonedx.json 2>&1 | sed 's/^/  /'
-	@cd $(ROOT_DIR) && uv run cyclonedx-py environment \
-		--output-format xml \
-		--output-file $(SECURITY_DIR)/sbom-cyclonedx.xml 2>&1 | sed 's/^/  /'
-	@cd $(ROOT_DIR) && uv pip freeze > $(SECURITY_DIR)/dependencies.txt
-	@cd $(ROOT_DIR) && uv pip tree > $(SECURITY_DIR)/dependency-tree.txt 2>/dev/null || true
-	@echo "$(GREEN)[OK]$(RESET) SBOM generated. Reports: $(CYAN)$(SECURITY_DIR)/$(RESET)"
-
-safety:
-	@echo "$(YELLOW)[INFO]$(RESET) Running safety scan..."
-	@[ -d "$(ROOT_DIR)/.venv" ] || (echo "$(RED)[ERROR]$(RESET) Virtual env not found. Run 'make setup'." && exit 1)
-	$(call require_tool,safety,security)
-	@cd $(ROOT_DIR) && uv pip freeze > $(ROOT_DIR)/requirements.txt
-	@cd $(ROOT_DIR) && uv run safety scan --full-report 2>&1 | tee $(SECURITY_DIR)/safety-report.txt || true
-	@echo "$(GREEN)[OK]$(RESET) Safety scan complete. Report: $(CYAN)$(SECURITY_DIR)/safety-report.txt$(RESET)"
-
-security-all: vuln-audit sbom safety
-	@echo "$(GREEN)[OK]$(RESET) All security checks completed."
-	@echo "Reports: $(CYAN)$(SECURITY_DIR)/$(RESET)"
-
-
-
 
 # ------------------------------------------------------------
 # info - Show environment and system details
@@ -456,7 +448,6 @@ info:
 	@echo ""
 	@echo "$(BOLD)$(BLUE)Directories:$(RESET)"
 	@echo "  Logs:       $(CYAN)$(LOG_DIR)$(RESET)"
-	@echo "  Security:   $(CYAN)$(SECURITY_DIR)$(RESET)"
 	@echo "  Cache:      $(CYAN)$$HOME/.cache/uv$(RESET)"
 	@echo ""
 	@echo "$(BOLD)$(BLUE)System:$(RESET)"
@@ -507,38 +498,8 @@ info:
 		echo -n "  mypy:        "; \
 		cd $(ROOT_DIR) && uv run mypy --version 2>/dev/null | head -1 | awk '{print $$2}' || echo "$(YELLOW)not installed$(RESET)"; \
 		echo ""; \
-		echo "$(BOLD)Security Tools:$(RESET)"; \
-		echo -n "  pip-audit:   "; \
-		cd $(ROOT_DIR) && uv run pip show pip-audit >/dev/null 2>&1 \
-			&& echo "$(GREEN)installed$(RESET)" || echo "$(YELLOW)not installed$(RESET)"; \
-		echo -n "  cyclonedx:   "; \
-		cd $(ROOT_DIR) && uv run pip show cyclonedx-bom >/dev/null 2>&1 \
-			&& echo "$(GREEN)installed$(RESET)" || echo "$(YELLOW)not installed$(RESET)"; \
-		echo -n "  safety:      "; \
-		cd $(ROOT_DIR) && uv run pip show safety >/dev/null 2>&1 && echo "$(GREEN)installed$(RESET)" || echo "$(YELLOW)not installed$(RESET)"; \
 	else \
 		echo "$(YELLOW)[WARN] Virtual environment not found. Run 'make setup' first.$(RESET)"; \
-	fi
-	@echo ""
-	@echo "$(BOLD)$(BLUE)Security Reports:$(RESET)"
-	@if [ -d "$(SECURITY_DIR)" ]; then \
-		FILE_COUNT=$$(find $(SECURITY_DIR) -type f 2>/dev/null | wc -l); \
-		echo "  Directory:  $(CYAN)$(SECURITY_DIR)$(RESET)"; \
-		echo "  Files:      $$FILE_COUNT"; \
-		if [ -f "$(SECURITY_DIR)/audit-report.json" ]; then \
-			SIZE=$$(ls -lh $(SECURITY_DIR)/audit-report.json 2>/dev/null | awk '{print $$5}'); \
-			echo "  audit.json: $$SIZE"; \
-		fi; \
-		if [ -f "$(SECURITY_DIR)/sbom-cyclonedx.json" ]; then \
-			SIZE=$$(ls -lh $(SECURITY_DIR)/sbom-cyclonedx.json 2>/dev/null | awk '{print $$5}'); \
-			echo "  sbom.json:  $$SIZE"; \
-		fi; \
-		if [ -f "$(SECURITY_DIR)/safety-report.txt" ]; then \
-			SIZE=$$(ls -lh $(SECURITY_DIR)/safety-report.txt 2>/dev/null | awk '{print $$5}'); \
-			echo "  safety.txt: $$SIZE"; \
-		fi; \
-	else \
-		echo "  $(YELLOW)No reports found$(RESET)"; \
 	fi
 	@echo ""
 	@echo "$(BOLD)$(BLUE)Logs:$(RESET)"
@@ -557,7 +518,6 @@ info:
 	@echo "  make data               Prepare datasets"
 	@echo "  make typecheck          Run mypy type checker"
 	@echo "  make format-all         Format all code"
-	@echo "  make security-all       Run all security checks"
 	@echo "  uv run python -m src.main --dataset tid2013 --model swin_iqa"
 	@echo "  uv run python -m src.main --dataset konvid-1k --model swin_vqa"
 	@echo "========================================================================"
@@ -569,35 +529,47 @@ info:
 # Docker Commands
 # ============================================================
 COMPOSE := $(shell \
-	if command -v podman-compose >/dev/null 2>&1; then \
+	if command -v podman >/dev/null 2>&1 \
+		&& command -v podman-compose >/dev/null 2>&1; then \
 		echo "podman-compose"; \
-	elif command -v docker-compose >/dev/null 2>&1; then \
+	elif command -v podman >/dev/null 2>&1 \
+		&& podman compose version >/dev/null 2>&1; then \
+		echo "podman compose"; \
+	elif command -v docker >/dev/null 2>&1 \
+		&& command -v docker-compose >/dev/null 2>&1; then \
 		echo "docker-compose"; \
-	elif docker compose version >/dev/null 2>&1; then \
+	elif command -v docker >/dev/null 2>&1 \
+		&& docker compose version >/dev/null 2>&1; then \
 		echo "docker compose"; \
 	else \
 		echo ""; \
 	fi)
 
-
-RUNTIME := $(shell \
-	if command -v podman >/dev/null 2>&1; then echo "podman"; \
-	elif command -v docker >/dev/null 2>&1; then echo "docker"; \
-	else echo ""; fi)
-
+RUNTIME := $(if $(filter podman%,$(COMPOSE)),podman,$(if $(filter docker%,$(COMPOSE)),docker,))
 
 COMPOSE_FILES := -f deploy-config/compose/docker-compose.yaml
+GPU ?= 0
+GPU_DISABLED := $(filter 0 false no,$(strip $(GPU)))
+
 ifeq ($(RUNTIME),podman)
-    COMPOSE_FILES += -f deploy-config/compose/docker-compose.podman.yaml
+ifneq ($(GPU_DISABLED),)
+COMPOSE_FILES += -f deploy-config/compose/docker-compose.podman-cpu.yaml
+else
+COMPOSE_FILES += -f deploy-config/compose/docker-compose.podman-gpu.yaml
 endif
-ifeq ($(RUNTIME),docker)
-    COMPOSE_FILES += -f deploy-config/compose/docker-compose.docker.yaml
 endif
 
-# This must be expanded after all runtime-specific compose overrides.
-OLLAMA_COMPOSE_FILES := $(COMPOSE_FILES) -f deploy-config/ollama/docker-compose.yaml
-COMPOSE_ENV = DEEP_VQA_DEPLOYMENT_CONFIG="$(DEPLOYMENT_CONFIG)"
-OLLAMA_COMPOSE_ENV = $(COMPOSE_ENV) OLLAMA_BASE_URL="$(OLLAMA_BASE_URL)" OLLAMA_MODELFILE_PATH="$(ROOT_DIR)/deploy-config/ollama/Modelfile"
+ifeq ($(RUNTIME),docker)
+ifneq ($(GPU_DISABLED),)
+COMPOSE_FILES += -f deploy-config/compose/docker-compose.docker-cpu.yaml
+else
+COMPOSE_FILES += -f deploy-config/compose/docker-compose.docker-gpu.yaml
+endif
+endif
+
+COMPOSE_ENV = DEEP_VQA_DEPLOYMENT_CONFIG="$(DEPLOYMENT_CONFIG)" \
+	IQA_MODEL_VOLUME_PATH="$(ROOT_DIR)/deploy/iqa-models" \
+	VQA_MODEL_VOLUME_PATH="$(ROOT_DIR)/deploy/vqa-models"
 
 
 define check_runtime
@@ -622,16 +594,15 @@ define ensure_env_file
 		fi; \
 		cp "$(ROOT_DIR)/.env.example" "$(ROOT_DIR)/.env"; \
 		echo "[INFO] Created .env from .env.example."; \
-		echo "[INFO] Internal profile still requires DEEP_VQA_API_KEY and DEEP_VQA_AUTH_SECRET."; \
+		echo "[INFO] Internal accounts mode needs no shared API key; legacy api_key mode requires secrets."; \
 	fi
 endef
 
 define show_deployment_context
 	@echo "$(CYAN)[INFO]$(RESET) Deployment mode: $(1)"
-	@echo "$(CYAN)[INFO]$(RESET) Profile: $(2)"
-	@echo "$(CYAN)[INFO]$(RESET) Auth: $(3)"
-	@echo "$(CYAN)[INFO]$(RESET) Evaluation store: $(4)"
-	@echo "$(CYAN)[INFO]$(RESET) Ollama endpoint (when enabled): $(OLLAMA_BASE_URL)"
+	@echo "$(CYAN)[INFO]$(RESET) Configuration file: $(2)"
+	@echo "$(CYAN)[INFO]$(RESET) Login mode: $(3)"
+	@echo "$(CYAN)[INFO]$(RESET) History storage: $(4)"
 endef
 
 
@@ -651,55 +622,43 @@ define check_deploy_auth
 	fi
 endef
 
+define check_deployment_mode
+	@if [ "$(DEPLOYMENT_MODE)" != internal ] && [ "$(DEPLOYMENT_MODE)" != proxy ] && [ "$(DEPLOYMENT_MODE)" != local ]; then \
+		echo "ERROR: DEPLOYMENT_MODE must be internal, proxy, or local"; \
+		exit 2; \
+	fi
+endef
+
 # Wait only while a container can still become ready. Exited/dead/unhealthy
 # states fail immediately instead of consuming the entire timeout budget.
 define wait_container_http
 	@attempts=$(3); unconfigured_attempts=0; \
 	for i in $$(seq 1 $$attempts); do \
-		state=$$($(RUNTIME) inspect --format '{{.State.Status}}' $(1) \
-			2>/dev/null || echo missing); \
-		health=$$($(RUNTIME) inspect \
-			--format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unconfigured{{end}}' \
-			$(1) 2>/dev/null || echo missing); \
+		state=$$($(RUNTIME) inspect --format '{{.State.Status}}' $(1) 2>/dev/null || echo missing); \
+		health=$$($(RUNTIME) inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unconfigured{{end}}' $(1) 2>/dev/null || echo missing); \
 		case "$$state/$$health" in \
-			missing/*) \
-				echo "$(RED)[ERROR]$(RESET) $(1) is not present."; \
-				exit 1 ;; \
-			exited/*|dead/*|removing/*|*/unhealthy) \
-				echo "$(RED)[ERROR]$(RESET) $(1) cannot become ready: state=$$state health=$$health"; \
-				exit 1 ;; \
-			running/healthy) \
-				curl --noproxy '*' -fsS --max-time 5 "$(2)" >/dev/null 2>&1 \
-					&& { echo "$(GREEN)[OK]$(RESET) $(1) is healthy."; exit 0; }; \
-				echo "$(RED)[ERROR]$(RESET) $(1) health endpoint failed."; \
-				exit 1 ;; \
-			running/unconfigured) \
-				unconfigured_attempts=$$((unconfigured_attempts + 1)) ;; \
+			missing/*) echo "$(RED)[ERROR]$(RESET) $(1) is not present."; exit 1 ;; \
+			exited/*|dead/*|removing/*|*/unhealthy) echo "$(RED)[ERROR]$(RESET) $(1) cannot become ready: state=$$state health=$$health"; exit 1 ;; \
+			running/healthy) ;; \
+			running/unconfigured) unconfigured_attempts=$$((unconfigured_attempts + 1)) ;; \
 			created/*|running/starting) ;; \
 			*) unconfigured_attempts=$$((unconfigured_attempts + 1)) ;; \
 		esac; \
-		if curl --noproxy '*' -fsS --max-time 5 "$(2)" >/dev/null 2>&1; then \
-			echo "$(GREEN)[OK]$(RESET) $(1) is healthy."; \
-			exit 0; \
-		fi; \
-		if [ "$$unconfigured_attempts" -ge 2 ]; then \
-			echo "$(RED)[ERROR]$(RESET) $(1) endpoint failed after two probes."; \
-			exit 1; \
-		fi; \
+		probe_ok=1; \
+		curl --noproxy '*' -fsS --max-time 5 "$(2)" >/dev/null 2>&1 && probe_ok=0; \
+		if [ "$$probe_ok" -eq 0 ]; then echo "$(GREEN)[OK]$(RESET) $(1) is healthy."; exit 0; fi; \
+		if [ "$$unconfigured_attempts" -ge 2 ]; then echo "$(RED)[ERROR]$(RESET) $(1) endpoint failed after two probes."; exit 1; fi; \
 		[ "$$i" -lt "$$attempts" ] && sleep 2; \
 	done; \
-	echo "$(RED)[ERROR]$(RESET) $(1) did not become healthy."; \
-	exit 1
+	echo "$(RED)[ERROR]$(RESET) $(1) did not become healthy."; exit 1
 endef
 
 
 BUILD_ARGS ?=
 DEPLOYMENT_MODE ?= internal
 DEPLOYMENT_CONFIG ?= deploy-config/profiles/infer_deploy.$(DEPLOYMENT_MODE).yaml
-OLLAMA_BASE_URL ?= http://vqa-ollama:11434
 API_HEALTH_URL = http://127.0.0.1:$${API_PORT:-8001}/v1/health
 WEB_HEALTH_URL = http://127.0.0.1:$${WEB_PORT:-8000}/api/v1/health
-OLLAMA_HEALTH_URL = http://127.0.0.1:$${OLLAMA_PORT:-11434}/api/tags
 
 
 docker-dev:
@@ -710,8 +669,8 @@ docker-dev:
 
 docker-train:
 	$(call check_runtime)
-	$(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) --build-arg INSTALL_DEV=$(if $(filter 1 true yes,$(DEV)),true,false) vqa-train
-	$(COMPOSE) $(COMPOSE_FILES) run --rm --name vqa-train vqa-train bash -c "\
+	$(COMPOSE_ENV) $(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) --build-arg INSTALL_DEV=$(if $(filter 1 true yes,$(DEV)),true,false) vqa-train
+	$(COMPOSE_ENV) $(COMPOSE) $(COMPOSE_FILES) run --rm --name vqa-train vqa-train bash -c "\
 		set -o pipefail && \
 		make data && \
 		uv run python -m src.main --dataset tid2013 --model swin_iqa 2>&1 | tee /app/results/tid2013.log && \
@@ -724,6 +683,9 @@ _docker-api:
 	$(call ensure_env_file)
 	$(call check_deploy_auth)
 	$(COMPOSE_ENV) $(COMPOSE) $(COMPOSE_FILES) build $(BUILD_ARGS) vqa-infer
+	@# Remove the dependent proxy before replacing vqa-infer. Rootless Podman
+	@# refuses to remove a container while another container depends on it.
+	@$(RUNTIME) rm -f vqa-nginx 2>/dev/null || true
 	@$(RUNTIME) rm -f vqa-infer 2>/dev/null || true
 	$(COMPOSE_ENV) $(COMPOSE) $(COMPOSE_FILES) up -d vqa-infer
 	@echo "[INFO] Waiting for FastAPI health at $(API_HEALTH_URL)..."
@@ -732,47 +694,57 @@ _docker-api:
 
 _docker-infer: _docker-api
 	@$(RUNTIME) rm -f vqa-nginx 2>/dev/null || true
-	$(COMPOSE) $(COMPOSE_FILES) up -d vqa-nginx
+	$(COMPOSE_ENV) $(COMPOSE) $(COMPOSE_FILES) up -d vqa-nginx
 	@echo "[INFO] Waiting for Nginx and proxied API..."
 	$(call wait_container_http,vqa-nginx,$(WEB_HEALTH_URL),30)
 	@echo "$(GREEN)[OK]$(RESET) Inference stack is ready: http://127.0.0.1:$${WEB_PORT:-8000}/"
 
-# Unified user-facing entry point. Keep the explicit targets below as
-# compatibility aliases and for scripts that want an unambiguous profile.
+# User command for starting Nginx and FastAPI.
 docker-infer:
-	@if [ "$(DEPLOYMENT_MODE)" = "internal" ]; then \
-		$(MAKE) docker-infer-internal; \
-	elif [ "$(DEPLOYMENT_MODE)" = "public" ]; then \
-		$(MAKE) docker-infer-public; \
-	else \
-		echo "ERROR: DEPLOYMENT_MODE must be internal or public"; exit 2; \
-	fi
+	$(call check_deployment_mode)
+	$(call run_infer_mode,$(DEPLOYMENT_CONFIG),$(if $(filter internal,$(DEPLOYMENT_MODE)),accounts,none),$(DEPLOYMENT_MODE),$(if $(filter proxy,$(DEPLOYMENT_MODE)),none,sqlite))
 
-# Explicit profile entry points. They validate repository policy before
-# delegating to the common stack target; the template keeps the two profiles
-# mechanically aligned without merging their security policies.
-define run_infer_profile
+# Single-user stack for a personal machine: CPU only, no login, loopback bind.
+local:
+	@$(MAKE) --no-print-directory docker-infer DEPLOYMENT_MODE=local GPU=0
+
+# Account operations run inside the inference container: they change the live
+# accounts database and need the service's dependencies, neither of which exists
+# on the deployment host.
+account-disable:
+	@test -n "$(EMAIL)" || (echo "ERROR: set EMAIL=user@example.com"; exit 1)
+	$(call check_runtime)
+	@$(RUNTIME) exec -it vqa-infer .venv/bin/python -m deploy.web.manage_account disable "$(EMAIL)"
+
+account-enable:
+	@test -n "$(EMAIL)" || (echo "ERROR: set EMAIL=user@example.com"; exit 1)
+	$(call check_runtime)
+	@$(RUNTIME) exec -it vqa-infer .venv/bin/python -m deploy.web.manage_account enable "$(EMAIL)"
+
+account-reset-password:
+	@test -n "$(EMAIL)" || (echo "ERROR: set EMAIL=user@example.com"; exit 1)
+	$(call check_runtime)
+	@$(RUNTIME) exec -it vqa-infer .venv/bin/python -m deploy.web.manage_account reset-password "$(EMAIL)"
+
+# Validate the selected mode configuration before starting the common services.
+define run_infer_mode
 	$(call show_deployment_context,$(3),$(1),$(2),$(4))
 	@if [ "$(3)" = "internal" ]; then \
-		echo "$(YELLOW)[INFO]$(RESET) Internal mode requires deployment secrets."; \
-		echo "$(YELLOW)[INFO]$(RESET) Run 'make env-secrets' to create or fill missing secrets."; \
+		echo "$(YELLOW)[INFO]$(RESET) Internal mode signs in with email + password."; \
+		echo "$(YELLOW)[INFO]$(RESET) Open the browser entry point and register the first account."; \
+	fi
+	@if [ "$(3)" = "local" ]; then \
+		echo "$(YELLOW)[INFO]$(RESET) Local mode has no login and keeps history on this machine."; \
+		echo "$(YELLOW)[INFO]$(RESET) The stack listens on 127.0.0.1 only."; \
 	fi
 	@if ! grep -Eq '^[[:space:]]*mode:[[:space:]]*$(2)([[:space:]]|$$)' $(1); then \
-		echo "ERROR: $(3) profile requires auth.mode=$(2)"; exit 1; \
+		echo "ERROR: $(3) mode requires auth.mode=$(2)"; exit 1; \
 	fi
 	@if ! grep -Eq '^[[:space:]]*backend:[[:space:]]*$(4)([[:space:]]|$$)' $(1); then \
-		echo "ERROR: $(3) profile requires evaluation_store.backend=$(4)"; exit 1; \
+		echo "ERROR: $(3) mode requires evaluation_store.backend=$(4)"; exit 1; \
 	fi
 	$(MAKE) _docker-infer DEPLOYMENT_CONFIG=$(1)
 endef
-
-docker-infer-internal:
-	$(call run_infer_profile,deploy-config/profiles/infer_deploy.internal.yaml,api_key,internal,sqlite)
-
-docker-infer-public:
-	$(call run_infer_profile,deploy-config/profiles/infer_deploy.public.yaml,none,public,none)
-
-
 
 docker-stop:
 	$(call check_runtime)
@@ -781,86 +753,45 @@ docker-stop:
 	@$(RUNTIME) stop vqa-infer 2>/dev/null || true
 	@$(RUNTIME) stop vqa-nginx 2>/dev/null || true
 	@$(RUNTIME) stop vqa-train 2>/dev/null || true
-	@$(OLLAMA_COMPOSE_ENV) $(COMPOSE) $(OLLAMA_COMPOSE_FILES) stop vqa-ollama 2>/dev/null || true
 	@echo "$(GREEN)[OK]$(RESET) Containers stopped."
 
-
-_docker-ollama-up:
-	$(call check_runtime)
-	$(call ensure_env_file)
-	@# Recreate the named service so containers created before the deploy-config
-	@# layout change cannot retain the obsolete ollama/Modelfile bind mount.
-	@$(RUNTIME) rm -f vqa-ollama 2>/dev/null || true
-	$(OLLAMA_COMPOSE_ENV) $(COMPOSE) $(OLLAMA_COMPOSE_FILES) up -d vqa-ollama
-	$(call wait_container_http,vqa-ollama,$(OLLAMA_HEALTH_URL),60)
-
-
-_docker-deploy-ollama: _docker-ollama-up
-	@echo "[INFO] Deploying Ollama model; configure OLLAMA_HTTP_PROXY/OLLAMA_HTTPS_PROXY only when needed."
-	$(OLLAMA_COMPOSE_ENV) $(COMPOSE) $(OLLAMA_COMPOSE_FILES) run --rm --no-deps -T \
-		--entrypoint /bin/sh vqa-ollama \
-		-c 'set -eu; export OLLAMA_HOST=http://vqa-ollama:11434; ollama pull qwen2.5vl:3b; ollama create deep-vqa-subjective -f /opt/deep-vqa/Modelfile'
-	@echo "$(GREEN)[OK]$(RESET) deep-vqa-subjective is ready."
-
-
-_docker-ollama-check:
-	@curl --noproxy '*' -fsS --max-time 10 "$(OLLAMA_HEALTH_URL)" >/dev/null \
-		&& echo "$(GREEN)[OK]$(RESET) Ollama endpoint is reachable." \
-		|| (echo "$(RED)[ERROR]$(RESET) Ollama endpoint is not reachable at http://127.0.0.1:11434."; exit 1)
-
 docker-deploy-check:
-	@failed=0; logs_needed=0; \
+	@if [ -z "$(RUNTIME)" ] || ! $(RUNTIME) container inspect vqa-infer >/dev/null 2>&1; then \
+		echo "$(RED)[ERROR]$(RESET) No containerized inference stack found. Run 'make docker-infer'."; \
+		exit 1; \
+	fi; \
+	failed=0; logs_needed=0; \
 	check_http() { \
-		name="$$1"; \
-		url="$$2"; \
-		optional="$$3"; \
-		max_attempts="$$4"; \
+		name="$$1"; url="$$2"; optional="$$3"; max_attempts="$$4"; \
 		if ! $(RUNTIME) container inspect "$$name" >/dev/null 2>&1; then \
-			if [ "$$optional" = yes ]; then \
-				echo "[INFO] $$name (optional): not present"; \
-				return 0; \
-			fi; \
-			echo "$(RED)[ERROR]$(RESET) $$name is not present."; \
-			return 1; \
+			if [ "$$optional" = yes ]; then echo "[INFO] $$name (optional): not present"; return 0; fi; \
+			echo "$(RED)[ERROR]$(RESET) $$name is not present."; return 1; \
 		fi; \
 		state=$$($(RUNTIME) inspect --format '{{.State.Status}}' "$$name"); \
-		health=$$($(RUNTIME) inspect \
-			--format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unconfigured{{end}}' \
-			"$$name"); \
+		health=$$($(RUNTIME) inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unconfigured{{end}}' "$$name"); \
 		[ -n "$$health" ] || health=unconfigured; \
 		echo "[INFO] $$name: state=$$state health=$$health"; \
 		case "$$state/$$health" in \
-			exited/*|dead/*|removing/*|*/unhealthy) \
-				echo "$(RED)[ERROR]$(RESET) $$name cannot become ready."; \
-				logs_needed=1; \
-				return 1 ;; \
+			exited/*|dead/*|removing/*|*/unhealthy) echo "$(RED)[ERROR]$(RESET) $$name cannot become ready."; logs_needed=1; return 1 ;; \
 			running/healthy) attempts=1 ;; \
 			running/unconfigured) attempts=2 ;; \
 			created/*|running/starting) attempts="$$max_attempts" ;; \
 			*) attempts=2 ;; \
 		esac; \
-		if [ "$$attempts" -gt 2 ]; then \
-			wait_seconds=$$((attempts * 2)); \
-			echo "[INFO] Waiting up to $$wait_seconds seconds for $$name..."; \
-		fi; \
 		for i in $$(seq 1 $$attempts); do \
-			if curl --noproxy '*' -fsS --max-time 5 "$$url" >/dev/null 2>&1; then \
-				echo "$(GREEN)[OK]$(RESET) $$name endpoint is healthy."; \
-				return 0; \
-			fi; \
+			probe_ok=1; \
+			curl --noproxy '*' -fsS --max-time 5 "$$url" >/dev/null 2>&1 && probe_ok=0; \
+			if [ "$$probe_ok" -eq 0 ]; then echo "$(GREEN)[OK]$(RESET) $$name endpoint is healthy."; return 0; fi; \
 			[ "$$i" -lt "$$attempts" ] && sleep 2; \
 		done; \
-		echo "$(RED)[ERROR]$(RESET) $$name endpoint failed."; \
-		logs_needed=1; \
-		return 1; \
+		echo "$(RED)[ERROR]$(RESET) $$name endpoint failed."; logs_needed=1; return 1; \
 	}; \
 	check_http vqa-infer "$(API_HEALTH_URL)" no 60 || failed=1; \
-	check_http vqa-nginx "$(WEB_HEALTH_URL)" yes 30 || failed=1; \
-	check_http vqa-ollama "$(OLLAMA_HEALTH_URL)" yes 60 || failed=1; \
+	check_http vqa-nginx "$(WEB_HEALTH_URL)" no 30 || failed=1; \
 	if [ "$$failed" -ne 0 ]; then \
 		if [ "$$logs_needed" -ne 0 ]; then \
 			echo "$(YELLOW)[INFO]$(RESET) Recent deployment logs:"; \
-			for name in vqa-infer vqa-nginx vqa-ollama; do \
+			for name in vqa-infer vqa-nginx; do \
 				echo "--- $$name ---"; \
 				$(RUNTIME) logs --tail=60 "$$name" 2>/dev/null || true; \
 			done; \
@@ -870,19 +801,21 @@ docker-deploy-check:
 	echo "$(GREEN)[OK]$(RESET) Deployment checks passed."
 
 
-docker-infer-internal-ollama:
-	$(MAKE) _docker-deploy-ollama
-	$(MAKE) docker-infer-internal OLLAMA_BASE_URL=http://vqa-ollama:11434
 
-docker-infer-public-ollama:
-	$(MAKE) _docker-deploy-ollama
-	$(MAKE) docker-infer-public OLLAMA_BASE_URL=http://vqa-ollama:11434
+docker-memory-measure:
+	$(call check_runtime)
+	@$(PYTHON) scripts/measure_container_memory.py --runtime $(RUNTIME) $(MEMORY_ARGS)
 
-
+benchmark:
+	@echo "$(BLUE)[INFO]$(RESET) Benchmarking serving checkpoints on held-out test splits..."
+	@set -o pipefail; cd $(ROOT_DIR) && PYTHONPATH="$(ROOT_DIR)" $(PYTHON) scripts/benchmark_models.py \
+		--roles "$(if $(ROLES),$(ROLES),iqa,vqa)" \
+		--device "$(if $(BENCH_DEVICE),$(BENCH_DEVICE),cpu)" \
+		--threads "$(if $(THREADS),$(THREADS),2)" $(BENCHMARK_ARGS) 2>&1 | sed 's/^/  /'
+	@echo "$(GREEN)[OK]$(RESET) Benchmark report written under reports/benchmark/."
 
 docker-manage:
 	$(call check_runtime)
-	@$(RUNTIME) images --filter "dangling=true" -q | xargs -r $(RUNTIME) rmi -f
 	@echo "Runtime: $(RUNTIME)"
 	@echo "Compose: $(COMPOSE)"
 	@echo "Files:   $(COMPOSE_FILES)"
@@ -910,28 +843,29 @@ docker-manage:
 	@$(RUNTIME) network ls 2>/dev/null || echo "  (none)"
 	@echo ""
 	@echo "--- Compose Services ---"
-	@$(OLLAMA_COMPOSE_ENV) $(COMPOSE) $(OLLAMA_COMPOSE_FILES) ps 2>/dev/null || echo "  (none)"
+	@$(COMPOSE_ENV) $(COMPOSE) $(COMPOSE_FILES) ps 2>/dev/null || echo "  (none)"
 
 
+
+docker-purge-train:
+	$(call check_runtime)
+	@echo "[INFO] Removing only training/development containers and images..."
+	@$(RUNTIME) rm -f vqa-train vqa-dev 2>/dev/null || true
+	@$(RUNTIME) rmi vqa-train:latest vqa-dev:latest 2>/dev/null || true
+	@echo "$(GREEN)[OK]$(RESET) Training/development containers and images removed; bind-mounted data kept."
+
+docker-purge-deploy:
+	$(call check_runtime)
+	@echo "[INFO] Removing only inference/Nginx containers and the inference image..."
+	@$(RUNTIME) rm -f vqa-nginx vqa-infer 2>/dev/null || true
+	@$(RUNTIME) rmi vqa-infer:latest 2>/dev/null || true
+	@echo "$(GREEN)[OK]$(RESET) Deployment containers and inference image removed; reports and upload volume kept."
 
 docker-purge-all:
 	$(call check_runtime)
-	@echo "[INFO] Stopping and removing containers..."
-	@$(COMPOSE) $(COMPOSE_FILES) down --remove-orphans 2>/dev/null || true
-	@$(OLLAMA_COMPOSE_ENV) $(COMPOSE) $(OLLAMA_COMPOSE_FILES) down --remove-orphans --volumes 2>/dev/null || true
-	@$(RUNTIME) ps -a --filter "name=vqa-train" -q | xargs -r $(RUNTIME) rm -f
-	@$(RUNTIME) ps -a --filter "name=vqa-dev" -q | xargs -r $(RUNTIME) rm -f
-	@$(RUNTIME) ps -a --filter "name=vqa-infer" -q | xargs -r $(RUNTIME) rm -f
-	@$(RUNTIME) ps -a --filter "name=vqa-nginx" -q | xargs -r $(RUNTIME) rm -f
-	@$(RUNTIME) ps -a --filter "name=vqa-ollama" -q | xargs -r $(RUNTIME) rm -f
-
-	@echo "[INFO] Removing dangling images..."
-	@$(RUNTIME) images --filter "dangling=true" -q | xargs -r $(RUNTIME) rmi -f
-
-	@echo "[INFO] Purging volumes..."
-	@$(RUNTIME) volume prune -f 2>/dev/null || true
-
-	@echo "[INFO] Purging networks..."
-	@$(RUNTIME) network prune -f 2>/dev/null || true
+	@echo "[INFO] Removing project containers, images, network and named upload volume..."
+	@$(COMPOSE_ENV) $(COMPOSE) $(COMPOSE_FILES) down --volumes
+	@$(RUNTIME) rm -f vqa-train vqa-dev vqa-infer vqa-nginx 2>/dev/null || true
+	@$(RUNTIME) rmi vqa-train:latest vqa-dev:latest vqa-infer:latest 2>/dev/null || true
 
 	@echo "$(GREEN)[OK]$(RESET) Docker/Podman purge complete."
