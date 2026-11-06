@@ -15,7 +15,9 @@ _CSV_HEADER = b"timestamp,level,module,function,line,message\n"
 
 def _open_csv_log(path: str, flags: int) -> int:
     """Write one header when opening an empty CSV, including rotated files."""
-    descriptor = os.open(path, flags, 0o666)
+    # Owner-only permissions: training logs can contain local paths and metrics,
+    # so they must not be created world-writable.
+    descriptor = os.open(path, flags, 0o600)
     try:
         if os.fstat(descriptor).st_size == 0:
             os.write(descriptor, _CSV_HEADER)
