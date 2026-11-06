@@ -1,7 +1,10 @@
 # src/config/schemas.py
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional
 from pathlib import Path
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.data.dataset_types import DatasetType, TaskType
 
 
 class _BaseModel(BaseModel):
@@ -21,7 +24,8 @@ class PathsConfig(_BaseModel):
     examples_dir: Path = Path("examples")
     cache_dir: Path = Path(".cache")
 
-    def resolve(self, path: str | Path) -> Path:
+    def resolve_path(self, path: str | Path) -> Path:
+        """Resolve a path relative to the project root when it is not absolute."""
         candidate = Path(path)
         return candidate if candidate.is_absolute() else self.project_root / candidate
 
@@ -31,7 +35,7 @@ class PathsConfig(_BaseModel):
 
     def dataset_results_dir(self, dataset_name: str) -> Path:
         """results/{dataset_name}/"""
-        return self.resolve(self.results_dir) / self.dataset_slug(dataset_name)
+        return self.resolve_path(self.results_dir) / self.dataset_slug(dataset_name)
 
     def train_logs_dir(self, dataset_name: str) -> Path:
         """results/{dataset_name}/train_logs/"""
@@ -54,19 +58,25 @@ class PathsConfig(_BaseModel):
         return self.dataset_results_dir(dataset_name) / "model_outputs"
 
     def corrupted_dir(self, dataset_name: str) -> Path:
+        """Directory for corrupted/failed files under a dataset's results."""
         return self.dataset_results_dir(dataset_name) / "corrupted"
 
     def deploy_iqa_dir(self) -> Path:
-        return self.resolve(self.deploy_dir) / "iqa-models"
+        """Directory for IQA serving checkpoints."""
+        return self.resolve_path(self.deploy_dir) / "iqa-models"
 
     def deploy_vqa_dir(self) -> Path:
-        return self.resolve(self.deploy_dir) / "vqa-models"
+        """Directory for VQA serving checkpoints."""
+        return self.resolve_path(self.deploy_dir) / "vqa-models"
 
     def reports_iqa_dir(self) -> Path:
-        return self.resolve(self.reports_dir) / "iqa-test"
+        """Directory for IQA report artifacts."""
+        return self.resolve_path(self.reports_dir) / "iqa-test"
 
     def reports_vqa_dir(self) -> Path:
-        return self.resolve(self.reports_dir) / "vqa-test"
+        """Directory for VQA report artifacts."""
+        return self.resolve_path(self.reports_dir) / "vqa-test"
+
 
 # ============================================================
 # 系统配置
@@ -175,8 +185,8 @@ class DatasetMetadataConfig(_BaseModel):
 
 class DatasetMetaConfig(_BaseModel):
     name: str
-    task_type: str  # "iqa" or "vqa"
-    data_type: str  # "image" or "video"
+    task_type: TaskType
+    data_type: DatasetType
     paths: DatasetPathsConfig
     registry_key: str = ""
     metadata: DatasetMetadataConfig = Field(default_factory=DatasetMetadataConfig)
@@ -189,6 +199,7 @@ class DatasetMetaConfig(_BaseModel):
 # ============================================================
 class Config(_BaseModel):
     """总配置入口"""
+
     system: SystemConfig
     preprocessing: PreprocessingConfig
     logging: LoggingConfig
@@ -197,6 +208,6 @@ class Config(_BaseModel):
     dataset: DatasetMetaConfig
 
     # 模型相关
-    task_type: str                    # "iqa" or "vqa"
-    model: ModelArchConfig            # 模型架构
-    loss: LossConfig                  # 损失配置
+    task_type: TaskType
+    model: ModelArchConfig  # 模型架构
+    loss: LossConfig  # 损失配置

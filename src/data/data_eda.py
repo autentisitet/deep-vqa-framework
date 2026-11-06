@@ -10,6 +10,9 @@ import pandas as pd
 from loguru import logger
 from tqdm import tqdm
 
+from src.config.schemas import Config
+from src.data.dataset_loaders import MetadataLoaderFactory
+from src.data.dataset_types import DatasetType
 from src.data.eda.integrity import check_media_integrity
 from src.data.eda.split import (
     check_fold_distribution,
@@ -18,14 +21,12 @@ from src.data.eda.split import (
     validate_group_split_isolation,
 )
 from src.data.eda.statistics import analyze_image_properties, analyze_video_properties, compute_mos_statistics
-from src.data.dataset_loaders import MetadataLoaderFactory
-from src.data.dataset_types import DatasetType
-from src.config.schemas import Config
 from src.utils.file_loader import CaseInsensitiveAssetResolver
 from src.utils.registry import Registry
 
 
 def _progress_bar(iterable, *, total: int, desc: str):
+    """Return a tqdm bar whose refresh cadence scales with the total."""
     miniters = max(1, math.ceil(total * 0.02)) if total else 1
     return tqdm(iterable, total=total, desc=desc, miniters=miniters)
 
@@ -49,9 +50,10 @@ class DataEDA:
         self.cfg = cfg
         self.dataset_name = cfg.dataset.registry_key or MetadataLoaderFactory.normalize_key(dataset_name)
         self.dataset_slug = self.cfg.paths.dataset_slug(self.dataset_name)
-        self.df = None
-        self.stats = {}
-        self.duplicate_physical_names = {}
+        # Populated by load_metadata(); analysis methods below require it.
+        self.df: Optional[pd.DataFrame] = None
+        self.stats: Dict[str, object] = {}
+        self.duplicate_physical_names: Dict[str, List[str]] = {}
 
         self.dataset_info = cfg.dataset
         self.is_video = self.dataset_info.data_type == "video"
@@ -59,7 +61,7 @@ class DataEDA:
         self.file_extensions = list(DatasetType.all_extensions())
 
         if data_dir is None:
-            data_dir = cfg.paths.resolve(Path(cfg.dataset.paths.root) / cfg.dataset.paths.data)
+            data_dir = cfg.paths.resolve_path(Path(cfg.dataset.paths.root) / cfg.dataset.paths.data)
         self.data_dir = Path(data_dir).resolve()
 
         self.corrupted_dir = cfg.paths.corrupted_dir(self.dataset_slug)
@@ -72,11 +74,10 @@ class DataEDA:
 
         self.resolver = CaseInsensitiveAssetResolver(target_dir=self.data_dir)
 
-
     def load_metadata(self) -> pd.DataFrame:
         """Load metadata file using the appropriate loader."""
         meta_file = (
-            self.cfg.paths.resolve(Path(self.dataset_info.paths.root))
+            self.cfg.paths.resolve_path(Path(self.dataset_info.paths.root))
             / self.dataset_info.paths.metadata
             / (self.dataset_info.metadata.mos_file or MetadataLoaderFactory.get_metadata_file(self.dataset_name))
         )
@@ -94,7 +95,6 @@ class DataEDA:
         except Exception as e:
             logger.error(f"Failed to parse metadata: {e}")
             return pd.DataFrame()
-
 
     def ensure_split_column(self):
         """Ensure DataFrame has a 'split' column for train/val/test."""
@@ -137,7 +137,6 @@ class DataEDA:
 
         logger.info(f"Split complete: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
 
-
     def basic_statistics(self):
         """Compute and log basic statistics."""
         if self.df is None or self.df.empty:
@@ -155,7 +154,6 @@ class DataEDA:
         self._analyze_media_properties()
         self.stats["total_samples"] = mos_stats["total_samples"]
         self.stats["range"] = mos_stats["range"]
-
 
     def _backup_rejected_labels(self, rejected_df: pd.DataFrame, reason_col: str = "reject_reason") -> None:
         """Persist labels for samples removed before analysis/training."""
@@ -176,10 +174,7 @@ class DataEDA:
         rejected_df.to_csv(latest_csv_path, index=False)
 
         reason_counts = rejected_df[reason_col].value_counts().to_dict() if reason_col in rejected_df else {}
-        logger.warning(
-            f"Backed up {len(rejected_df)} rejected labels: {csv_path} | reasons={reason_counts}"
-        )
-
+        logger.warning(f"Backed up {len(rejected_df)} rejected labels: {csv_path} | reasons={reason_counts}")
 
     def _analyze_media_properties(self):
         """Analyze media properties from disk."""
@@ -191,7 +186,7 @@ class DataEDA:
 
         try:
             first_file = Path(media_paths[0]).name
-            asset = self.resolver.resolve(first_file)
+            asset = self.resolver.find_asset(first_file)
             dataset_type = asset.dataset_type
         except Exception:
             dataset_type = DatasetType.VIDEO if self.is_video else DatasetType.IMAGE
@@ -215,10 +210,11 @@ class DataEDA:
                 fps = props.get("fps", {}).get("mean", 0)
                 logger.info(f"    Size: {int(w)}x{int(h)} | FPS: {fps:.2f}")
 
-
     def check_integrity(self, max_samples: Optional[int] = None, skip_video_check: bool = False) -> Dict:
         """Check file integrity: missing, corrupted, repeated sample ids."""
         logger.info("Integrity check started...")
+        if self.df is None:
+            raise RuntimeError("Metadata must be loaded before check_integrity(); call load_metadata() first.")
 
         df_to_check = self.df if max_samples is None else self.df.head(max_samples)
 
@@ -233,29 +229,24 @@ class DataEDA:
             sid = str(row["sample_id"])
 
             try:
-                asset = self.resolver.resolve(sid)
+                asset = self.resolver.find_asset(sid)
                 target_path = asset.path
                 is_video = asset.is_video
             except Exception:
                 missing.append(sid)
-                rejected_records.append({
-                    **row.to_dict(),
-                    "reject_reason": "missing",
-                    "reject_error": "Unable to resolve media file",
-                    "original_path": "",
-                    "quarantine_path": "",
-                })
+                rejected_records.append(self._reject_record(row, "missing", "Unable to resolve media file"))
                 continue
 
             if not target_path.exists():
                 missing.append(sid)
-                rejected_records.append({
-                    **row.to_dict(),
-                    "reject_reason": "missing",
-                    "reject_error": "Resolved media file does not exist",
-                    "original_path": str(target_path),
-                    "quarantine_path": "",
-                })
+                rejected_records.append(
+                    self._reject_record(
+                        row,
+                        "missing",
+                        "Resolved media file does not exist",
+                        original_path=str(target_path),
+                    )
+                )
                 continue
 
             if skip_video_check and is_video:
@@ -269,19 +260,17 @@ class DataEDA:
                 corrupted.append(sid)
                 quarantine_path = ""
                 if target_path.exists():
-                    dest = self.corrupted_dir / target_path.name
-                    if dest.exists():
-                        dest = self.corrupted_dir / f"{target_path.stem}_corrupted{target_path.suffix}"
-                    shutil.move(str(target_path), str(dest))
-                    quarantine_path = str(dest)
-                    logger.warning(f"Corrupted file quarantined: {target_path.name} ({error}) -> {dest}")
-                rejected_records.append({
-                    **row.to_dict(),
-                    "reject_reason": "corrupted",
-                    "reject_error": error or "Integrity check failed",
-                    "original_path": str(target_path),
-                    "quarantine_path": quarantine_path,
-                })
+                    quarantine_path = self._quarantine_corrupted(target_path)
+                    logger.warning(f"Corrupted file quarantined: {target_path.name} ({error}) -> {quarantine_path}")
+                rejected_records.append(
+                    self._reject_record(
+                        row,
+                        "corrupted",
+                        error or "Integrity check failed",
+                        original_path=str(target_path),
+                        quarantine_path=quarantine_path,
+                    )
+                )
                 continue
 
             valid_indices.append(i)
@@ -289,11 +278,7 @@ class DataEDA:
         self.df = self.df.loc[valid_indices].reset_index(drop=True)
 
         sample_id_series = self.df["sample_id"].astype(str).str.strip().str.lower()
-        repeated_sample_ids = (
-            sample_id_series[sample_id_series.duplicated(keep=False)]
-            .drop_duplicates()
-            .tolist()
-        )
+        repeated_sample_ids = sample_id_series[sample_id_series.duplicated(keep=False)].drop_duplicates().tolist()
         if repeated_sample_ids:
             preview = ", ".join(repeated_sample_ids[:10])
             suffix = "..." if len(repeated_sample_ids) > 10 else ""
@@ -316,6 +301,30 @@ class DataEDA:
             "repeated_sample_ids": repeated_sample_ids,
         }
 
+    def _reject_record(
+        self,
+        row,
+        reason: str,
+        error: str,
+        original_path: str = "",
+        quarantine_path: str = "",
+    ) -> Dict:
+        """Build a rejected-record entry with the shared fields filled in."""
+        return {
+            **row.to_dict(),
+            "reject_reason": reason,
+            "reject_error": error,
+            "original_path": original_path,
+            "quarantine_path": quarantine_path,
+        }
+
+    def _quarantine_corrupted(self, target_path: Path) -> str:
+        """Move a corrupted file into the quarantine directory; return its new path."""
+        dest = self.corrupted_dir / target_path.name
+        if dest.exists():
+            dest = self.corrupted_dir / f"{target_path.stem}_corrupted{target_path.suffix}"
+        shutil.move(str(target_path), str(dest))
+        return str(dest)
 
     def _write_integrity_report(self, missing: List[str], corrupted: List[str], repeated_sample_ids: List[str]):
         """Write integrity report to file."""
@@ -337,7 +346,6 @@ class DataEDA:
             if repeated_sample_ids:
                 f.write("Repeated Sample IDs (kept):\n" + "\n".join(repeated_sample_ids) + "\n")
 
-
     def check_filename_label_match(self) -> bool:
         """Check if filenames on disk match labels in metadata."""
         if self.df is None:
@@ -346,7 +354,7 @@ class DataEDA:
         physical_names = {Path(name).stem.strip().lower() for name in self.resolver.full_registry}
         label_names = {Path(str(name).strip()).stem.lower() for name in self.df["sample_id"].astype(str)}
 
-        physical_stems = {}
+        physical_stems: Dict[str, List[str]] = {}
         for filename in self.resolver.full_registry:
             physical_stems.setdefault(Path(filename).stem.strip().lower(), []).append(filename)
         duplicate_stems = {stem: names for stem, names in physical_stems.items() if len(names) > 1}
@@ -363,7 +371,6 @@ class DataEDA:
                 logger.warning(f"  {stem}: {', '.join(sorted(names))}")
         return match
 
-
     def visualize_mos_distribution(self, save_dir: Optional[Path] = None):
         """Plot MOS distribution."""
         if self.df is None or self.df.empty:
@@ -375,7 +382,13 @@ class DataEDA:
         save_dir.mkdir(parents=True, exist_ok=True)
         fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
 
-        axes[0].hist(self.df["mos"], bins=25, edgecolor="black", alpha=0.75, color="steelblue")
+        axes[0].hist(
+            self.df["mos"],
+            bins=25,
+            edgecolor="black",
+            alpha=0.75,
+            color="steelblue",
+        )
         axes[0].set_xlabel("MOS Score")
         axes[0].set_ylabel("Frequency")
         axes[0].set_title(f"{self.dataset_name} - MOS Distribution", fontsize=11, fontweight="bold")
@@ -398,7 +411,6 @@ class DataEDA:
         plt.close()
         logger.info(f"MOS distribution saved: {output_path}")
 
-
     def render_eda_plot(self, plot_name: str, **kwargs) -> None:
         """Render an EDA plot through the shared registry contract."""
         spec = EDA_PLOT_REGISTRY.get(plot_name)
@@ -407,28 +419,31 @@ class DataEDA:
         renderer = getattr(self, spec["method"])
         renderer(**kwargs)
 
-
     def normalize_scores(self) -> pd.DataFrame:
         """Normalize MOS scores to [0, 1]."""
-        if "split" in self.df.columns:
-            train_df = self.df[self.df["split"] == "train"]
+        df = self.df
+        if df is None:
+            raise RuntimeError("Metadata must be loaded before normalize_scores(); call load_metadata() first.")
+        if "split" in df.columns:
+            train_df = df[df["split"] == "train"]
             min_val = train_df["mos"].min()
             max_val = train_df["mos"].max()
         else:
-            min_val = self.df["mos"].min()
-            max_val = self.df["mos"].max()
+            min_val = df["mos"].min()
+            max_val = df["mos"].max()
 
         denom = (max_val - min_val) if max_val != min_val else 1.0
-        self.df["normalized_score"] = (self.df["mos"] - min_val) / denom
+        df["normalized_score"] = (df["mos"] - min_val) / denom
 
         self.stats["mos_min"] = float(min_val)
         self.stats["mos_max"] = float(max_val)
         logger.info("MOS scores normalized to [0, 1]")
-        return self.df
-
+        return df
 
     def detect_outliers_3sigma(self) -> pd.DataFrame:
         """Detect outliers using 3-sigma rule."""
+        if self.df is None:
+            raise RuntimeError("Metadata must be loaded before detect_outliers_3sigma(); call load_metadata() first.")
         mean = self.df["mos"].mean()
         std = self.df["mos"].std() if self.df["mos"].std() > 0 else 1.0
         lower_bound = mean - 3 * std
@@ -439,9 +454,12 @@ class DataEDA:
         self.df["is_outlier"] = (self.df["mos"] < lower_bound) | (self.df["mos"] > upper_bound)
         return self.df
 
-
     def check_fold_score_distribution(self, n_splits: int = 5) -> List[Dict]:
         """Check K-fold cross-validation distribution."""
+        if self.df is None:
+            raise RuntimeError(
+                "Metadata must be loaded before check_fold_score_distribution(); call load_metadata() first."
+            )
         fold_df = self.df
         if "split" in self.df.columns:
             fold_df = self.df[self.df["split"].isin(["train", "val"])].reset_index(drop=True)
@@ -454,12 +472,7 @@ class DataEDA:
             verbose=True,
         )
 
-
-    def run_full_eda(
-        self,
-        save_dir: Optional[Path] = None,
-        skip_integrity: bool = False
-    ) -> Dict:
+    def run_full_eda(self, save_dir: Optional[Path] = None, skip_integrity: bool = False) -> Dict:
         """Execute the complete data exploration and analysis pipeline."""
         if save_dir is None:
             save_dir = self.eda_dir
@@ -472,7 +485,7 @@ class DataEDA:
             return {}
 
         if skip_integrity:
-            integrity_res = {
+            integrity_res: Dict[str, object] = {
                 "corrupted": [],
                 "missing": [],
                 "repeated_sample_ids": [],

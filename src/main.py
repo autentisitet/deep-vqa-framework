@@ -1,31 +1,35 @@
 import argparse
 import os
 import shutil
+from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 import cv2
+
 cv2.setNumThreads(0)
 
 from loguru import logger
 
+from src.config import load_config
+from src.config.schemas import Config
 from src.core.evaluator import Evaluator
 from src.core.trainer import TrainerExecutionPipeline
 from src.data.data_eda import DataEDA
-from src.visualization import MetricsPlotter
-from src.config import load_config
 from src.data.dataset_loaders import MetadataLoaderFactory
-from src.utils.file_loader import CaseInsensitiveAssetResolver
 from src.utils.checkpointing import select_best_checkpoint
+from src.utils.file_loader import CaseInsensitiveAssetResolver
 from src.utils.logging_utils import log_prepare, time_it
+from src.visualization import MetricsPlotter
 
 
-def _deploy_best_checkpoint(cfg: Any, dataset_name: str, base_fn: str) -> Path:
+def _deploy_best_checkpoint(cfg: Config, dataset_name: str, base_fn: str) -> Path:
+    """Copy the best checkpoint into the serving directory for its task."""
     dataset_slug = cfg.paths.dataset_slug(dataset_name)
     task_type = (getattr(cfg, "task_type", None) or cfg.dataset.task_type).lower()
     if task_type not in {"iqa", "vqa"}:
@@ -45,15 +49,18 @@ def _deploy_best_checkpoint(cfg: Any, dataset_name: str, base_fn: str) -> Path:
     deploy_dir = cfg.paths.deploy_iqa_dir() if task_type == "iqa" else cfg.paths.deploy_vqa_dir()
     deploy_dir.mkdir(parents=True, exist_ok=True)
 
-    deployed_path = deploy_dir / f"{dataset_slug}_best.pt"
+    deployed_path: Path = deploy_dir / f"{dataset_slug}_best.pt"
     shutil.copy2(best_checkpoint, deployed_path)
     logger.info(f"Deployed best checkpoint: {best_checkpoint} -> {deployed_path}")
     return deployed_path
 
 
-def deploy_best_checkpoint_after_run(func: Callable[..., Any]) -> Callable[..., Any]:
+def deploy_best_checkpoint_after_run[**P, R](func: Callable[P, R]) -> Callable[P, R]:
+    """Decorator that deploys the best checkpoint when a run succeeds."""
+
     @wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        """Run the wrapped stage and deploy its best checkpoint on success."""
         result = func(*args, **kwargs)
         if result is False:
             logger.warning("Main run did not complete successfully; skipping checkpoint deployment.")
@@ -66,14 +73,14 @@ def deploy_best_checkpoint_after_run(func: Callable[..., Any]) -> Callable[..., 
         cfg = result.get("cfg")
         dataset_name = result.get("dataset_name")
         base_fn = result.get("base_fn")
-        if cfg is None or dataset_name is None or base_fn is None:
+        if not isinstance(cfg, Config) or not isinstance(dataset_name, str) or not isinstance(base_fn, str):
             logger.warning("Deployment context is incomplete; skipping checkpoint deployment.")
             return result
 
         _deploy_best_checkpoint(
             cfg=cfg,
-            dataset_name=str(dataset_name),
-            base_fn=str(base_fn),
+            dataset_name=dataset_name,
+            base_fn=base_fn,
         )
         return result
 
@@ -88,6 +95,7 @@ def _plot_training_outputs(
     n_splits: int,
     fast_run: bool = False,
 ) -> None:
+    """Render the registered training plots for each completed fold."""
     model_metrics = {}
     max_fold = 1 if fast_run else n_splits
 
@@ -122,10 +130,23 @@ def _plot_training_outputs(
         logger.warning(f"No valid training history found in {train_logs_dir}.")
 
 
-@deploy_best_checkpoint_after_run
-@time_it
-def main() -> dict[str, Any] | bool:
-    parser = argparse.ArgumentParser(description="Deep VQA/IQA General Data-Driven Framework")
+@dataclass(frozen=True)
+class TrainingOptions:
+    """Explicit execution inputs, independent of the CLI parser."""
+
+    model: str = "swin_iqa"
+    dataset: str = "TID2013"
+    smoke_test: bool = False
+    skip_integrity: bool = False
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the training CLI without starting the training lifecycle."""
+    parser = argparse.ArgumentParser(
+        description="Deep VQA/IQA General Data-Driven Framework",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Examples:\n  python -m src.main --dataset tid2013 --model swin_iqa\n  python -m src.main --dataset konvid-1k --model swin_vqa --smoke_test",
+    )
     parser.add_argument("--model", type=str, default="swin_iqa")
     parser.add_argument("--dataset", type=str, default="TID2013")
     parser.add_argument("--smoke_test", action="store_true")
@@ -134,11 +155,28 @@ def main() -> dict[str, Any] | bool:
         action="store_true",
         help="Skip media integrity checks. Not recommended for training.",
     )
-    args = parser.parse_args()
+    from src import __version__
 
-    requested_dataset = args.dataset
+    parser.add_argument("--version", action="version", version=f"Deep-VQA {__version__}")
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> TrainingOptions:
+    """Produce training options from argv or the process command line."""
+    args = build_parser().parse_args(argv)
+    return TrainingOptions(
+        model=args.model, dataset=args.dataset, smoke_test=args.smoke_test, skip_integrity=args.skip_integrity
+    )
+
+
+@deploy_best_checkpoint_after_run
+@time_it
+def run(options: TrainingOptions) -> dict[str, object] | bool:
+    """Consume options and run EDA, training, plotting and checkpoint deployment."""
+    # 1. Load config and resolve the dataset/model names.
+    requested_dataset = options.dataset
     dataset_name = MetadataLoaderFactory.normalize_key(requested_dataset)
-    model_name = args.model.lower()
+    model_name = options.model.lower()
 
     cfg = load_config(
         config_dir=Path("train-config"),
@@ -151,7 +189,7 @@ def main() -> dict[str, Any] | bool:
         f"task_type={cfg.task_type}, dataset={cfg.dataset.name} ({dataset_name})"
     )
 
-    data_dir = cfg.paths.resolve(Path(cfg.dataset.paths.root) / cfg.dataset.paths.data)
+    data_dir = cfg.paths.resolve_path(Path(cfg.dataset.paths.root) / cfg.dataset.paths.data)
     if not data_dir.exists():
         raise FileNotFoundError(f"Dataset path does not exist: {data_dir}")
 
@@ -159,11 +197,12 @@ def main() -> dict[str, Any] | bool:
     plots_dir = cfg.paths.plots_dir(dataset_name)
     model_outputs_dir = cfg.paths.model_outputs_dir(dataset_name)
 
+    # 2. Prepare output directories and apply smoke-test overrides.
     train_logs_dir.mkdir(parents=True, exist_ok=True)
     plots_dir.mkdir(parents=True, exist_ok=True)
     model_outputs_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.smoke_test:
+    if options.smoke_test:
         logger.warning("Smoke test mode activated.")
         cfg.train.epochs = 1
         cfg.preprocessing.batch_size = 2
@@ -176,13 +215,14 @@ def main() -> dict[str, Any] | bool:
         dataset_name=dataset_name,
     )
 
+    # 3. Run the EDA pipeline and validate that a split column exists.
     eda_engine = DataEDA(
         cfg=cfg,
         dataset_name=dataset_name,
         data_dir=data_dir,
     )
 
-    eda_engine.run_full_eda(skip_integrity=args.skip_integrity)
+    eda_engine.run_full_eda(skip_integrity=options.skip_integrity)
 
     if eda_engine.df is None or "split" not in eda_engine.df.columns:
         logger.error("EDA pipeline failure.")
@@ -191,7 +231,7 @@ def main() -> dict[str, Any] | bool:
     if "mos_min" in eda_engine.stats and "mos_max" in eda_engine.stats:
         logger.info(f"MOS range: [{eda_engine.stats['mos_min']:.3f}, {eda_engine.stats['mos_max']:.3f}]")
 
-    if args.smoke_test and eda_engine.df is not None:
+    if options.smoke_test and eda_engine.df is not None:
         eda_engine.df = eda_engine.df.sample(
             n=min(16, len(eda_engine.df)), random_state=cfg.preprocessing.seed
         ).reset_index(drop=True)
@@ -200,6 +240,7 @@ def main() -> dict[str, Any] | bool:
         logger.error("Data EDA did not create split column!")
         return False
 
+    # 4. Build the training pipeline and run cross-validation.
     resolver = CaseInsensitiveAssetResolver(target_dir=data_dir)
 
     pipeline = TrainerExecutionPipeline(
@@ -207,7 +248,7 @@ def main() -> dict[str, Any] | bool:
         eda_df=eda_engine.df,
         data_dir=data_dir,
         resolver=resolver,
-        fast_run=args.smoke_test,
+        fast_run=options.smoke_test,
     )
 
     evaluator = Evaluator(
@@ -222,6 +263,7 @@ def main() -> dict[str, Any] | bool:
         logger.error(f"Training failed: {e}")
         return False
 
+    # 5. Render training plots; a plotting failure must not block checkpoint deployment.
     plotter = MetricsPlotter(
         cfg=cfg,
         plots_dir=plots_dir,
@@ -234,13 +276,19 @@ def main() -> dict[str, Any] | bool:
             base_fn=base_fn,
             dataset_name=dataset_name,
             n_splits=completed_folds,
-            fast_run=args.smoke_test,
+            fast_run=options.smoke_test,
         )
     except Exception as e:
         # Checkpoint deployment is still valid if an optional visualization fails.
         logger.exception(f"Training visualization failed; continuing to deployment: {e}")
     logger.info("System lifecycle completed successfully.")
     return {"cfg": cfg, "dataset_name": dataset_name, "base_fn": base_fn}
+
+
+def main(argv: list[str] | None = None) -> dict[str, object] | bool:
+    """Parse arguments before invoking the decorated training lifecycle."""
+    result: dict[str, object] | bool = run(parse_args(argv))
+    return result
 
 
 if __name__ == "__main__":

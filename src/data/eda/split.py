@@ -30,12 +30,14 @@ GROUP_COLUMN_CANDIDATES = (
 
 
 def _normalize_group_value(value) -> str:
+    """Normalize a group value to a stable lowercase stem."""
     if pd.isna(value):
         return ""
     return Path(str(value).strip()).stem.lower()
 
 
 def _infer_group_from_sample_id(sample_id, dataset_name: Optional[str] = None) -> str:
+    """Infer a group key from a sample id, applying TID2013-aware rules."""
     stem = _normalize_group_value(sample_id)
     dataset_key = str(dataset_name or "").strip().lower()
 
@@ -57,9 +59,7 @@ def infer_group_labels(
     if sample_col not in df.columns:
         raise KeyError(f"Missing sample id column: {sample_col}")
 
-    fallback_groups = df[sample_col].apply(
-        lambda sample_id: _infer_group_from_sample_id(sample_id, dataset_name)
-    )
+    fallback_groups = df[sample_col].apply(lambda sample_id: _infer_group_from_sample_id(sample_id, dataset_name))
 
     candidate_cols = []
     if group_col:
@@ -96,7 +96,7 @@ def find_group_split_overlaps(
     overlaps = {}
     split_names = list(split_groups)
     for i, left_name in enumerate(split_names):
-        for right_name in split_names[i + 1:]:
+        for right_name in split_names[i + 1 :]:
             shared = sorted(split_groups[left_name] & split_groups[right_name])
             if shared:
                 overlaps[(left_name, right_name)] = shared
@@ -125,14 +125,14 @@ def validate_group_split_isolation(
         preview = ", ".join(shared[:10])
         suffix = "..." if len(shared) > 10 else ""
         logger.error(
-            f"Group leakage in {context}: {left_name} vs {right_name}; "
-            f"{len(shared)} shared groups: {preview}{suffix}"
+            f"Group leakage in {context}: {left_name} vs {right_name}; {len(shared)} shared groups: {preview}{suffix}"
         )
 
     return False
 
 
-def _safe_stratified_labels(df: pd.DataFrame, score_col: str) -> pd.Series:
+def _stratified_labels_with_fallback(df: pd.DataFrame, score_col: str) -> pd.Series:
+    """Return score bins for splitting, falling back to ``-1`` on failure."""
     labels = create_stratified_labels(df, score_col=score_col)
     return pd.Series(labels, index=df.index).astype("float").fillna(-1).astype(int)
 
@@ -144,6 +144,7 @@ def _group_holdout_split(
     stratify_labels: pd.Series,
     random_state: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """Split once, keeping whole groups together while approximating the ratio."""
     unique_groups = groups.nunique()
     if unique_groups < 2:
         raise ValueError("Need at least two groups for a group-aware split")
@@ -172,7 +173,10 @@ def _group_holdout_split(
         test_size=holdout_ratio,
         random_state=random_state,
     )
-    return next(splitter.split(df, groups=groups))
+    train_indices: np.ndarray
+    test_indices: np.ndarray
+    train_indices, test_indices = next(splitter.split(df, groups=groups))
+    return train_indices, test_indices
 
 
 def split_train_val_test(
@@ -205,7 +209,7 @@ def split_train_val_test(
 
     logger.info(f"Split: Train={train_ratio:.2f}, Val={val_ratio:.2f}, Test={test_ratio:.2f}")
 
-    stratify_labels = _safe_stratified_labels(df, score_col=score_col)
+    stratify_labels = _stratified_labels_with_fallback(df, score_col=score_col)
     groups = infer_group_labels(df, group_col=group_col, dataset_name=dataset_name)
 
     if groups.nunique() >= 3:
@@ -260,12 +264,15 @@ def split_train_val_test(
         return train, val, test
 
     raise ValueError(
-        "Need at least three distinct groups for leakage-safe train/val/test split; "
-        f"found {groups.nunique()}."
+        f"Need at least three distinct groups for leakage-safe train/val/test split; found {groups.nunique()}."
     )
 
 
-def create_stratified_labels(df: pd.DataFrame, bins: int = 10, score_col: str = "mos"):
+def create_stratified_labels(
+    df: pd.DataFrame,
+    bins: int = 10,
+    score_col: str = "mos",
+):
     """
     Create score-bin labels for stratified splitters.
 
@@ -305,7 +312,7 @@ def make_group_kfold_splits(
                 f"using {actual_splits} folds."
             )
 
-        labels = _safe_stratified_labels(df, score_col=score_col)
+        labels = _stratified_labels_with_fallback(df, score_col=score_col)
         if StratifiedGroupKFold is not None:
             try:
                 splitter = StratifiedGroupKFold(
@@ -320,10 +327,7 @@ def make_group_kfold_splits(
         splitter = GroupKFold(n_splits=actual_splits)
         return list(splitter.split(df, groups=groups)), "GroupKFold"
 
-    raise ValueError(
-        "Need at least two distinct groups for leakage-safe cross-validation; "
-        f"found {unique_groups}."
-    )
+    raise ValueError(f"Need at least two distinct groups for leakage-safe cross-validation; found {unique_groups}.")
 
 
 def check_fold_distribution(
@@ -366,15 +370,17 @@ def check_fold_distribution(
         train_std = df.iloc[train_idx][score_col].std()
         val_std = df.iloc[val_idx][score_col].std()
 
-        fold_stats.append({
-            "fold": fold + 1,
-            "train_mean": train_mean,
-            "val_mean": val_mean,
-            "train_std": train_std,
-            "val_std": val_std,
-            "train_groups": groups.iloc[train_idx].nunique(),
-            "val_groups": groups.iloc[val_idx].nunique(),
-        })
+        fold_stats.append(
+            {
+                "fold": fold + 1,
+                "train_mean": train_mean,
+                "val_mean": val_mean,
+                "train_std": train_std,
+                "val_std": val_std,
+                "train_groups": groups.iloc[train_idx].nunique(),
+                "val_groups": groups.iloc[val_idx].nunique(),
+            }
+        )
 
     if verbose:
         logger.info(f"{strategy} {len(splits)}-Fold distribution checked")

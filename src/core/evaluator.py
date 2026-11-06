@@ -1,16 +1,16 @@
 # src/core/evaluator.py
 import time
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
 import torch
 from loguru import logger
-from scipy.stats import kendalltau, pearsonr, spearmanr
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import r2_score
 
 from src.config.schemas import Config
+from src.models.metrics import compute_metrics
 
 
 class Evaluator:
@@ -48,19 +48,22 @@ class Evaluator:
 
     @property
     def base_filename(self) -> str:
+        """Return the current base filename used for outputs."""
         return self._base_filename
 
     @base_filename.setter
-    def base_filename(self, new_name: str):
+    def base_filename(self, new_name: str) -> None:
         """Update base filename and cascade to history/manifest paths."""
         self._base_filename = new_name
 
     @property
     def history_path(self) -> Path:
+        """Path of the training history CSV."""
         return self.logs_dir / f"{self._base_filename}_history.csv"
 
     @history_path.setter
-    def history_path(self, path: Union[str, Path]):
+    def history_path(self, path: Union[str, Path]) -> None:
+        """Set the history path, deriving the base filename and log directory."""
         path = Path(path)
         self.logs_dir = path.parent
         self.logs_dir.mkdir(parents=True, exist_ok=True)
@@ -68,10 +71,12 @@ class Evaluator:
 
     @property
     def manifest_path(self) -> Path:
+        """Path of the prediction-error manifest CSV."""
         return self.logs_dir / f"{self._base_filename}_manifest.csv"
 
     @manifest_path.setter
-    def manifest_path(self, path: Union[str, Path]):
+    def manifest_path(self, path: Union[str, Path]) -> None:
+        """Set the manifest path, deriving the base filename and log directory."""
         path = Path(path)
         self.logs_dir = path.parent
         self.logs_dir.mkdir(parents=True, exist_ok=True)
@@ -154,7 +159,7 @@ class Evaluator:
             manifest_enabled=manifest_enabled,
         )
 
-    def _to_clean_numpy(self, data: Any) -> np.ndarray:
+    def _to_clean_numpy(self, data: object) -> np.ndarray:
         """Convert Tensor/List to numpy array."""
         if data is None:
             return np.array([])
@@ -164,7 +169,9 @@ class Evaluator:
             return np.array([self._to_clean_numpy(x) for x in data])
         if isinstance(data, np.ndarray):
             return data
-        return np.array(data)
+        if isinstance(data, (tuple, int, float, np.number)):
+            return np.array(data)
+        raise TypeError(f"Unsupported metric input: {type(data).__name__}")
 
     def _compute_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> dict:
         """Compute PLCC, SROCC, KROCC, RMSE, R2, MAE."""
@@ -178,24 +185,16 @@ class Evaluator:
                 "mae": 0.0,
             }
 
-        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+        base_metrics = compute_metrics(y_pred, y_true)
         r2 = r2_score(y_true, y_pred) if len(y_true) > 1 else 0.0
-        mae = np.mean(np.abs(y_true - y_pred))
-
-        if np.std(y_true) == 0 or np.std(y_pred) == 0:
-            plcc, srocc, krocc = 0.0, 0.0, 0.0
-        else:
-            plcc, _ = pearsonr(y_true, y_pred)
-            srocc, _ = spearmanr(y_true, y_pred)
-            krocc, _ = kendalltau(y_true, y_pred)
 
         return {
-            "plcc": round(float(np.nan_to_num(plcc)), 6),
-            "srocc": round(float(np.nan_to_num(srocc)), 6),
-            "krocc": round(float(np.nan_to_num(krocc)), 6),
-            "rmse": round(float(np.nan_to_num(rmse)), 6),
+            "plcc": round(base_metrics["plcc"], 6),
+            "srocc": round(base_metrics["srocc"], 6),
+            "krocc": round(base_metrics["krocc"], 6),
+            "rmse": round(base_metrics["rmse"], 6),
             "r2": round(float(np.nan_to_num(r2)), 6),
-            "mae": round(float(np.nan_to_num(mae)), 6),
+            "mae": round(base_metrics["mae"], 6),
         }
 
     def _save_history(self, metrics: dict) -> None:
@@ -212,7 +211,11 @@ class Evaluator:
                 df_existing = pd.read_csv(history_path)
                 df_combined = pd.concat([df_existing, df_new], ignore_index=True)
                 if "epoch" in df_combined.columns:
-                    df_combined.drop_duplicates(subset=["epoch"], keep="last", inplace=True)
+                    df_combined.drop_duplicates(
+                        subset=["epoch"],
+                        keep="last",
+                        inplace=True,
+                    )
                 df_combined.to_csv(history_path, index=False)
             except Exception as e:
                 logger.error(f"Failed to append history: {e}")
@@ -266,6 +269,7 @@ class Evaluator:
 
     @staticmethod
     def _error_level(error: float, thresholds: list[float]) -> str:
+        """Bucket an absolute error against the configured thresholds."""
         if not thresholds or error < thresholds[0]:
             return "below_threshold"
         if len(thresholds) == 1:

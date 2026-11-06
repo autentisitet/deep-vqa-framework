@@ -1,18 +1,7 @@
-import yaml
 from pathlib import Path
+
 from .schemas import Config
-
-
-def _deep_merge(base: dict, override: dict) -> dict:
-    result = base.copy()
-    for k, v in override.items():
-        if k not in result:
-            result[k] = v
-        elif isinstance(result[k], dict) and isinstance(v, dict):
-            result[k] = _deep_merge(result[k], v)
-        else:
-            result[k] = v
-    return result
+from .yaml import deep_merge, load_yaml_mapping
 
 
 def load_config(
@@ -20,6 +9,7 @@ def load_config(
     model_name: str = "swin_iqa",
     dataset_name: str = "tid2013",
 ) -> Config:
+    """Assemble and validate a ``Config`` from the training YAML files."""
     # Import lazily: dataset_loaders imports src.utils, whose package exports
     # config symbols. Keeping this import at module scope creates a cycle
     # during test/module discovery.
@@ -27,24 +17,15 @@ def load_config(
 
     dataset_key = MetadataLoaderFactory.normalize_key(dataset_name)
 
-    # 1. 加载所有 YAML
-    with open(config_dir / "basic.yaml") as f:
-        base_cfg = yaml.safe_load(f) or {}
-
-    with open(config_dir / "dataset_config.yaml") as f:
-        all_datasets = yaml.safe_load(f) or {}
-        config_dataset_key = next(
-            (k for k in all_datasets.keys() if k.lower().strip() == dataset_key),
-            None,
-        )
-        dataset_cfg = all_datasets.get(config_dataset_key, {}) if config_dataset_key else {}
-        dataset_cfg["registry_key"] = dataset_key
-
-    with open(config_dir / "models" / f"{model_name}.yaml") as f:
-        model_cfg = yaml.safe_load(f) or {}
+    base_cfg = load_yaml_mapping(config_dir / "basic.yaml")
+    all_datasets = load_yaml_mapping(config_dir / "dataset_config.yaml")
+    config_dataset_key = next((key for key in all_datasets if key.lower().strip() == dataset_key), None)
+    dataset_cfg = dict(all_datasets.get(config_dataset_key, {})) if config_dataset_key else {}
+    dataset_cfg["registry_key"] = dataset_key
+    model_cfg = load_yaml_mapping(config_dir / "models" / f"{model_name}.yaml")
 
     # 2. 合并 base + model（model 覆盖 base）
-    merged = _deep_merge(base_cfg, model_cfg)
+    merged = deep_merge(base_cfg, model_cfg)
 
     # 3. dataset 塞进 merged；paths / 其他默认值由 Pydantic 提供
     merged["dataset"] = dataset_cfg

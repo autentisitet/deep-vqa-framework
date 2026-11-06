@@ -1,44 +1,44 @@
 # src/core/engine.py
-from typing import Any, Optional
+from __future__ import annotations
 
+import math
 import re
 import shutil
+from collections.abc import Iterable, Sized
+from enum import Enum
 from pathlib import Path
-import json
-import math
+from typing import Optional
 
 import numpy as np
 import torch
 import torch.nn as nn
 from loguru import logger
+from pydantic import BaseModel
+
+# torch.amp is available for every supported torch version (see pyproject.toml),
+# so no torch.cuda.amp compatibility fallback is needed.
+from torch.amp import GradScaler as AmpGradScaler
+from torch.amp import autocast as amp_autocast
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.config.schemas import Config
-
-try:
-    from torch.amp import GradScaler as AmpGradScaler
-    from torch.amp import autocast as amp_autocast
-
-    def make_grad_scaler(device_type: str, enabled: bool) -> AmpGradScaler:
-        return AmpGradScaler(device_type, enabled=enabled)
-
-    def autocast_context(device_type: str, enabled: bool):
-        return amp_autocast(device_type=device_type, enabled=enabled)
-
-except ImportError:
-    from torch.cuda.amp import GradScaler as AmpGradScaler
-    from torch.cuda.amp import autocast as amp_autocast
-
-    def make_grad_scaler(device_type: str, enabled: bool) -> AmpGradScaler:
-        return AmpGradScaler(enabled=enabled)
-
-    def autocast_context(device_type: str, enabled: bool):
-        return amp_autocast(enabled=enabled)
+from src.core.evaluator import Evaluator
 
 
-def progress_bar(iterable: Any, *, desc: str) -> tqdm:
-    total = len(iterable) if hasattr(iterable, "__len__") else None
+def make_grad_scaler(device_type: str, enabled: bool) -> AmpGradScaler:
+    """Build an AMP gradient scaler for the given device and flag."""
+    return AmpGradScaler(device_type, enabled=enabled)
+
+
+def autocast_context(device_type: str, enabled: bool):
+    """Return the AMP autocast context manager for the given device and flag."""
+    return amp_autocast(device_type=device_type, enabled=enabled)
+
+
+def progress_bar[T](iterable: Iterable[T], *, desc: str) -> tqdm[T]:
+    """Return a tqdm bar whose refresh cadence scales with the iterable length."""
+    total = len(iterable) if isinstance(iterable, Sized) else None
     miniters = max(1, math.ceil(total * 0.02)) if total else None
     return tqdm(iterable, desc=desc, miniters=miniters)
 
@@ -59,10 +59,10 @@ class TrainerEngine:
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
         criterion: nn.Module,
-        evaluator: Any,
+        evaluator: Evaluator,
         cfg: Config,
         device: str = "cuda",
-        scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
+        scheduler: torch.optim.lr_scheduler.LRScheduler | torch.optim.lr_scheduler.ReduceLROnPlateau | None = None,
     ):
         self.device = device
         self.device_type = "cuda" if "cuda" in str(device) else "cpu"
@@ -105,9 +105,10 @@ class TrainerEngine:
             f"Monitor: {self.checkpoint_monitor} | AMP: {self.use_amp}"
         )
 
-
-    def _sanitize_for_serialization(self, obj):
-        """Recursively convert Path objects to strings."""
+    def _sanitize_for_serialization(self, obj: object) -> object:
+        """Convert paths, enums and Pydantic models into safe checkpoint values."""
+        if isinstance(obj, Enum):
+            return self._sanitize_for_serialization(obj.value)
         if isinstance(obj, dict):
             return {k: self._sanitize_for_serialization(v) for k, v in obj.items()}
         elif isinstance(obj, list):
@@ -116,12 +117,10 @@ class TrainerEngine:
             return tuple(self._sanitize_for_serialization(v) for v in obj)
         elif isinstance(obj, Path):
             return str(obj)
-        elif hasattr(obj, "model_dump"):
+        elif isinstance(obj, BaseModel):
             return self._sanitize_for_serialization(obj.model_dump())
         else:
             return obj
-
-
 
     def resume_training(self, checkpoint_path: str) -> int:
         """Resume training from checkpoint."""
@@ -144,7 +143,7 @@ class TrainerEngine:
             self.scheduler.load_state_dict(checkpoint["scheduler"])
             logger.info("  - Scheduler state loaded")
 
-        resume_epoch = checkpoint.get("epoch", 0) + 1
+        resume_epoch: int = checkpoint.get("epoch", 0) + 1
 
         if "metrics" in checkpoint:
             hist_metrics = {k.lower(): v for k, v in checkpoint["metrics"].items()}
@@ -158,8 +157,6 @@ class TrainerEngine:
 
         logger.info(f"Resuming from epoch {resume_epoch}")
         return resume_epoch
-
-
 
     def train_epoch(self, train_loader: DataLoader, epoch: int) -> float:
         """Run one training epoch."""
@@ -201,11 +198,13 @@ class TrainerEngine:
 
             log_interval = self.cfg.logging.log_interval
             if batch_idx % log_interval == 0:
-                pbar.set_postfix({
-                    "Loss": f"{total_loss.item() * accum_steps:.4f}",
-                    "Huber": f"{float(loss_dict.get('smooth_l1_loss', 0.0)):.4f}",
-                    "Rank": f"{float(loss_dict.get('rank_loss', 0.0)):.4f}",
-                })
+                pbar.set_postfix(
+                    {
+                        "Loss": f"{total_loss.item() * accum_steps:.4f}",
+                        "Huber": f"{float(loss_dict.get('smooth_l1_loss', 0.0)):.4f}",
+                        "Rank": f"{float(loss_dict.get('rank_loss', 0.0)):.4f}",
+                    }
+                )
 
         return running_loss / len(train_loader)
 
@@ -223,7 +222,7 @@ class TrainerEngine:
 
         all_preds = []
         all_trues = []
-        traditional_metrics_payload = {}
+        traditional_metrics_payload: dict[str, list[float]] = {}
 
         for batch_data in progress_bar(val_loader, desc=f"Epoch {epoch}/{self.epochs} [Val]"):
             if isinstance(batch_data, dict):
@@ -264,7 +263,7 @@ class TrainerEngine:
         if eval_fn is None:
             raise AttributeError("Evaluator missing evaluate/execute method.")
 
-        metrics = eval_fn(
+        metrics: dict[str, float] = eval_fn(
             y_true=np.array(all_trues),
             y_pred=np.array(all_preds),
             epoch=epoch,
@@ -296,97 +295,109 @@ class TrainerEngine:
                 train_loss=train_loss,
                 save_manifest=True,
             )
+            metrics, val_loss, val_srocc, val_plcc = self._normalize_metrics(raw_metrics)
 
-            metrics = {k.lower(): v for k, v in raw_metrics.items()}
-            val_loss = raw_metrics.get("val_loss", metrics.get("val_loss", 0.0))
-            if val_loss == 0.0 and "loss" in metrics:
-                val_loss = metrics["loss"]
+            current_lr = self._step_scheduler(val_loss)
+            self._log_epoch(epoch, train_loss, val_loss, val_srocc, val_plcc, current_lr)
 
-            metrics["val_loss"] = val_loss
-            metrics["loss"] = val_loss
-
-            for indicator in ["srocc", "plcc", "rmse"]:
-                if indicator in metrics:
-                    metrics[f"val_{indicator}"] = metrics[indicator]
-
-            val_srocc = metrics.get("val_srocc", 0.0)
-            val_plcc = metrics.get("val_plcc", 0.0)
-
-            if self.scheduler is not None:
-                if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    self.scheduler.step(val_loss)
-                else:
-                    self.scheduler.step()
-                current_lr = self.optimizer.param_groups[0]["lr"]
-                logger.info(
-                    f"Epoch {epoch} | LR: {current_lr:.6f} | "
-                    f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
-                    f"SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}"
-                )
-            else:
-                logger.info(
-                    f"Epoch {epoch} | Train Loss: {train_loss:.4f} | "
-                    f"Val Loss: {val_loss:.4f} | SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}"
-                )
-
-            should_stop = False
-
-            # Early stopping uses the primary validation metric only.
-            if self.early_stop_enabled:
-                score = metrics.get(self.early_stop_monitor, val_loss)
-                if self.early_stop_monitor not in metrics:
-                    logger.warning(f"Monitor '{self.early_stop_monitor}' not found, using val_loss.")
-
-                if self._is_improved(score, self.best_early_stop_score, self.early_stop_mode):
-                    self.best_early_stop_score = score
-                    self.early_stop_counter = 0
-                else:
-                    self.early_stop_counter += 1
-
-                if self.early_stop_counter >= self.patience:
-                    logger.warning(
-                        f"Early stopping triggered. No improvement in '{self.early_stop_monitor}' "
-                        f"for {self.early_stop_counter} epochs."
-                    )
-                    should_stop = True
-
-            # Checkpoint
-            ckpt_score = metrics.get(self.checkpoint_monitor, 0.0)
-            ckpt_secondary_score = metrics.get(self.checkpoint_secondary_monitor, 0.0)
-            if self._is_primary_or_tiebreak_improved(
-                ckpt_score,
-                ckpt_secondary_score,
-                self.best_checkpoint_score,
-                self.best_checkpoint_secondary_score,
-                self.checkpoint_mode,
-            ):
-                self.best_checkpoint_score = ckpt_score
-                self.best_checkpoint_secondary_score = ckpt_secondary_score
-                self._save_checkpoint(
-                    epoch,
-                    val_loss,
-                    metrics,
-                    is_best=True,
-                    current_fold=current_fold,
-                )
-
-            if epoch == self.epochs:
-                self._save_checkpoint(
-                    epoch,
-                    val_loss,
-                    metrics,
-                    is_best=False,
-                    current_fold=current_fold,
-                )
+            should_stop = self._should_early_stop(metrics, val_loss)
+            self._maybe_save_checkpoint(epoch, val_loss, metrics, current_fold)
 
             if should_stop:
                 break
 
             torch.cuda.empty_cache()
 
+    def _normalize_metrics(self, raw_metrics: dict[str, float]) -> tuple[dict[str, float], float, float, float]:
+        """Lowercase metric keys and fill the loss / val_* aliases."""
+        metrics = {k.lower(): v for k, v in raw_metrics.items()}
+        val_loss = raw_metrics.get("val_loss", metrics.get("val_loss", 0.0))
+        if val_loss == 0.0 and "loss" in metrics:
+            val_loss = metrics["loss"]
+        metrics["val_loss"] = val_loss
+        metrics["loss"] = val_loss
+        for indicator in ["srocc", "plcc", "rmse"]:
+            if indicator in metrics:
+                metrics[f"val_{indicator}"] = metrics[indicator]
+        return metrics, val_loss, metrics.get("val_srocc", 0.0), metrics.get("val_plcc", 0.0)
 
+    def _step_scheduler(self, val_loss: float) -> Optional[float]:
+        """Step the scheduler and return the current learning rate."""
+        if self.scheduler is None:
+            return None
+        if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            self.scheduler.step(val_loss)
+        else:
+            self.scheduler.step()
+        return float(self.optimizer.param_groups[0]["lr"])
+
+    def _log_epoch(
+        self,
+        epoch: int,
+        train_loss: float,
+        val_loss: float,
+        val_srocc: float,
+        val_plcc: float,
+        current_lr: Optional[float],
+    ) -> None:
+        """Log one epoch summary."""
+        if current_lr is not None:
+            logger.info(
+                f"Epoch {epoch} | LR: {current_lr:.6f} | Train Loss: {train_loss:.4f} | "
+                f"Val Loss: {val_loss:.4f} | SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}"
+            )
+        else:
+            logger.info(
+                f"Epoch {epoch} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
+                f"SROCC: {val_srocc:.4f} | PLCC: {val_plcc:.4f}"
+            )
+
+    def _should_early_stop(self, metrics: dict[str, float], val_loss: float) -> bool:
+        """Update the early-stopping counter and report whether to stop."""
+        if not self.early_stop_enabled:
+            return False
+        score = metrics.get(self.early_stop_monitor, val_loss)
+        if self.early_stop_monitor not in metrics:
+            logger.warning(f"Monitor '{self.early_stop_monitor}' not found, using val_loss.")
+        if self._is_improved(score, self.best_early_stop_score, self.early_stop_mode):
+            self.best_early_stop_score = score
+            self.early_stop_counter = 0
+        else:
+            self.early_stop_counter += 1
+        if self.early_stop_counter >= self.patience:
+            logger.warning(
+                f"Early stopping triggered. No improvement in '{self.early_stop_monitor}' "
+                f"for {self.early_stop_counter} epochs."
+            )
+            return True
+        return False
+
+    def _maybe_save_checkpoint(
+        self,
+        epoch: int,
+        val_loss: float,
+        metrics: dict[str, float],
+        current_fold: int,
+    ) -> None:
+        """Save the best checkpoint when improved, and the final one."""
+        ckpt_score = metrics.get(self.checkpoint_monitor, 0.0)
+        ckpt_secondary_score = metrics.get(self.checkpoint_secondary_monitor, 0.0)
+        if self._is_primary_or_tiebreak_improved(
+            ckpt_score,
+            ckpt_secondary_score,
+            self.best_checkpoint_score,
+            self.best_checkpoint_secondary_score,
+            self.checkpoint_mode,
+        ):
+            self.best_checkpoint_score = ckpt_score
+            self.best_checkpoint_secondary_score = ckpt_secondary_score
+            self._save_checkpoint(epoch, val_loss, metrics, is_best=True, current_fold=current_fold)
+
+        if epoch == self.epochs:
+            self._save_checkpoint(epoch, val_loss, metrics, is_best=False, current_fold=current_fold)
 
     def _is_improved(self, current: float, best: float, mode: str) -> bool:
+        """Whether ``current`` beats ``best`` under a min/max mode."""
         return current < best if mode == "min" else current > best
 
     def _is_primary_or_tiebreak_improved(
@@ -397,16 +408,16 @@ class TrainerEngine:
         best_secondary: float,
         mode: str,
     ) -> bool:
+        """Whether the primary score improved, or tied with a better secondary."""
         if self._is_improved(current, best, mode):
             return True
         return current == best and current_secondary > best_secondary
-
 
     def _save_checkpoint(
         self,
         epoch: int,
         val_loss: float,
-        metrics: dict[str, Any],
+        metrics: dict[str, float],
         is_best: bool,
         current_fold: int = 1,
     ) -> None:
@@ -424,6 +435,7 @@ class TrainerEngine:
         current_secondary_score = metrics.get(self.checkpoint_secondary_monitor, 0.0)
 
         def extract_score(path: Path, monitor: str, fallback: float) -> float:
+            """Parse a metric value from a checkpoint filename."""
             match = re.search(rf"{re.escape(monitor)}(-?\d+\.\d+)", path.name.lower())
             if match:
                 return float(match.group(1))
@@ -459,6 +471,7 @@ class TrainerEngine:
                 primary_fallback = float("-inf") if self.checkpoint_mode == "max" else float("inf")
 
                 def checkpoint_sort_key(path: Path) -> tuple[float, float]:
+                    """Return the primary and secondary scores for checkpoint sorting."""
                     primary = extract_score(path, self.checkpoint_monitor, primary_fallback)
                     secondary = extract_score(path, self.checkpoint_secondary_monitor, float("-inf"))
                     return (primary, secondary) if reverse_flag else (-primary, secondary)

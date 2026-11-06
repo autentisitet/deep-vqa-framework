@@ -50,6 +50,7 @@ class IQAVQALoss(nn.Module):
         return (pair_weight * torch.nn.functional.softplus(-target_sign * pred_diff)).sum() / pair_weight.sum()
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """Return the weighted regression, ranking, and total losses."""
         pred = pred.view(-1)
         target = target.view(-1).float()
         pred = torch.clamp(pred, min=1e-6, max=1.0 - 1e-6)

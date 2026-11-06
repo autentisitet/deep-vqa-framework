@@ -1,7 +1,7 @@
 # src/utils/file_loader.py
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Set, Tuple, Union
+from typing import Dict, Tuple, Union
 
 from loguru import logger
 
@@ -16,16 +16,18 @@ class AssetInfo:
 
     @property
     def dataset_type(self) -> DatasetType:
+        """Classify this asset by its file extension."""
         return DatasetType.detect(self.extension)
 
     @property
     def is_video(self) -> bool:
+        """Whether this asset is a video."""
         return self.dataset_type == DatasetType.VIDEO
 
     @property
     def is_image(self) -> bool:
+        """Whether this asset is an image."""
         return self.dataset_type == DatasetType.IMAGE
-
 
 
 class CaseInsensitiveAssetResolver:
@@ -36,30 +38,33 @@ class CaseInsensitiveAssetResolver:
         logger.info(f"Scanning: {self.target_dir}")
 
         all_exts = DatasetType.all_extensions()
-        for f in self.target_dir.rglob("*"):
-            if f.is_file():
-                ext = f.suffix.lower()
-                if ext in all_exts:
-                    self.full_registry[f.name.lower()] = AssetInfo(
-                        path=f,
-                        filename=f.name,
-                        extension=ext,
-                    )
+        for f in filter(Path.is_file, self.target_dir.rglob("*")):
+            ext = f.suffix.lower()
+            if ext in all_exts:
+                self.full_registry[f.name.lower()] = AssetInfo(
+                    path=f,
+                    filename=f.name,
+                    extension=ext,
+                )
 
         logger.info(f"Indexed {len(self.full_registry)} files")
 
-    def resolve(self, filename: str) -> AssetInfo:
+    def find_asset(self, filename: str) -> AssetInfo:
+        """Return the indexed asset for a filename, matching case-insensitively."""
         key = Path(filename).name.lower()
         if key in self.full_registry:
             return self.full_registry[key]
         raise FileNotFoundError(f"File not found: {filename} in {self.target_dir}")
 
-    def resolve_path(self, filename: str) -> Path:
-        return self.resolve(filename).path
+    def find_path(self, filename: str) -> Path:
+        """Return the filesystem path of a resolved asset."""
+        return self.find_asset(filename).path
 
-    def resolve_with_info(self, filename: str) -> Tuple[Path, bool, bool]:
-        asset = self.resolve(filename)
+    def find_with_info(self, filename: str) -> Tuple[Path, bool, bool]:
+        """Return ``(path, is_video, is_image)`` for a resolved asset."""
+        asset = self.find_asset(filename)
         return asset.path, asset.is_video, asset.is_image
 
     def contains(self, filename: str) -> bool:
+        """Whether a filename has been indexed."""
         return Path(filename).name.lower() in self.full_registry

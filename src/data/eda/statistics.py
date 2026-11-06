@@ -3,10 +3,24 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import cv2
+import av
 import numpy as np
 import pandas as pd
 from loguru import logger
+
+from src.data.image_io import read_image_rgb
+
+
+def _classify_color_channels(img: np.ndarray) -> str:
+    """Label an image's channel layout for the color-space histogram."""
+    if len(img.shape) == 2:
+        return "grayscale"
+    channels = img.shape[2]
+    if channels == 3:
+        return "RGB"
+    if channels == 4:
+        return "RGBA"
+    return f"{channels}channels"
 
 
 def analyze_image_properties(
@@ -29,27 +43,15 @@ def analyze_image_properties(
 
     for img_path in sampled:
         try:
-            img = cv2.imread(str(img_path))
-            if img is None:
-                continue
-
-            h, w = img.shape[:2]
-            widths.append(w)
-            heights.append(h)
-            aspect_ratios.append(w / h if h > 0 else 0)
+            array = read_image_rgb(img_path)
+            height, width = array.shape[:2]
+            widths.append(width)
+            heights.append(height)
+            aspect_ratios.append(width / height if height > 0 else 0)
             file_sizes.append(img_path.stat().st_size / (1024 * 1024))
 
             if detailed:
-                if len(img.shape) == 2:
-                    color_channels.append("grayscale")
-                else:
-                    c = img.shape[2]
-                    if c == 3:
-                        color_channels.append("RGB")
-                    elif c == 4:
-                        color_channels.append("RGBA")
-                    else:
-                        color_channels.append(f"{c}channels")
+                color_channels.append(_classify_color_channels(array))
         except Exception as e:
             logger.debug(f"Failed to analyze {img_path}: {e}")
             continue
@@ -113,27 +115,21 @@ def analyze_video_properties(
 
     for video_path in sampled:
         try:
-            cap = cv2.VideoCapture(str(video_path))
-            if not cap.isOpened():
-                continue
-
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            with av.open(str(video_path)) as container:
+                stream = container.streams.video[0]
+                fps = float(stream.average_rate) if stream.average_rate else 0.0
+                frame_count = stream.frames or 0
+                width = stream.codec_context.width or 0
+                height = stream.codec_context.height or 0
+                duration = float(stream.duration * stream.time_base) if stream.duration else 0.0
+                codec = stream.codec_context.name
 
             fps_list.append(fps)
             frame_count_list.append(frame_count)
             widths.append(width)
             heights.append(height)
-            durations.append(frame_count / fps if fps > 0 else 0)
-
-            if detailed:
-                fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
-                codec_char = "".join([chr((fourcc >> 8 * i) & 0xFF) for i in range(4)])
-                codecs.append(codec_char)
-
-            cap.release()
+            durations.append(duration if duration > 0 else (frame_count / fps if fps > 0 else 0))
+            codecs.append(codec)
         except Exception as e:
             logger.debug(f"Failed to analyze {video_path}: {e}")
             continue

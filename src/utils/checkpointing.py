@@ -1,10 +1,19 @@
-from pathlib import Path
+from __future__ import annotations
+
 import re
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
+if TYPE_CHECKING:
+    import torch
+
+    from src.config.schemas import Config
+
 
 def checkpoint_score_from_name(path: Path, monitor: str) -> float | None:
+    """Parse a monitored score out of a checkpoint filename, if present."""
     match = re.search(
         rf"{re.escape(monitor.lower())}(-?\d+(?:\.\d+)?)",
         path.name.lower(),
@@ -31,9 +40,7 @@ def select_best_checkpoint(
 
     prefix = f"{base_fn}_fold"
     best_epoch_paths = [
-        path
-        for path in model_outputs_dir.glob("*.pt")
-        if path.name.startswith(prefix) and "_best_epoch" in path.name
+        path for path in model_outputs_dir.glob("*.pt") if path.name.startswith(prefix) and "_best_epoch" in path.name
     ]
 
     scored_paths: list[tuple[Path, float, float, float]] = []
@@ -71,6 +78,64 @@ def select_best_checkpoint(
         )
         return fallback_paths[0]
 
-    raise FileNotFoundError(
-        f"No best checkpoint found for current run prefix '{base_fn}' in {model_outputs_dir}"
-    )
+    raise FileNotFoundError(f"No best checkpoint found for current run prefix '{base_fn}' in {model_outputs_dir}")
+
+
+def load_checkpoint(ckpt_path: Path, device: str = "cuda") -> tuple[torch.nn.Module, Config]:
+    """
+    Load model checkpoint saved by TrainerEngine.
+
+    Args:
+        ckpt_path: Path to the .pt checkpoint file
+        device: Device to load the model on
+
+    Returns:
+        Tuple of (model, config_obj)
+
+    Raises:
+        FileNotFoundError: If checkpoint does not exist
+        KeyError: If checkpoint lacks required config field
+    """
+    import torch
+
+    from src.config.schemas import Config
+    from src.models.iqavqa_model import IQAVQANet
+
+    if not ckpt_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+
+    # Checkpoints are untrusted input at deployment boundaries.  Restrict
+    # deserialization to tensors/primitive containers so pickle payloads
+    # cannot execute arbitrary Python code.
+    checkpoint = torch.load(ckpt_path, map_location=device, weights_only=True)
+
+    if "config" not in checkpoint:
+        raise KeyError(
+            "Checkpoint missing 'config' field. Ensure checkpoint was saved by TrainerEngine._save_checkpoint"
+        )
+
+    config_dict = checkpoint["config"]
+
+    # Convert dict to Config object
+    if isinstance(config_dict, dict):
+        config_obj = Config(**config_dict)
+    elif isinstance(config_dict, Config):
+        config_obj = config_dict
+    else:
+        raise TypeError(f"Unexpected config type: {type(config_dict)}")
+
+    model = IQAVQANet(cfg=config_obj, load_pretrained_backbone=False)
+    model.load_state_dict(checkpoint["state_dict"])
+    model.to(device)
+    model.eval()
+
+    epoch = checkpoint.get("epoch", "?")
+    metrics = checkpoint.get("metrics", {})
+    logger.info(f"[OK] Loaded: {ckpt_path.name} (epoch={epoch})")
+
+    if metrics:
+        val_srocc = metrics.get("val_srocc") or metrics.get("srocc")
+        if val_srocc is not None:
+            logger.info(f"   └─ Validation SROCC: {val_srocc:.4f}")
+
+    return model, config_obj
