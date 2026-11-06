@@ -408,6 +408,27 @@ def _generated_file_root() -> Path:
     return cfg.resolve_path(cfg.reports_dir / "iqa-test").resolve()
 
 
+def _resolve_within(root: Path, relative: str) -> Path | None:
+    """Resolve ``relative`` strictly inside ``root`` and return the resolved path.
+
+    ``resolve(strict=True)`` follows symlinks, and the ``commonpath`` check then
+    rejects any result that escapes ``root`` (``..`` segments, absolute paths,
+    or symlinks pointing outside). Callers only ever receive a path known to be
+    inside the report directory.
+    """
+    root = root.resolve()
+    try:
+        candidate = (root / relative).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    try:
+        if os.path.commonpath([str(root), str(candidate)]) != str(root):
+            return None
+    except ValueError:
+        return None
+    return candidate
+
+
 def _purge_expired_artifacts(root: Path, now: float | None = None) -> int:
     """Delete generated visualization directories past their retention window.
 
@@ -1182,10 +1203,8 @@ async def create_visualization(
 
 def _find_generated_file(root: Path, requested_path: str) -> Path | None:
     """Resolve one generated file while rejecting paths outside the report directory."""
-    try:
-        candidate = (root / requested_path).resolve(strict=True)
-        candidate.relative_to(root)
-    except (OSError, ValueError):
+    candidate = _resolve_within(root, requested_path)
+    if candidate is None:
         return None
     return candidate if candidate.is_file() else None
 
@@ -1222,7 +1241,12 @@ async def get_generated_file(file_path: str, request: Request) -> FileResponse:
         raise ArtifactNotFoundError("Generated file not found")
 
     root = _generated_file_root()
-    recorded_owner = _artifact_owner(root / segments[0])
+    # Resolve the artifact directory before reading its owner, so a symlink or
+    # ``..`` can never point the owner lookup outside the report directory.
+    owner_dir = _resolve_within(root, segments[0])
+    if owner_dir is None or not owner_dir.is_dir():
+        raise ArtifactNotFoundError("Generated file not found")
+    recorded_owner = _artifact_owner(owner_dir)
     # Return 404 rather than 403 so the response does not confirm that another
     # session's artifact exists.
     if recorded_owner is None or not hmac.compare_digest(recorded_owner, owner):
