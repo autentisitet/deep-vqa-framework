@@ -6,11 +6,15 @@ Thank you for your interest! Please follow these guidelines.
 
 ## 1. Environment Setup
 
+Run `make` for the project command index. `make help`, `make h`, and `make ?`
+are equivalent. `make --help` shows GNU Make's own options, not the project's
+targets.
+
 We use `uv` for dependency management. Run `make install` to install dependencies (uv will be installed automatically).
 
 ```bash
 # Install core + dev + security tools (recommended for contributors)
-make install DEV=1 SECURITY=1
+make install DEV=1
 
 # Verify environment
 make info
@@ -20,7 +24,7 @@ make info
 > If you're in China, add `--mirror` to use TUNA mirror for faster downloads:
 
 ```bash
-make install MIRROR=1 DEV=1 SECURITY=1
+make install MIRROR=1 DEV=1
 make info
 ```
 
@@ -41,6 +45,10 @@ make docker-infer
 # Stop all containers
 make docker-stop
 
+# Remove only the dev/training or inference/web containers and images
+make docker-purge-train
+make docker-purge-deploy
+
 # Check container environment status
 make docker-manage
 ```
@@ -49,29 +57,25 @@ make docker-manage
 > The Makefile auto-detects your container runtime (Docker or Podman).
 > No manual configuration needed.
 
-### Optional Ollama workflow
+### Start the web service
 
-The normal contributor workflow is `make docker-infer`; it defaults to the
-internal profile and does not require
-Ollama. To develop or test the subjective-quality endpoint, run these commands
-from the repository root:
+The web interface reaches the IQA/VQA models through Nginx. From the
+repository root:
 
 ```bash
-# Create the local configuration and required internal-mode secrets.
-make env-secrets
-
-# Start Ollama, initialize deep-vqa-subjective, and start the browser-facing stack.
-make docker-infer-internal-ollama
+make docker-infer
+make docker-deploy-check
 ```
 
-Use `make docker-infer DEPLOYMENT_MODE=public` for the stateless public profile.
-Deployment policy files are under `deploy-config/profiles/`; training and model
-YAML files are under `train-config/`.
+Internal mode uses email + password accounts; open the browser entry point and
+register the first account. `make env-secrets` is only needed for the legacy
+`auth.mode: api_key` deployment.
 
-Ollama is called by FastAPI and is not exposed through Nginx. On Podman, a
-host-loopback proxy must be made container-reachable, for example
-`OLLAMA_HTTP_PROXY=http://host.containers.internal:7897`; see
-[knowledge/ollama.md](../knowledge/ollama.md) for proxy and SELinux details.
+Use `make docker-infer DEPLOYMENT_MODE=proxy` only when a process in front of
+Deep-VQA already owns the reachable IP, terminates HTTPS, and authenticates
+users. Mode configuration lives under `deploy-config/profiles/`; see
+[docs/deployment.md](../docs/deployment.md) for the IP/DNS/NAT path and mode
+details.
 
 ---
 
@@ -88,13 +92,13 @@ make typecheck      # Run type checking
 
 ## 3. Development Workflow
 
-* **Branching**: Please use descriptive branch names:
+- **Branching**: Please use descriptive branch names:
 
 - `feature/<your-feature-name>` for new features
 - `fix/<issue-description>` for bug fixes
 - `docs/<update>` for documentation changes
 
-* **Commits**: Please follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+- **Commits**: Please follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.
 
 ```text
 <type>(<scope>): <subject>
@@ -102,7 +106,7 @@ make typecheck      # Run type checking
 
 Common types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `chore`
 
-* **Testing**: Before submitting a PR, please ensure the smoke test passes:
+- **Testing**: Before submitting a PR, please ensure the smoke test passes:
 
 ```bash
 uv run python -m src.main --smoke_test
@@ -118,23 +122,20 @@ Dependencies are managed via `pyproject.toml` with three categories:
 | :--- | :--- | :--- | :--- |
 | **Core** | `[project.dependencies]` | Runtime dependencies (PyTorch, FastAPI, OpenCV, etc.) | `make setup` |
 | **Dev** | `[project.optional-dependencies]` | Development tools (pytest, ruff, mypy, black, isort) | `make setup DEV=1 MIRROR=1` |
-| **Security** | `[project.optional-dependencies]` | Security scanners (pip-audit, cyclonedx-bom, safety) | `make setup SECURITY=1 MIRROR=1` |
 
 ---
 
-## 5. Security Checks
+## 5. Security and CI
 
-Run security scans to ensure no vulnerable dependencies:
+Repository security is handled primarily by GitHub automation and CI:
 
-```bash
-# Individual checks
-make vuln-audit    # pip-audit vulnerability scan
-make sbom          # Generate SBOM (CycloneDX)
-make safety        # Safety vulnerability scan
+- CodeQL analysis for Python;
+- Dependabot updates for Python and GitHub Actions;
+- GitHub dependency review and secret-scanning features when enabled in the repository settings;
+- shell, build, lint, type-check, deployment-contract, and pytest checks in CI.
 
-# Or you can run all security checks
-make security-all
-```
+Use `SECURITY.md` for private vulnerability reports. Do not add secrets,
+private media, exploit payloads, or scanner reports to commits.
 
 ---
 
@@ -142,10 +143,10 @@ make security-all
 
 When reporting a bug, please include:
 
-* The error message and stack trace
-* Your environment details (OS, GPU, PyTorch version)
-* Steps to reproduce the issue
-* A minimal reproducible example if possible
+- The error message and stack trace
+- Your environment details (OS, GPU, PyTorch version)
+- Steps to reproduce the issue
+- A minimal reproducible example if possible
 
 ---
 
@@ -153,7 +154,7 @@ When reporting a bug, please include:
 
 Before submitting a PR, ensure:
 
-- [ ] Code passes `make check-code`
+- [ ] Repository gate passes `make preflight`
 - [ ] Code is formatted with `make fmt`
 - [ ] Type checking passes `make typecheck`
 - [ ] Smoke test passes

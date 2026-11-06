@@ -5,6 +5,161 @@ All notable changes to Deep-VQA-Framework are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.9.6] - Unreleased
+
+> All uncommitted work in the current release-preparation tree belongs to
+> the v0.9.6 release line. Changes remain uncommitted until explicit review.
+
+### Added
+
+- Added `auth.mode: accounts`: email + password registration, scrypt-hashed
+  passwords, hashed session tokens, and account-scoped evaluation history and
+  artifacts. The login page adapts to the selected mode, and registration failure
+  messages are identical for unknown accounts and wrong passwords.
+- Added `make benchmark` (`scripts/benchmark_models.py`): re-runs the published
+  serving checkpoints over each dataset's held-out test split using the
+  repository metric code, reports raw and five-parameter-logistic-mapped
+  accuracy, scores the deterministic OpenCV heuristic on the identical samples,
+  and records per-item latency, parameter counts, checkpoint sizes, and process memory into
+  `reports/benchmark/<utc>.{json,md}`.
+- Added a split bilingual browser frontend with login/workspace pages,
+  same-origin browser routing, forwarded-HTTPS cookie handling, upload previews,
+  feature-map/Grad-CAM comparisons, and frontend feature settings.
+- Added bounded, magic-validated upload handling with streaming byte limits,
+  read timeouts, executable-header rejection, random 256-bit filenames,
+  restrictive permissions, and post-processing cleanup.
+- Added startup model loading: IQA and VQA checkpoints load once during
+  worker startup and are reused by request handlers instead of being
+  deserialized per request.
+- Added container memory measurement with
+  `scripts/measure_container_memory.py` and `make docker-memory-measure`.
+  The report labels peaks as sampled lower bounds and includes host available
+  memory and swap usage.
+- Added model, upload, logs, and container health deployment contracts,
+  upload-security tests, model-loading tests, and repeatable memory-measurement
+  reports.
+- Added GitHub Dependabot configuration and a CodeQL workflow for repository
+  security automation.
+
+### Changed
+
+- Made `make docker-manage` read-only instead of deleting the runtime's
+  dangling images during status inspection.
+- Added scoped `make docker-purge-train` and `make docker-purge-deploy`
+  cleanup targets; both preserve bind-mounted data and the upload volume.
+  Kept `docker-purge-all` project-scoped, removing global runtime pruning.
+- Added a session authentication challenge to HTTP 401 responses and mapped
+  malformed image/video decoder input to HTTP 422 instead of a server failure.
+- Defaulted Docker/Podman Compose to CPU, requiring explicit `GPU=1` on hosts
+  with a configured NVIDIA runtime; corrected Make help on account secrets.
+- Reduced unnecessary training/inference bind mounts and removed host-gateway
+  aliases from the inference container while retaining runtime state paths.
+- Kept API documentation on the loopback diagnostic port and removed the
+  broken public Swagger link; public model summaries expose only checkpoint
+  filenames rather than server directory paths.
+- Bounded Nginx request lines and headers, and report request-rate and
+  connection-limit rejections as HTTP 429 rather than the default 503.
+- Replaced the Nginx missing-path homepage fallback with HTTP 404 and
+  prevented an implicit redirect from the bare `/api` prefix.
+- Preserved the trusted front proxy HTTPS scheme through bundled Nginx so
+  secure cookies and Origin validation use the browser-facing protocol.
+- Removed the unused cross-origin browser override and CORS support; the
+  bundled frontend now always reaches the API on the same origin.
+- Disabled implicit trailing-slash HTTP 307 redirects on API routes so an
+  unexpected path returns a normal error response.
+- Moved public business error codes to a dedicated numeric range starting at `1000`, separate from HTTP response statuses `100-599`, and stopped the frontend from synthesizing business codes from HTTP statuses.
+- Consolidated shared deployment defaults into `deploy-config/basic.yaml`;
+  mode profiles now contain only authentication and history overrides. Training
+  and deployment share YAML loading and recursive merging, with separate schemas.
+- Reused media preprocessing and safe checkpoint loading from `src/` across
+  training, deployment and offline EDA, removing the EDA dependency on `deploy/`.
+
+- Simplified media decoding to one backend per role: Pillow for image
+  read/decode, Decord for video frame sampling, and OpenCV only for CV
+  algorithms (sharpness/noise heuristics). The OpenCV video/image fallback
+  paths were removed.
+- Reorganized the `deploy` package by concern: `deploy/web` (HTTP routes, wire
+  schemas, accounts, evaluation store, uploads, domain exceptions) and
+  `deploy/inference` (model loading, preprocessing, prediction, technical
+  quality, batch CLI), with the shared instance configuration moved to
+  `deploy/config.py`. `deploy/core` was removed.
+- Consolidated developer documentation under `docs/` instead of splitting it
+  between `docs/` and `knowledge/`, and pointed the frontend footer at the
+  repository documentation. The previous footer link resolved to
+  `/knowledge/deployment.md` under the nginx web root, which was never readable
+  on SELinux-enforcing hosts, so it silently served the application shell.
+- Mounted `deploy-config/` into the inference container: profile and Compose
+  policy changes now take effect after recreating the container instead of
+  requiring an image rebuild. Runtime bind mounts carry their SELinux labels
+  in the shared base topology, so CPU overlays do not duplicate volume lists.
+- Grouped the test suite by concern (`tests/api`, `tests/deployment`, `tests/ml`,
+  `tests/data`) and moved the account operations CLI into the `deploy` package so
+  it ships inside the inference image instead of requiring a repository `.venv`.
+- Renamed the `cache_clean` Make target to `cache-clean` so every user-facing
+  target uses the same hyphenated convention, and documented that GNU Make
+  options remain under `make --help`.
+- Reworked browser access so network clients connect to Nginx. FastAPI remains
+  on the Compose bridge network and its host port binds to `127.0.0.1` by default.
+- Standardized container-only browser access, renamed the no-storage
+  reverse-proxy mode from `public` to `proxy`, and replaced host `batch-test`
+  with `docker-batch-test`.
+- Made Compose manage persistent model bind mounts and the upload volume, bounded JSON-file
+  container logs, `restart: unless-stopped`, startup health checks, Docker and
+  Podman differences, GPU/CPU configuration files, and SELinux-compatible mounts.
+- Kept internal mode behind per-person accounts with SQLite evaluation history,
+  while proxy mode does not save history or visualization files.
+- Hardened generated-file downloads with authentication, path checks, and
+  symlink checks, and synchronized generated OpenAPI, mode configuration, Nginx,
+  frontend, README, knowledge-base, and contributor documentation.
+- Removed local `vuln-audit`, `sbom`, `safety`, and `security-all` Make targets
+  and their optional scanner dependencies. Repository security is documented
+  around GitHub CodeQL, Dependabot, dependency review, secret scanning, CI,
+  and `SECURITY.md` instead of presenting local scanners as a project feature.
+
+### Security
+
+- Scoped generated artifacts and evaluation history to their owner: the account
+  in accounts mode, and an anonymous server-issued session in the legacy
+  `auth.mode: api_key` deployment where every visitor shares one key. Artifact
+  identifiers are random tokens instead of timestamps, and the ownership record
+  stores only a digest of the session token.
+- Added a bounded artifact retention sweep: `viz-*` directories older than
+  `artifacts.retention_seconds` are removed when the next visualization is
+  created. Cleanup never runs during startup, and unrelated files under the
+  reports root are ignored.
+- Exposed only Nginx to network clients and kept inference/model services
+  private to the Compose network.
+- Added canonical file-type detection from magic bytes instead of trusting
+  multipart `Content-Type` or filename extensions.
+- Added random upload paths, `0600` file permissions, executable-header
+  rejection, bounded request bodies, read timeouts, and cleanup after use.
+- Added safe checkpoint loading with `weights_only=True` and startup model
+  validation against typed YAML configuration.
+- Added bounded container log rotation and GitHub security automation.
+
+### Removed
+
+- Removed the optional Ollama/llama.cpp visual-explanation service, its prompt,
+  Compose service, mode configuration, environment variables, API endpoint, frontend
+  panel, tests, and documentation. The explanation endpoint reported a
+  deterministic OpenCV technical score as an `llm_score` alias and applied a
+  Beta-prior "credible interval" to a deterministic value; the service is out of
+  scope and did not fit the supported deployment targets.
+- Removed the duplicate Chinese disclaimer; `DISCLAIMER.md` remains the
+  canonical legal and usage-boundary document.
+- Removed the old public-mode YAML file and direct host inference path.
+- Removed local SBOM/vulnerability-scanner command interfaces and dependency
+  extras that were not part of the maintained runtime contract.
+
+### Not included in v0.9.6 yet
+
+- Redis, Celery, RabbitMQ, Umami, Plausible, and Uptime Kuma are not runtime
+  dependencies of this tree. They require separate asynchronous-task,
+  monitoring, or analytics designs and are intentionally not represented as
+  unused placeholder services.
+
+---
+
 ## [0.9.0] - 2026-08-23
 
 ### Added
@@ -22,7 +177,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Added bilingual Ollama guides and expanded command-specific `make help-*`
   documentation.
 - Added explicit `train-config/` and `deploy-config/` ownership boundaries for
-  training YAML, deployment profiles, Compose, Nginx, and Ollama assets.
+  training YAML, deployment YAML files, Compose, Nginx, and Ollama files.
 - Added a unified `make docker-infer` entry point with `DEPLOYMENT_MODE`.
 - Added an explicit backend bridge network for inference and optional Ollama
   services.
@@ -45,12 +200,12 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Updated the frontend, deployment, contributor, and repository-agent documentation
   for the current 0.9.0 workflow.
 - Removed obsolete accessibility, cloud-rental, and legacy deployment guide
-  documents; the `knowledge/` documents are now the deployment documentation
+  documents; the `docs/` documents are now the deployment documentation
   entry point.
 
 ### Security
 
-- Kept Ollama model-management endpoints outside the Nginx public surface;
+- Kept Ollama model-management endpoints unavailable through Nginx;
   browsers access subjective assessment only through FastAPI.
 - Added explicit container-reachable Ollama proxy variables instead of passing
   host loopback proxy addresses into containers.
@@ -70,7 +225,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Added generated OpenAPI, Swagger UI, and ReDoc documentation, with the
   schema persisted to `docs/openapi.json`.
 - Added offline training feature-distribution analysis with standardized
-  embeddings, PCA artifacts, nearest-sample context, and projection reports.
+  embeddings, PCA files, nearest-sample context, and projection reports.
 - Added feature-map and Grad-CAM visualization support for image inference.
 - Added registered preprocessing, EDA, and visualization components to make
   extension points explicit and auditable.
@@ -226,6 +381,7 @@ and it is not treated as a published release or as evidence that later 0.x
 versions are regressions. Tagged releases and this changelog are the authoritative
 version history.
 
+[0.9.6]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.9.0...HEAD
 [0.9.0]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.7.5...v0.9.0
 [0.7.5]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.7.0...v0.7.5
 [0.7.0]: https://github.com/autentisitet/deep-vqa-framework/releases/tag/v0.7.0

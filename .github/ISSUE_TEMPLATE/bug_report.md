@@ -13,9 +13,13 @@ assignees: ''
 
 <!-- What command did you run? -->
 
+---
+
 ## Error message
 
 <!-- Paste error stack trace here -->
+
+---
 
 ## Environment
 
@@ -30,6 +34,10 @@ assignees: ''
 | Python | |
 | PyTorch | |
 | CUDA | |
+| Deployment mode (`internal` / `proxy`) | |
+| Auth mode (`accounts` / `api_key` / `none`) | |
+
+---
 
 ## Additional context
 

@@ -88,8 +88,8 @@
 </head>
 <body>
     <div class="topbar">
-        <div class="title">Deep-VQA-Framework Platform v0.9.0</div>
-        <div class="subtitle">Dataset audit · reproducible IQA/VQA training · evaluation · checkpoint handoff · API, Nginx, and optional Ollama deployment</div>
+        <div class="title">Deep-VQA-Framework Platform v0.9.6</div>
+        <div class="subtitle">Dataset audit · reproducible IQA/VQA training · evaluation · checkpoint handoff · FastAPI, Nginx, and containers</div>
     </div>
     <div class="mermaid">
     graph TD
@@ -146,7 +146,7 @@
             EV --> MP[metrics_plotter.py]
         end
 
-        subgraph STAGE_6 [6. Artifact storage]
+        subgraph STAGE_6 [6. Output files]
             TR --> F[(best checkpoints<br/>results/dataset/model_outputs/)]
             MP --> PLOTS[(EDA + training + residual + fold diagnostics<br/>results/dataset/plots/)]
             TR --> AR[archive_results.sh]
@@ -155,36 +155,31 @@
 
         subgraph STAGE_7 [7. Inference delivery]
             F -->|"publish successful checkpoint<br/>dataset_best.pt"| BM[(deploy/iqa-models/<br/>deploy/vqa-models/)]
-            BM --> CORE[deploy/core/*.py<br/>Pydantic endpoint config + preprocessing + loading + inference]
-            CORE --> API[deploy/api.py<br/>FastAPI /v1/evaluations /v1/health]
-            CORE --> CLI[deploy/cli.py<br/>Batch inference CLI]
+            BM --> CORE[deploy/config.py + deploy/web/ + deploy/inference/<br/>instance config + HTTP service + model serving]
+            CORE --> API[deploy/web/api.py<br/>FastAPI /v1/evaluations /v1/auth /v1/health]
+            CORE --> CLI[deploy/inference/cli.py<br/>Batch inference CLI]
             API --> DIAG[(Feature maps + Grad-CAM<br/>reports/iqa-test/)]
-            API --> SQLITE[(SQLite evaluation history<br/>reports/frontend-evaluations.sqlite3)]
+            API --> AUTH[deploy/web/accounts.py<br/>scrypt password hashing<br/>hashed session tokens]
+            AUTH --> ADB[(reports/accounts.sqlite3)]
+            API --> HIST[(reports/frontend-evaluations.sqlite3)]
+            AUTH -. owns .-> DIAG
             NGINX[nginx<br/>static frontend and /api/ proxy<br/>browser delivery mode] --> API
-            API --> OLLAMA[optional Ollama<br/>subjective assessment<br/>private service endpoint]
             WEB[frontend/index.html<br/>browser frontend] --> NGINX
             ENV[.env from .env.example<br/>ports · endpoints · local proxy] --> CORE
-            ENV --> OLLAMA
             API --> EXT[external API clients]
-            DEV[host Uvicorn<br/>API-only development :8000] --> EXT
         end
 
-        subgraph STAGE_8 [8. Container runtime topology]
+        subgraph STAGE_8 [8. Container network connections]
             BASE[Dockerfile base stage] --> DEVIMG[vqa-dev image]
             BASE --> TRAINIMG[vqa-train image]
             BASE --> INFERIMG[vqa-infer image]
             NIMG[official nginx:alpine] --> NGINXSVC[Compose service vqa-nginx]
-            OIMG[official ollama/ollama:latest] --> OLLAMASVC[Compose service vqa-ollama]
             INFERIMG --> INFERSVC[Compose service vqa-infer]
             INFERSVC --> INFERCTR[vqa-infer container]
             NGINXSVC --> NGINXCTR[vqa-nginx container]
-            OLLAMASVC --> OLLAMACTR[vqa-ollama container]
             BACKEND[(backend bridge network)] --- INFERCTR
             BACKEND --- NGINXCTR
-            BACKEND --- OLLAMACTR
             INFERSVC -. healthcheck first .-> NGINXSVC
-            OLLAMASVC -. optional Make target starts first .-> INFERSVC
-            OLLAMASVC -. one-shot model setup task .-> MODELSETUP[temporary task; no init service]
         end
 
         STAGE_1 ==> STAGE_2
