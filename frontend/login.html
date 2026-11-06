@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deep-VQA · 登录</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="auth-page">
+  <main class="auth-card" aria-labelledby="loginTitle">
+    <div class="logo" aria-hidden="true">DV</div>
+    <h1 id="loginTitle">Deep-VQA 工作台</h1>
+    <p id="loginDescription">正在检查登录方式…</p>
+
+    <form id="loginForm">
+      <div id="apiKeyFields" hidden>
+        <label id="apiKeyLabel" for="apiKey">API Key</label>
+        <input id="apiKey" name="apiKey" type="password" autocomplete="current-password">
+      </div>
+
+      <div id="accountFields" hidden>
+        <label id="emailLabel" for="email">邮箱</label>
+        <input id="email" name="email" type="email" autocomplete="email">
+        <label id="passwordLabel" for="password">密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" minlength="8">
+      </div>
+
+      <button class="btn" id="loginButton" type="submit">登录</button>
+    </form>
+
+    <button class="btn alt" id="switchModeButton" type="button" hidden>创建账号</button>
+    <button class="auth-language" id="languageButton" type="button">English</button>
+    <div class="notice" id="loginNotice" role="alert"></div>
+  </main>
+  <script type="module" src="/login.js"></script>
+</body>
+</html>
