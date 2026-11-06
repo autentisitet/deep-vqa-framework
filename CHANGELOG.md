@@ -5,11 +5,9 @@ All notable changes to Deep-VQA-Framework are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
-## [0.9.6] - Unreleased
+---
 
-> Changes merged after the `v0.9.0` tag belong to the v0.9.6 release line
-> until the release is tagged. The comparison link at the end of this file is
-> the authoritative commit index for the current unreleased scope.
+## [0.9.6] - 2026-11-06
 
 ### Added
 
@@ -116,11 +114,6 @@ and releases use [Semantic Versioning](https://semver.org/).
   and their optional scanner dependencies. Repository security is documented
   around GitHub CodeQL, Dependabot, dependency review, secret scanning, CI,
   and `SECURITY.md` instead of presenting local scanners as a project feature.
-- Upgraded `filelock`, `urllib3`, and `setuptools` to patched versions and
-  regenerated the locked requirements export to resolve their Dependabot alerts.
-- Reduced routine Dependabot noise by scheduling Python and GitHub Actions
-  updates monthly and grouping minor and patch updates by ecosystem; major
-  updates remain separate for manual review.
 
 ### Security
 
@@ -157,7 +150,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Removed local SBOM/vulnerability-scanner command interfaces and dependency
   extras that were not part of the maintained runtime contract.
 
-### Not included in v0.9.6 yet
+### Not included in v0.9.6
 
 - Redis, Celery, RabbitMQ, Umami, Plausible, and Uptime Kuma are not runtime
   dependencies of this tree. They require separate asynchronous-task,
@@ -387,7 +380,7 @@ and it is not treated as a published release or as evidence that later 0.x
 versions are regressions. Tagged releases and this changelog are the authoritative
 version history.
 
-[0.9.6]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.9.0...HEAD
+[0.9.6]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.9.0...59f1112
 [0.9.0]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.7.5...v0.9.0
 [0.7.5]: https://github.com/autentisitet/deep-vqa-framework/compare/v0.7.0...v0.7.5
 [0.7.0]: https://github.com/autentisitet/deep-vqa-framework/releases/tag/v0.7.0
