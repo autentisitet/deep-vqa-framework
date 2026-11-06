@@ -81,10 +81,15 @@ def sync(version: str, *, write: bool = True) -> bool:
         )
         or changed
     )
-    # requirements.txt no longer embeds a "deep-vqa-framework==x.y.z" marker:
-    # uv >= 0.11 exports the editable install as "-e ." without a project
-    # version comment. The release version is sourced from pyproject.toml and
-    # still checked against uv.lock and docs/openapi.json below.
+    changed = (
+        not replace(
+            ROOT / "requirements.txt",
+            r"deep-vqa-framework==[0-9]+\.[0-9]+\.[0-9]+",
+            f"deep-vqa-framework=={version}",
+            write=write,
+        )
+        or changed
+    )
     changed = (
         not replace(
             ROOT / "uv.lock",

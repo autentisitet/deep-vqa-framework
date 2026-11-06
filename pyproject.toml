@@ -124,18 +124,3 @@ profile = "black"
 line_length = 120
 known_first_party = ["src"]
 skip_gitignore = true
-
-
-# Install PyTorch from the CPU-only index. The default deployment is CPU and
-# this drops the entire nvidia/cuda/triton dependency chain that otherwise
-# ships with the PyPI Linux wheels, which is also the main source of Dependabot
-# security alerts. GPU users can override these sources with a CUDA index.
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-torchaudio = { index = "pytorch-cpu" }
-torchvision = { index = "pytorch-cpu" }
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
