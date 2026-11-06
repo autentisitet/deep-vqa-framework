@@ -3,13 +3,12 @@ name: CI
 
 on:
   push:
-    branches: ["main", "master", "dev"]
+    branches: ["main"]
     paths-ignore:
       - "examples/**"
       - "docs/assets/**"
       - "LICENSE"
   pull_request:
-    branches: ["main", "master", "dev"]
     paths-ignore:
       - "examples/**"
       - "docs/assets/**"
@@ -62,6 +61,7 @@ jobs:
   docker-build-train:
     name: Docker Build (train)
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -76,6 +76,7 @@ jobs:
   docker-build-infer:
     name: Docker Build (infer)
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
