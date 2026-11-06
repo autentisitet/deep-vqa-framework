@@ -472,3 +472,27 @@ def test_gpu_setup_resolves_across_the_trusted_primary_and_torch_indexes() -> No
 
     assert "--extra-index-url $TORCH_INDEX" in setup
     assert "--index-strategy unsafe-best-match" in setup
+
+
+def test_dependabot_batches_routine_updates_monthly() -> None:
+    """Routine updates stay grouped while major upgrades remain reviewable."""
+    import yaml
+
+    config = yaml.safe_load((ROOT / ".github/dependabot.yml").read_text(encoding="utf-8"))
+    updates = {entry["package-ecosystem"]: entry for entry in config["updates"]}
+
+    expected_groups = {
+        "pip": "python-minor-patch",
+        "github-actions": "actions-minor-patch",
+    }
+    for ecosystem, group_name in expected_groups.items():
+        update = updates[ecosystem]
+        assert update["directory"] == "/"
+        assert update["schedule"]["interval"] == "monthly"
+        assert update["open-pull-requests-limit"] == 5
+        assert update["groups"] == {
+            group_name: {
+                "patterns": ["*"],
+                "update-types": ["minor", "patch"],
+            }
+        }
