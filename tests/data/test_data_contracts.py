@@ -33,3 +33,9 @@ def test_registered_preprocessing_pipelines_match_tensor_shapes() -> None:
     video = rgb_video_array_to_imagenet_tensor(np.zeros((2, 32, 48, 3), dtype=np.uint8), input_size=32)
     assert tuple(image.shape) == (3, 32, 32)
     assert tuple(video.shape) == (2, 3, 32, 32)
+
+
+def test_extension_results_do_not_allow_mutating_the_registry():
+    extensions = DatasetType.extensions_for("image")
+    extensions.clear()
+    assert DatasetType.detect("jpg") is DatasetType.IMAGE
